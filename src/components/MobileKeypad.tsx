@@ -46,8 +46,14 @@ export default function MobileKeypad({ onHit }: MobileKeypadProps) {
           </Button>
         ))}
       </div>
-      {/* Bulls */}
-      <div className="grid grid-cols-2 gap-2">
+      {/* Zero + Bulls */}
+      <div className="grid grid-cols-3 gap-2">
+        <Button
+          className="py-6 cursor-pointer transition-transform active:scale-95"
+          onClick={() => { onHit({ kind: 'Miss', scored: 0, label: 'Miss' }); triggerHaptic(10); setMod('none'); }}
+        >
+          0 (Miss)
+        </Button>
         <Button className="py-6 cursor-pointer transition-transform active:scale-95" onClick={() => { onHit(segmentFromSelection('SB')); triggerHaptic(10); setMod('none'); }}>Outer Bull (25)</Button>
         <Button className="py-6 cursor-pointer transition-transform active:scale-95" onClick={() => { onHit(segmentFromSelection('DB')); triggerHaptic(10); setMod('none'); }}>Inner Bull (50)</Button>
       </div>

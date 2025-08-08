@@ -286,7 +286,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         setRematchLoading(false);
         return;
       }
-      const playerIds = (mpData ?? []).map((r: any) => r.player_id);
+      const playerIds = ((mpData ?? []) as { player_id: string; play_order: number }[]).map((r) => r.player_id);
       if (playerIds.length < 2) {
         alert('Need at least 2 players to start a rematch');
         setRematchLoading(false);

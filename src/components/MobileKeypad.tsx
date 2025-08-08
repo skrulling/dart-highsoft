@@ -25,14 +25,14 @@ export default function MobileKeypad({ onHit }: MobileKeypadProps) {
         <Button
           onClick={() => setMod((m) => (m === 'D' ? 'none' : 'D'))}
           variant={mod === 'D' ? 'default' : 'outline'}
-          className="cursor-pointer"
+          className="cursor-pointer transition-transform active:scale-95"
         >
           Double
         </Button>
         <Button
           onClick={() => setMod((m) => (m === 'T' ? 'none' : 'T'))}
           variant={mod === 'T' ? 'default' : 'outline'}
-          className="cursor-pointer"
+          className="cursor-pointer transition-transform active:scale-95"
         >
           Triple
         </Button>
@@ -40,15 +40,15 @@ export default function MobileKeypad({ onHit }: MobileKeypadProps) {
       {/* Numbers */}
       <div className="grid grid-cols-5 gap-2">
         {numbers.map((n) => (
-          <Button key={n} className="py-6 cursor-pointer" onClick={() => applyMod(n)}>
+          <Button key={n} className="py-6 cursor-pointer transition-transform active:scale-95" onClick={() => applyMod(n)}>
             {n}
           </Button>
         ))}
       </div>
       {/* Bulls */}
       <div className="grid grid-cols-2 gap-2">
-        <Button className="py-6 cursor-pointer" onClick={() => { onHit(segmentFromSelection('SB')); triggerHaptic(10); }}>Outer Bull (25)</Button>
-        <Button className="py-6 cursor-pointer" onClick={() => { onHit(segmentFromSelection('DB')); triggerHaptic(10); }}>Inner Bull (50)</Button>
+        <Button className="py-6 cursor-pointer transition-transform active:scale-95" onClick={() => { onHit(segmentFromSelection('SB')); triggerHaptic(10); }}>Outer Bull (25)</Button>
+        <Button className="py-6 cursor-pointer transition-transform active:scale-95" onClick={() => { onHit(segmentFromSelection('DB')); triggerHaptic(10); }}>Inner Bull (50)</Button>
       </div>
     </div>
   );

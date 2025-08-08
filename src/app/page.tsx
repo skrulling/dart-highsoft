@@ -10,7 +10,7 @@ export default function Home() {
   useEffect(() => {
     (async () => {
       try {
-        const supabase = getSupabaseClient();
+        const supabase = await getSupabaseClient();
         const { data } = await supabase.from('player_summary').select('*').order('wins', { ascending: false }).limit(10);
         setLeaders(((data as unknown) as { player_id: string; display_name: string; wins: number; avg_per_turn: number }[]) ?? []);
       } catch {

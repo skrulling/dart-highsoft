@@ -24,7 +24,7 @@ export default function NewMatchPage() {
 
   useEffect(() => {
     (async () => {
-      const supabase = getSupabaseClient();
+      const supabase = await getSupabaseClient();
       const { data } = await supabase.from('players').select('*').order('display_name');
       setPlayers((data as Player[]) ?? []);
     })();
@@ -33,7 +33,7 @@ export default function NewMatchPage() {
   async function createPlayer() {
     const name = newName.trim();
     if (!name) return;
-    const supabase = getSupabaseClient();
+    const supabase = await getSupabaseClient();
     const { data, error } = await supabase.from('players').insert({ display_name: name }).select('*').single();
     if (error) return alert(error.message);
     setPlayers((prev) => [...prev, data as Player]);
@@ -49,7 +49,7 @@ export default function NewMatchPage() {
     if (selectedIds.length < 2) return alert('Select at least 2 players');
     const order = [...selectedIds].sort(() => Math.random() - 0.5);
 
-    const supabase = getSupabaseClient();
+    const supabase = await getSupabaseClient();
     const { data: match, error: mErr } = await supabase
       .from('matches')
       .insert({ mode: 'x01', start_score: startScore, finish, legs_to_win: legsToWin })

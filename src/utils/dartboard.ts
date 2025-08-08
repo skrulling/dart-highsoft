@@ -81,3 +81,15 @@ export function computeHit(
 export function isDoubleKind(kind: SegmentResult['kind']): boolean {
   return kind === 'Double' || kind === 'InnerBull';
 }
+
+export function segmentFromSelection(
+  mod: 'S' | 'D' | 'T' | 'SB' | 'DB',
+  value?: number
+): SegmentResult {
+  if (mod === 'SB') return { kind: 'OuterBull', scored: 25, label: 'SB' };
+  if (mod === 'DB') return { kind: 'InnerBull', scored: 50, label: 'DB' };
+  const n = Math.max(1, Math.min(20, value ?? 0));
+  if (mod === 'S') return { kind: 'Single', value: n, scored: n, label: `S${n}` };
+  if (mod === 'D') return { kind: 'Double', value: n, scored: n * 2, label: `D${n}` };
+  return { kind: 'Triple', value: n, scored: n * 3, label: `T${n}` };
+}

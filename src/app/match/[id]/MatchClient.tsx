@@ -1,6 +1,7 @@
 "use client";
 
 import Dartboard from '@/components/Dartboard';
+import MobileKeypad from '@/components/MobileKeypad';
 import { computeHit, SegmentResult } from '@/utils/dartboard';
 import { applyThrow, FinishRule } from '@/utils/x01';
 import { getSupabaseClient } from '@/lib/supabaseClient';
@@ -549,12 +550,17 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         </Card>
       </div>
       <div className="flex flex-col items-center gap-3">
-        <div className={`${matchWinnerId ? 'pointer-events-none opacity-50' : ''}`}>
-          <Dartboard onHit={handleBoardClick} />
+        <div className="w-full grid md:grid-cols-2 gap-4">
+          <div className={`flex justify-center ${matchWinnerId ? 'pointer-events-none opacity-50' : ''}`}>
+            <Dartboard onHit={handleBoardClick} />
+          </div>
+          <div className={`md:hidden ${matchWinnerId ? 'pointer-events-none opacity-50' : ''}`}>
+            <MobileKeypad onHit={(seg) => handleBoardClick(0, 0, seg as any)} />
+          </div>
         </div>
         <div className="flex items-center gap-3">
           <Button variant="outline" onClick={undoLastThrow} disabled={!!matchWinnerId}>Undo dart</Button>
-          <div className="text-sm text-gray-600">Click the board to register throws</div>
+          <div className="text-sm text-gray-600 hidden md:block">Click the board to register throws</div>
         </div>
       </div>
     </div>

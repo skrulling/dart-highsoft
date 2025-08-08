@@ -204,12 +204,19 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         return acc;
       }, {});
       const target = match.legs_to_win;
-      const someoneWonMatch = Object.values(wonCounts).some((c) => c >= target);
+      const someoneWonMatch = Object.entries(wonCounts).find(([, c]) => c >= target);
       if (!someoneWonMatch) {
         const nextLegNum = (allLegs ?? []).length + 1;
         const { error: insErr } = await (getSupabaseClient()).from('legs').insert({ match_id: matchId, leg_number: nextLegNum, starting_player_id: playerId });
         if (insErr) {
           alert(`Failed to create next leg: ${insErr.message}`);
+        }
+      }
+      if (someoneWonMatch) {
+        const [winnerPid] = someoneWonMatch;
+        const { error: setWinnerErr } = await supabase.from('matches').update({ winner_player_id: winnerPid }).eq('id', matchId);
+        if (setWinnerErr) {
+          alert(`Failed to set match winner: ${setWinnerErr.message}`);
         }
       }
       await loadAll();

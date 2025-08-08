@@ -320,7 +320,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       alert(`Failed to query last throw: ${qErr.message}`);
       return;
     }
-    const last = (lastList ?? [])[0] as
+    const last = ((lastList ?? [])[0] as unknown) as
       | { id: string; turn_id: string; dart_index: number; segment: string; scored: number; turns: { leg_id: string; player_id: string; turn_number: number } }
       | undefined;
     if (!last) return; // nothing to undo

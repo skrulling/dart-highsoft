@@ -82,11 +82,11 @@ export default function StatsPage() {
         if (!t.busted) acc[t.player_id].total += t.total_scored;
         return acc;
       }, {});
-      for (const [pid, stats] of Object.entries(byPlayer)) {
+      for (const [pid, stats] of Object.entries(byPlayer) as [string, { total: number; turns: number }][]) {
         const idx = playerIndex.get(pid);
         if (idx === undefined) continue;
         const avg = stats.turns > 0 ? stats.total / stats.turns : 0;
-        (series[idx].data as any[]).push([ts, Number(avg.toFixed(2))]);
+        (series[idx].data as Highcharts.PointOptionsType[]).push([ts, Number(avg.toFixed(2))] as Highcharts.PointOptionsType);
       }
     }
     return series;

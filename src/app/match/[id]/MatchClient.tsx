@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { useRouter } from 'next/navigation';
 
 type Player = { id: string; display_name: string };
 
@@ -44,6 +45,7 @@ type MatchPlayersRow = {
 };
 
 export default function MatchClient({ matchId }: { matchId: string }) {
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -266,12 +268,30 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     }
   }
 
+  const [rematchLoading, setRematchLoading] = useState(false);
+
   async function startRematch() {
     if (!match) return;
     try {
+      setRematchLoading(true);
       const supabase = await getSupabaseClient();
-      // Use the same players as this match
-      const playerIds = players.map((p) => p.id);
+      // Load players from DB to avoid race conditions
+      const { data: mpData, error: mpLoadErr } = await supabase
+        .from('match_players')
+        .select('player_id, play_order')
+        .eq('match_id', matchId)
+        .order('play_order');
+      if (mpLoadErr) {
+        alert(mpLoadErr.message);
+        setRematchLoading(false);
+        return;
+      }
+      const playerIds = (mpData ?? []).map((r: any) => r.player_id);
+      if (playerIds.length < 2) {
+        alert('Need at least 2 players to start a rematch');
+        setRematchLoading(false);
+        return;
+      }
       const order = [...playerIds].sort(() => Math.random() - 0.5);
       const { data: newMatch, error: mErr } = await supabase
         .from('matches')
@@ -280,12 +300,14 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         .single();
       if (mErr || !newMatch) {
         alert(mErr?.message ?? 'Failed to create rematch');
+        setRematchLoading(false);
         return;
       }
       const mp = order.map((id, idx) => ({ match_id: (newMatch as MatchRecord).id, player_id: id, play_order: idx }));
       const { error: mpErr } = await supabase.from('match_players').insert(mp);
       if (mpErr) {
         alert(mpErr.message);
+        setRematchLoading(false);
         return;
       }
       const { error: lErr } = await supabase
@@ -293,13 +315,16 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         .insert({ match_id: (newMatch as MatchRecord).id, leg_number: 1, starting_player_id: order[0] });
       if (lErr) {
         alert(lErr.message);
+        setRematchLoading(false);
         return;
       }
       // Redirect to new match page
-      window.location.href = `/match/${(newMatch as MatchRecord).id}`;
+      router.push(`/match/${(newMatch as MatchRecord).id}`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Unknown error creating rematch';
       alert(msg);
+    } finally {
+      setRematchLoading(false);
     }
   }
 
@@ -363,7 +388,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
             </CardHeader>
             <CardContent>
               <div className="flex gap-3">
-                <Button onClick={startRematch}>Rematch</Button>
+                <Button onClick={startRematch} disabled={rematchLoading}>{rematchLoading ? 'Starting…' : 'Rematch'}</Button>
               </div>
             </CardContent>
           </Card>

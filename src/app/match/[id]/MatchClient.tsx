@@ -555,7 +555,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
             <Dartboard onHit={handleBoardClick} />
           </div>
           <div className={`md:hidden ${matchWinnerId ? 'pointer-events-none opacity-50' : ''}`}>
-            <MobileKeypad onHit={(seg) => handleBoardClick(0, 0, seg as any)} />
+            <MobileKeypad onHit={(seg) => handleBoardClick(0, 0, seg as unknown as ReturnType<typeof computeHit>)} />
           </div>
         </div>
         <div className="flex items-center gap-3">

@@ -20,7 +20,7 @@ export default function NewMatchPage() {
   const [newName, setNewName] = useState('');
   const [startScore, setStartScore] = useState<StartScore>('501');
   const [finish, setFinish] = useState<FinishRule>('double_out');
-  const [legsToWin, setLegsToWin] = useState(3);
+  const [legsToWin, setLegsToWin] = useState(2);
 
   useEffect(() => {
     (async () => {
@@ -115,7 +115,15 @@ export default function NewMatchPage() {
         </div>
         <div>
           <div className="font-medium mb-1">Legs to win</div>
-          <Input type="number" min={1} value={legsToWin} onChange={(e) => setLegsToWin(parseInt(e.target.value || '1', 10))} />
+          <div className="flex items-stretch gap-2">
+            <Button type="button" variant="outline" onClick={() => setLegsToWin((v) => Math.max(1, v - 1))}>
+              −
+            </Button>
+            <Input readOnly className="text-center select-none" value={String(legsToWin)} />
+            <Button type="button" variant="outline" onClick={() => setLegsToWin((v) => v + 1)}>
+              +
+            </Button>
+          </div>
         </div>
       </div>
 

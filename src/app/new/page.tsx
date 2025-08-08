@@ -3,6 +3,9 @@
 import { useEffect, useState } from 'react';
 import { getSupabaseClient } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 type Player = { id: string; display_name: string };
 
@@ -81,54 +84,43 @@ export default function NewMatchPage() {
           ))}
         </div>
         <div className="flex gap-2">
-          <input
-            className="input input-bordered flex-1 border rounded px-3 py-2"
-            placeholder="New player name"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-          />
-          <button className="btn bg-green-600 text-white px-3 py-2 rounded" onClick={createPlayer}>
+          <Input className="flex-1" placeholder="New player name" value={newName} onChange={(e) => setNewName(e.target.value)} />
+          <Button onClick={createPlayer}>
             Add player
-          </button>
+          </Button>
         </div>
       </div>
 
       <div className="grid grid-cols-2 gap-4">
         <div>
           <div className="font-medium mb-1">Start score</div>
-          <select
-            className="border rounded px-3 py-2 w-full"
-            value={startScore}
-            onChange={(e) => setStartScore(e.target.value as StartScore)}
-          >
-            <option value="201">201</option>
-            <option value="301">301</option>
-            <option value="501">501</option>
-          </select>
+          <Select value={startScore} onValueChange={(v) => setStartScore(v as StartScore)}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Start score" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="201">201</SelectItem>
+              <SelectItem value="301">301</SelectItem>
+              <SelectItem value="501">501</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
         <div>
           <div className="font-medium mb-1">Finish rule</div>
-          <select className="border rounded px-3 py-2 w-full" value={finish} onChange={(e) => setFinish(e.target.value as FinishRule)}>
-            <option value="double_out">Double out</option>
-            <option value="single_out">Single out</option>
-          </select>
+          <Select value={finish} onValueChange={(v) => setFinish(v as FinishRule)}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Finish rule" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="double_out">Double out</SelectItem>
+              <SelectItem value="single_out">Single out</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
         <div>
           <div className="font-medium mb-1">Legs to win</div>
-          <input
-            type="number"
-            min={1}
-            className="border rounded px-3 py-2 w-full"
-            value={legsToWin}
-            onChange={(e) => setLegsToWin(parseInt(e.target.value || '1', 10))}
-          />
+          <Input type="number" min={1} value={legsToWin} onChange={(e) => setLegsToWin(parseInt(e.target.value || '1', 10))} />
         </div>
       </div>
 
       <div className="flex gap-3">
-        <button className="btn bg-blue-600 text-white px-4 py-2 rounded" onClick={onStart}>
-          Start match
-        </button>
+        <Button onClick={onStart}>Start match</Button>
       </div>
     </div>
   );

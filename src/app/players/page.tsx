@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { getSupabaseClient } from '@/lib/supabaseClient';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 
 type Player = { id: string; display_name: string };
 
@@ -38,15 +40,8 @@ export default function PlayersPage() {
     <div className="max-w-2xl mx-auto p-4 space-y-6">
       <h1 className="text-2xl font-semibold">Players</h1>
       <form onSubmit={addPlayer} className="flex gap-2">
-        <input
-          className="input input-bordered flex-1 border rounded px-3 py-2"
-          placeholder="New player name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
-        <button className="btn bg-blue-600 text-white px-4 py-2 rounded" disabled={loading}>
-          Add
-        </button>
+        <Input className="flex-1" placeholder="New player name" value={name} onChange={(e) => setName(e.target.value)} />
+        <Button disabled={loading}>Add</Button>
       </form>
       <ul className="divide-y border rounded">
         {players.map((p) => (

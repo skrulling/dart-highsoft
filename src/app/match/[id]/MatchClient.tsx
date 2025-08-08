@@ -261,7 +261,12 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                 const isCurrent = currentPlayer?.id === p.id;
                 const isActiveTurn = localTurn.playerId === p.id && localTurn.darts.length > 0;
                 return (
-                  <div key={p.id} className={`flex items-center justify-between rounded px-3 py-2 ${isCurrent ? 'bg-yellow-50 border border-yellow-300' : 'border'}`}>
+                  <div
+                    key={p.id}
+                    className={`flex items-center justify-between rounded px-3 py-2 ${
+                      isCurrent ? 'border border-accent bg-accent/30' : 'border'
+                    }`}
+                  >
                     <div className="flex items-center gap-2">
                       {isCurrent && <Badge>Up</Badge>}
                       <div className="font-medium">{p.display_name}</div>

@@ -557,12 +557,14 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         </Card>
       </div>
       <div className="flex flex-col items-center gap-3">
-        <div className="w-full grid md:grid-cols-2 gap-4">
-          <div className={`flex justify-center ${matchWinnerId ? 'pointer-events-none opacity-50' : ''}`}>
-            <Dartboard onHit={handleBoardClick} />
-          </div>
+        <div className="w-full">
+          {/* Mobile: keypad only */}
           <div className={`md:hidden ${matchWinnerId ? 'pointer-events-none opacity-50' : ''}`}>
             <MobileKeypad onHit={(seg) => handleBoardClick(0, 0, seg as unknown as ReturnType<typeof computeHit>)} />
+          </div>
+          {/* Desktop: board */}
+          <div className={`hidden md:flex justify-center ${matchWinnerId ? 'pointer-events-none opacity-50' : ''}`}>
+            <Dartboard onHit={handleBoardClick} />
           </div>
         </div>
         <div className="flex items-center gap-3">

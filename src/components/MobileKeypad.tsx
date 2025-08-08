@@ -1,32 +1,42 @@
 "use client";
 
-import { segmentFromSelection } from '@/utils/dartboard';
+import { segmentFromSelection, type SegmentResult } from '@/utils/dartboard';
 import { Button } from './ui/button';
+import { useState } from 'react';
 
 type MobileKeypadProps = {
-  onHit: (result: ReturnType<typeof segmentFromSelection>) => void;
+  onHit: (result: SegmentResult) => void;
 };
 
 export default function MobileKeypad({ onHit }: MobileKeypadProps) {
   const numbers = Array.from({ length: 20 }, (_, i) => i + 1);
-  let currentMod: 'S' | 'D' | 'T' = 'S';
-
-  function makeHandler(mod: 'S' | 'D' | 'T', value: number) {
-    return () => onHit(segmentFromSelection(mod, value));
-  }
+  const [mod, setMod] = useState<'none' | 'D' | 'T'>('none');
+  const applyMod = (value: number) => {
+    const m = mod === 'none' ? 'S' : mod;
+    onHit(segmentFromSelection(m, value));
+  };
 
   return (
     <div className="w-full space-y-3">
       {/* Modifiers */}
-      <div className="grid grid-cols-3 gap-2">
-        <Button onClick={() => (currentMod = 'S')} variant="outline">Single</Button>
-        <Button onClick={() => (currentMod = 'D')} variant="outline">Double</Button>
-        <Button onClick={() => (currentMod = 'T')} variant="outline">Triple</Button>
+      <div className="grid grid-cols-2 gap-2">
+        <Button
+          onClick={() => setMod((m) => (m === 'D' ? 'none' : 'D'))}
+          variant={mod === 'D' ? 'default' : 'outline'}
+        >
+          Double
+        </Button>
+        <Button
+          onClick={() => setMod((m) => (m === 'T' ? 'none' : 'T'))}
+          variant={mod === 'T' ? 'default' : 'outline'}
+        >
+          Triple
+        </Button>
       </div>
       {/* Numbers */}
       <div className="grid grid-cols-5 gap-2">
         {numbers.map((n) => (
-          <Button key={n} className="py-6" onClick={makeHandler(currentMod, n)}>
+          <Button key={n} className="py-6" onClick={() => applyMod(n)}>
             {n}
           </Button>
         ))}

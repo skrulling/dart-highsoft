@@ -51,16 +51,17 @@ export default function NewMatchPage() {
       .single();
     if (mErr || !match) return alert(mErr?.message ?? 'Failed to create match');
 
-    const mp = order.map((id, idx) => ({ match_id: (match as any).id, player_id: id, play_order: idx }));
+    const matchId = (match as { id: string }).id;
+    const mp = order.map((id, idx) => ({ match_id: matchId, player_id: id, play_order: idx }));
     const { error: mpErr } = await supabase.from('match_players').insert(mp);
     if (mpErr) return alert(mpErr.message);
 
     const { error: lErr } = await supabase
       .from('legs')
-      .insert({ match_id: (match as any).id, leg_number: 1, starting_player_id: order[0] });
+      .insert({ match_id: matchId, leg_number: 1, starting_player_id: order[0] });
     if (lErr) return alert(lErr.message);
 
-    router.push(`/match/${(match as any).id}`);
+    router.push(`/match/${matchId}`);
   }
 
   return (

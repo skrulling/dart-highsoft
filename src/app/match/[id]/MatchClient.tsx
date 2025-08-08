@@ -33,6 +33,13 @@ type TurnRecord = {
   busted: boolean;
 };
 
+type MatchPlayersRow = {
+  match_id: string;
+  player_id: string;
+  play_order: number;
+  players: Player;
+};
+
 export default function MatchClient({ matchId }: { matchId: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -61,7 +68,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         .select('*, players:player_id(*)')
         .eq('match_id', matchId)
         .order('play_order');
-      const flatPlayers = (mp ?? []).map((r: any) => r.players as Player);
+      const flatPlayers = ((mp as MatchPlayersRow[] | null) ?? []).map((r) => r.players);
       setPlayers(flatPlayers);
 
       const { data: lgs } = await supabase.from('legs').select('*').eq('match_id', matchId).order('leg_number');
@@ -79,8 +86,9 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       } else {
         setTurns([]);
       }
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Unknown error';
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -152,7 +160,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     if (score === 0) {
       await supabase.from('legs').update({ winner_player_id: playerId }).eq('id', currentLeg.id);
       const { data: allLegs } = await supabase.from('legs').select('*').eq('match_id', matchId);
-      const wonCounts = (allLegs ?? []).reduce<Record<string, number>>((acc, l: any) => {
+      const wonCounts = ((allLegs as LegRecord[] | null) ?? []).reduce<Record<string, number>>((acc, l) => {
         if (l.winner_player_id) acc[l.winner_player_id] = (acc[l.winner_player_id] || 0) + 1;
         return acc;
       }, {});

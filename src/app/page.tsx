@@ -5,14 +5,14 @@ import { getSupabaseClient } from '@/lib/supabaseClient';
 import { useEffect, useState } from 'react';
 
 export default function Home() {
-  const [leaders, setLeaders] = useState<{ player_id: string; display_name: string; wins: number }[]>([]);
+  const [leaders, setLeaders] = useState<{ player_id: string; display_name: string; wins: number; avg_per_turn: number }[]>([]);
 
   useEffect(() => {
     (async () => {
       try {
         const supabase = getSupabaseClient();
-        const { data } = await supabase.from('player_match_wins').select('*').order('wins', { ascending: false }).limit(10);
-        setLeaders(((data as unknown) as { player_id: string; display_name: string; wins: number }[]) ?? []);
+        const { data } = await supabase.from('player_summary').select('*').order('wins', { ascending: false }).limit(10);
+        setLeaders(((data as unknown) as { player_id: string; display_name: string; wins: number; avg_per_turn: number }[]) ?? []);
       } catch {
         setLeaders([]);
       }
@@ -42,7 +42,10 @@ export default function Home() {
                 <span className="w-8 text-lg text-center">{medal(idx)}</span>
                 <span>{row.display_name}</span>
               </div>
-              <div className="font-mono">{row.wins}</div>
+              <div className="flex items-center gap-6">
+                <div className="font-mono tabular-nums">{row.wins}</div>
+                <div className="text-sm text-muted-foreground">{row.avg_per_turn.toFixed(2)} avg</div>
+              </div>
             </li>
           ))}
           {leaders.length === 0 && (

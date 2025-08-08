@@ -14,6 +14,8 @@
     "@radix-ui/react-slot": "^1.2.3",
     "@supabase/supabase-js": "^2.54.0",
     "clsx": "^2.1.1",
+    "highcharts": "^12.3.0",
+    "highcharts-react-official": "^3.2.2",
     "next": "15.4.6",
     "react": "19.1.0",
     "react-dom": "19.1.0",

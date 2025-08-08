@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import Link from "next/link";
+import { Home, BarChart3 } from "lucide-react";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -27,7 +29,28 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen h-full bg-background text-foreground`}
       >
-        {children}
+        <div className="min-h-screen pb-16 md:pb-0">
+          <nav className="hidden md:flex items-center justify-between px-6 py-3 border-b bg-card">
+            <div className="font-semibold">Dart Scoreboard</div>
+            <div className="flex items-center gap-4 text-sm">
+              <Link href="/">Home</Link>
+              <Link href="/stats">Statistics</Link>
+            </div>
+          </nav>
+          <main className="p-4 md:p-6 max-w-6xl mx-auto">{children}</main>
+          <nav className="md:hidden fixed bottom-0 left-0 right-0 border-t bg-card">
+            <div className="grid grid-cols-2">
+              <Link href="/" className="flex flex-col items-center justify-center py-2 gap-1">
+                <Home className="size-5" />
+                <span className="text-xs">Home</span>
+              </Link>
+              <Link href="/stats" className="flex flex-col items-center justify-center py-2 gap-1">
+                <BarChart3 className="size-5" />
+                <span className="text-xs">Stats</span>
+              </Link>
+            </div>
+          </nav>
+        </div>
       </body>
     </html>
   );

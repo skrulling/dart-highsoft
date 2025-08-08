@@ -56,6 +56,11 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     startScore: number;
   } | null>(null);
 
+  const [localTurn, setLocalTurn] = useState<{
+    playerId: string | null;
+    darts: { scored: number; label: string; kind: SegmentResult['kind'] }[];
+  }>({ playerId: null, darts: [] });
+
   const loadAll = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -113,16 +118,19 @@ export default function MatchClient({ matchId }: { matchId: string }) {
 
   const currentPlayer = useMemo(() => {
     if (!orderPlayers.length) return null as Player | null;
+    if (localTurn.playerId) {
+      return orderPlayers.find((p) => p.id === localTurn.playerId) ?? orderPlayers[0];
+    }
     const idx = turns.length % orderPlayers.length;
     return orderPlayers[idx];
-  }, [orderPlayers, turns.length]);
+  }, [orderPlayers, turns.length, localTurn.playerId]);
 
   function getScoreForPlayer(playerId: string): number {
     const legTurns = turns.filter((t) => t.player_id === playerId && t.leg_id === currentLeg?.id);
     const scored = legTurns.reduce((sum, t) => (t.busted ? sum : sum + (t.total_scored || 0)), 0);
     const current = startScore - scored;
-    if (ongoingTurnRef.current && ongoingTurnRef.current.playerId === playerId) {
-      const sub = ongoingTurnRef.current.darts.reduce((s, d) => s + d.scored, 0);
+    if (localTurn.playerId === playerId) {
+      const sub = localTurn.darts.reduce((s, d) => s + d.scored, 0);
       return Math.max(0, current - sub);
     }
     return current;
@@ -143,7 +151,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       return null;
     }
     ongoingTurnRef.current = { turnId: (data as TurnRecord).id, playerId: currentPlayer.id, darts: [], startScore: getScoreForPlayer(currentPlayer.id) };
-    setTurns((prev) => [...prev, data as TurnRecord]);
+    setLocalTurn({ playerId: currentPlayer.id, darts: [] });
     return (data as TurnRecord).id;
     }
 
@@ -154,6 +162,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     const supabase = getSupabaseClient();
     await supabase.from('turns').update({ total_scored: total, busted }).eq('id', ongoing.turnId);
     ongoingTurnRef.current = null;
+    setLocalTurn({ playerId: null, darts: [] });
     await loadAll();
   }
 
@@ -184,7 +193,8 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     if (!turnId) return;
 
     const myScoreStart = ongoingTurnRef.current?.startScore ?? getScoreForPlayer(currentPlayer.id);
-    const outcome = applyThrow(myScoreStart - ongoingTurnRef.current!.darts.reduce((s, d) => s + d.scored, 0), result, finishRule);
+    const localSubtotal = localTurn.darts.reduce((s, d) => s + d.scored, 0);
+    const outcome = applyThrow(myScoreStart - localSubtotal, result, finishRule);
 
     const newDartIndex = ongoingTurnRef.current!.darts.length + 1;
     const supabase = getSupabaseClient();
@@ -192,6 +202,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       .from('throws')
       .insert({ turn_id: turnId, dart_index: newDartIndex, segment: result.label, scored: result.scored });
     ongoingTurnRef.current!.darts.push({ scored: result.scored, label: result.label, kind: result.kind });
+    setLocalTurn((prev) => ({ playerId: currentPlayer.id, darts: [...prev.darts, { scored: result.scored, label: result.label, kind: result.kind }] }));
 
     if (outcome.busted) {
       await finishTurn(true);

@@ -11,25 +11,41 @@ export default function Dartboard({ onHit }: DartboardProps) {
   const viewBox = 500;
   const cx = viewBox / 2;
   const cy = viewBox / 2;
+  const segmentOrder = [
+    20, 1, 18, 4, 13, 6, 10, 15, 2, 17,
+    3, 19, 7, 16, 8, 11, 14, 9, 12, 5,
+  ];
+
+  // Colors approximating a standard board
+  const COLORS = {
+    singleLight: '#E6E2D3', // cream
+    singleDark: '#2B2B2B', // dark
+    ringRed: '#D12F2F', // red for double/triple
+    ringGreen: '#2AAA3B', // green for double/triple
+    outerBull: '#2AAA3B',
+    innerBull: '#D12F2F',
+    numberRingBg: '#111111',
+    separators: '#222222',
+  } as const;
 
   const segments = useMemo(() => {
-    const colors = ['#000', '#c00'];
     const paths: { d: string; fill: string }[] = [];
     for (let i = 0; i < 20; i++) {
       const startAngle = ((i * 18 - 90) * Math.PI) / 180; // start from top
       const endAngle = (((i + 1) * 18 - 90) * Math.PI) / 180;
-      const fillSingle = colors[i % 2 === 0 ? 0 : 1];
-      const fillTriple = colors[i % 2 === 0 ? 1 : 0];
-      const fillDouble = colors[i % 2 === 0 ? 1 : 0];
+
+      const isDarkSingle = i % 2 === 0; // 20 wedge dark
+      const singleFill = isDarkSingle ? COLORS.singleDark : COLORS.singleLight;
+      const ringFill = i % 2 === 0 ? COLORS.ringRed : COLORS.ringGreen; // 20 ring red
 
       // Single outer (between triple outer and double inner)
-      paths.push({ d: annularSector(TRIPLE_OUTER_RADIUS, DOUBLE_INNER_RADIUS, startAngle, endAngle), fill: fillSingle });
-      // Triple ring
-      paths.push({ d: annularSector(TRIPLE_INNER_RADIUS, TRIPLE_OUTER_RADIUS, startAngle, endAngle), fill: fillTriple });
+      paths.push({ d: annularSector(TRIPLE_OUTER_RADIUS, DOUBLE_INNER_RADIUS, startAngle, endAngle), fill: singleFill });
+      // Triple ring (red/green alternating)
+      paths.push({ d: annularSector(TRIPLE_INNER_RADIUS, TRIPLE_OUTER_RADIUS, startAngle, endAngle), fill: ringFill });
       // Single inner (between bull outer and triple inner)
-      paths.push({ d: annularSector(OUTER_BULL_RADIUS, TRIPLE_INNER_RADIUS, startAngle, endAngle), fill: fillSingle });
-      // Double ring
-      paths.push({ d: annularSector(DOUBLE_INNER_RADIUS, DOUBLE_OUTER_RADIUS, startAngle, endAngle), fill: fillDouble });
+      paths.push({ d: annularSector(OUTER_BULL_RADIUS, TRIPLE_INNER_RADIUS, startAngle, endAngle), fill: singleFill });
+      // Double ring (red/green alternating)
+      paths.push({ d: annularSector(DOUBLE_INNER_RADIUS, DOUBLE_OUTER_RADIUS, startAngle, endAngle), fill: ringFill });
     }
     return paths;
   }, []);
@@ -62,6 +78,19 @@ export default function Dartboard({ onHit }: DartboardProps) {
     onHit(svgX, svgY, result);
   }
 
+  // Numbers around the board
+  const numberPositions = useMemo(() => {
+    const items: { x: number; y: number; label: string }[] = [];
+    const radius = DOUBLE_OUTER_RADIUS + 20;
+    for (let i = 0; i < 20; i++) {
+      const angle = ((i * 18 - 90) * Math.PI) / 180;
+      const x = cx + radius * Math.cos(angle);
+      const y = cy + radius * Math.sin(angle);
+      items.push({ x, y, label: String(segmentOrder[i]) });
+    }
+    return items;
+  }, [cx, cy, segmentOrder]);
+
   return (
     <svg
       role="img"
@@ -69,15 +98,33 @@ export default function Dartboard({ onHit }: DartboardProps) {
       className="w-full max-w-[500px] cursor-crosshair select-none drop-shadow"
       onClick={onClick}
     >
+      {/* Number ring background */}
+      <circle cx={cx} cy={cy} r={DOUBLE_OUTER_RADIUS + 26} fill={COLORS.numberRingBg} />
+      {/* Board background */}
       <circle cx={cx} cy={cy} r={DOUBLE_OUTER_RADIUS} fill="#222" stroke="#111" strokeWidth={2} />
       {segments.map((seg, i) => (
         <path key={i} d={seg.d} fill={seg.fill} stroke="#222" strokeWidth={0.5} />
       ))}
       {/* Bulls */}
-      <circle cx={cx} cy={cy} r={OUTER_BULL_RADIUS} fill="#2b2" />
-      <circle cx={cx} cy={cy} r={INNER_BULL_RADIUS} fill="#c00" />
+      <circle cx={cx} cy={cy} r={OUTER_BULL_RADIUS} fill={COLORS.outerBull} />
+      <circle cx={cx} cy={cy} r={INNER_BULL_RADIUS} fill={COLORS.innerBull} />
       {/* Outer border */}
       <circle cx={cx} cy={cy} r={DOUBLE_OUTER_RADIUS} fill="none" stroke="#000" strokeWidth={4} />
+      {/* Numbers */}
+      {numberPositions.map((pos, i) => (
+        <text
+          key={i}
+          x={pos.x}
+          y={pos.y}
+          fill="#FFF"
+          fontSize={18}
+          fontWeight={700}
+          textAnchor="middle"
+          dominantBaseline="middle"
+        >
+          {pos.label}
+        </text>
+      ))}
     </svg>
   );
 }

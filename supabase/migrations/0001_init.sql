@@ -64,7 +64,7 @@ create table if not exists public.throws (
 );
 
 -- Aggregates for stats
-create view if not exists public.player_match_stats as
+create or replace view public.player_match_stats as
 select
   mp.match_id,
   mp.player_id,

@@ -3,7 +3,7 @@
 import Dartboard from '@/components/Dartboard';
 import { computeHit, SegmentResult } from '@/utils/dartboard';
 import { applyThrow, FinishRule } from '@/utils/x01';
-import { supabase } from '@/lib/supabaseClient';
+import { getSupabaseClient } from '@/lib/supabaseClient';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 type Player = { id: string; display_name: string };
@@ -60,6 +60,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     setLoading(true);
     setError(null);
     try {
+      const supabase = getSupabaseClient();
       const { data: m } = await supabase.from('matches').select('*').eq('id', matchId).single();
       setMatch(m as MatchRecord);
 
@@ -131,6 +132,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     if (!currentLeg || !currentPlayer) return null as string | null;
     if (ongoingTurnRef.current) return ongoingTurnRef.current.turnId;
     const nextTurnNumber = turns.length + 1;
+    const supabase = getSupabaseClient();
     const { data, error } = await supabase
       .from('turns')
       .insert({ leg_id: currentLeg.id, player_id: currentPlayer.id, turn_number: nextTurnNumber, total_scored: 0, busted: false })
@@ -149,6 +151,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     const ongoing = ongoingTurnRef.current;
     if (!ongoing) return;
     const total = ongoing.darts.reduce((s, d) => s + d.scored, 0);
+    const supabase = getSupabaseClient();
     await supabase.from('turns').update({ total_scored: total, busted }).eq('id', ongoing.turnId);
     ongoingTurnRef.current = null;
     await loadAll();
@@ -158,6 +161,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     if (!currentLeg || !match) return;
     const score = getScoreForPlayer(playerId);
     if (score === 0) {
+      const supabase = getSupabaseClient();
       await supabase.from('legs').update({ winner_player_id: playerId }).eq('id', currentLeg.id);
       const { data: allLegs } = await supabase.from('legs').select('*').eq('match_id', matchId);
       const wonCounts = ((allLegs as LegRecord[] | null) ?? []).reduce<Record<string, number>>((acc, l) => {
@@ -168,7 +172,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       const someoneWonMatch = Object.values(wonCounts).some((c) => c >= target);
       if (!someoneWonMatch) {
         const nextLegNum = (allLegs ?? []).length + 1;
-        await supabase.from('legs').insert({ match_id: matchId, leg_number: nextLegNum, starting_player_id: playerId });
+        await (getSupabaseClient()).from('legs').insert({ match_id: matchId, leg_number: nextLegNum, starting_player_id: playerId });
       }
       await loadAll();
     }
@@ -183,6 +187,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     const outcome = applyThrow(myScoreStart - ongoingTurnRef.current!.darts.reduce((s, d) => s + d.scored, 0), result, finishRule);
 
     const newDartIndex = ongoingTurnRef.current!.darts.length + 1;
+    const supabase = getSupabaseClient();
     await supabase
       .from('throws')
       .insert({ turn_id: turnId, dart_index: newDartIndex, segment: result.label, scored: result.scored });

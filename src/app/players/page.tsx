@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabaseClient';
+import { getSupabaseClient } from '@/lib/supabaseClient';
 
 type Player = { id: string; display_name: string };
 
@@ -11,6 +11,7 @@ export default function PlayersPage() {
   const [loading, setLoading] = useState(false);
 
   async function load() {
+    const supabase = getSupabaseClient();
     const { data } = await supabase.from('players').select('*').order('display_name');
     setPlayers(data ?? []);
   }
@@ -22,6 +23,7 @@ export default function PlayersPage() {
     e.preventDefault();
     if (!name.trim()) return;
     setLoading(true);
+    const supabase = getSupabaseClient();
     const { error } = await supabase.from('players').insert({ display_name: name.trim() });
     setLoading(false);
     if (!error) {

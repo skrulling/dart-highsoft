@@ -90,7 +90,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
           .select('*')
           .eq('leg_id', currentLeg.id)
           .order('turn_number');
-        setTurns((tns ?? []) as TurnRecord[]);
+        setTurns(((tns ?? []) as TurnRecord[]).sort((a, b) => a.turn_number - b.turn_number));
       } else {
         setTurns([]);
       }
@@ -115,7 +115,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     return rotated;
   }, [match, players, currentLeg]);
 
-  const startScore: number = useMemo(() => (match?.start_score ? parseInt(match.start_score, 10) : 501), [match]);
+  const startScore: number = useMemo(() => (match?.start_score ? parseInt(match.start_score, 10) : 501), [match?.start_score]);
   const finishRule: FinishRule = useMemo(() => (match?.finish ?? 'double_out'), [match]);
 
   const currentPlayer = useMemo(() => {

@@ -558,9 +558,22 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       </div>
       <div className="flex flex-col items-center gap-3">
         <div className="w-full">
-          {/* Mobile: keypad only */}
-          <div className={`md:hidden ${matchWinnerId ? 'pointer-events-none opacity-50' : ''}`}>
-            <MobileKeypad onHit={(seg) => handleBoardClick(0, 0, seg as unknown as ReturnType<typeof computeHit>)} />
+          {/* Mobile: player indicator + keypad at top */}
+          <div className="md:hidden space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="font-medium">{currentPlayer?.display_name ?? '—'}</div>
+              <div className="flex gap-2">
+                {localTurn.darts.map((d, idx) => (
+                  <Badge key={idx} variant="secondary">{d.label}</Badge>
+                ))}
+                {Array.from({ length: 3 - localTurn.darts.length }).map((_, idx) => (
+                  <Badge key={`m${idx}`} variant="outline">–</Badge>
+                ))}
+              </div>
+            </div>
+            <div className={`${matchWinnerId ? 'pointer-events-none opacity-50' : ''}`}>
+              <MobileKeypad onHit={(seg) => handleBoardClick(0, 0, seg as unknown as ReturnType<typeof computeHit>)} />
+            </div>
           </div>
           {/* Desktop: board */}
           <div className={`hidden md:flex justify-center ${matchWinnerId ? 'pointer-events-none opacity-50' : ''}`}>

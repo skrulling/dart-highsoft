@@ -169,7 +169,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     return (data as TurnRecord).id;
     }
 
-  async function finishTurn(busted: boolean) {
+  async function finishTurn(busted: boolean, opts?: { skipReload?: boolean }) {
     const ongoing = ongoingTurnRef.current;
     if (!ongoing) return;
     const total = ongoing.darts.reduce((s, d) => s + d.scored, 0);
@@ -180,47 +180,52 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     }
     ongoingTurnRef.current = null;
     setLocalTurn({ playerId: null, darts: [] });
-    await loadAll();
-  }
-
-  async function maybeFinishLegIfWon(playerId: string) {
-    if (!currentLeg || !match) return;
-    const score = getScoreForPlayer(playerId);
-    if (score === 0) {
-      const supabase = await getSupabaseClient();
-      const { error: legErr } = await supabase.from('legs').update({ winner_player_id: playerId }).eq('id', currentLeg.id);
-      if (legErr) {
-        alert(`Failed to set leg winner: ${legErr.message}`);
-        return;
-      }
-      const { data: allLegs, error: listErr } = await supabase.from('legs').select('*').eq('match_id', matchId);
-      if (listErr) {
-        alert(`Failed to load legs: ${listErr.message}`);
-        await loadAll();
-        return;
-      }
-      const wonCounts = ((allLegs as LegRecord[] | null) ?? []).reduce<Record<string, number>>((acc, l) => {
-        if (l.winner_player_id) acc[l.winner_player_id] = (acc[l.winner_player_id] || 0) + 1;
-        return acc;
-      }, {});
-      const target = match.legs_to_win;
-      const someoneWonMatch = Object.entries(wonCounts).find(([, c]) => c >= target);
-      if (!someoneWonMatch) {
-        const nextLegNum = (allLegs ?? []).length + 1;
-        const { error: insErr } = await (await getSupabaseClient()).from('legs').insert({ match_id: matchId, leg_number: nextLegNum, starting_player_id: playerId });
-        if (insErr) {
-          alert(`Failed to create next leg: ${insErr.message}`);
-        }
-      }
-      if (someoneWonMatch) {
-        const [winnerPid] = someoneWonMatch;
-        const { error: setWinnerErr } = await supabase.from('matches').update({ winner_player_id: winnerPid }).eq('id', matchId);
-        if (setWinnerErr) {
-          alert(`Failed to set match winner: ${setWinnerErr.message}`);
-        }
-      }
+    if (!opts?.skipReload) {
       await loadAll();
     }
+  }
+
+  async function endLegAndMaybeMatch(winnerPlayerId: string) {
+    if (!currentLeg || !match) return;
+    const supabase = await getSupabaseClient();
+    // Set leg winner if not already set
+    const { error: legErr } = await supabase
+      .from('legs')
+      .update({ winner_player_id: winnerPlayerId })
+      .eq('id', currentLeg.id)
+      .is('winner_player_id', null);
+    if (legErr) {
+      alert(`Failed to set leg winner: ${legErr.message}`);
+      await loadAll();
+      return;
+    }
+    // Compute match winner
+    const { data: allLegs, error: listErr } = await supabase.from('legs').select('*').eq('match_id', matchId);
+    if (listErr) {
+      alert(`Failed to load legs: ${listErr.message}`);
+      await loadAll();
+      return;
+    }
+    const wonCounts = ((allLegs as LegRecord[] | null) ?? []).reduce<Record<string, number>>((acc, l) => {
+      if (l.winner_player_id) acc[l.winner_player_id] = (acc[l.winner_player_id] || 0) + 1;
+      return acc;
+    }, {});
+    const target = match.legs_to_win;
+    const someoneWonMatch = Object.entries(wonCounts).find(([, c]) => c >= target);
+    if (!someoneWonMatch) {
+      const nextLegNum = (allLegs ?? []).length + 1;
+      const { error: insErr } = await supabase.from('legs').insert({ match_id: matchId, leg_number: nextLegNum, starting_player_id: winnerPlayerId });
+      if (insErr) {
+        alert(`Failed to create next leg: ${insErr.message}`);
+      }
+    } else {
+      const [winnerPid] = someoneWonMatch;
+      const { error: setWinnerErr } = await supabase.from('matches').update({ winner_player_id: winnerPid }).eq('id', matchId);
+      if (setWinnerErr) {
+        alert(`Failed to set match winner: ${setWinnerErr.message}`);
+      }
+    }
+    await loadAll();
   }
 
   async function handleBoardClick(_x: number, _y: number, result: ReturnType<typeof computeHit>) {
@@ -250,8 +255,9 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       return;
     }
     if (outcome.finished) {
-      await finishTurn(false);
-      await maybeFinishLegIfWon(currentPlayer.id);
+      // Persist the partial turn and finish the leg immediately without waiting for state
+      await finishTurn(false, { skipReload: true });
+      await endLegAndMaybeMatch(currentPlayer.id);
       return;
     }
     if (newDartIndex >= 3) {

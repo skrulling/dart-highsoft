@@ -71,11 +71,11 @@ export default function NewMatchPage() {
   }
 
   return (
-    <div className="max-w-2xl mx-auto p-4 space-y-6">
+    <div className="max-w-2xl mx-auto p-4 md:p-6 space-y-6">
       <h1 className="text-2xl font-semibold">New Match</h1>
       <div className="space-y-3">
         <div className="font-medium">Players</div>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
           {players.map((p) => (
             <label key={p.id} className={`flex items-center gap-2 border p-2 rounded ${selectedIds.includes(p.id) ? 'bg-blue-50 border-blue-300' : ''}`}>
               <input type="checkbox" checked={selectedIds.includes(p.id)} onChange={() => toggle(p.id)} />

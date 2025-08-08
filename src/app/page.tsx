@@ -12,7 +12,7 @@ export default function Home() {
       try {
         const supabase = getSupabaseClient();
         const { data } = await supabase.from('player_match_wins').select('*').order('wins', { ascending: false }).limit(10);
-        setLeaders((data as any[]) ?? []);
+        setLeaders(((data as unknown) as { player_id: string; display_name: string; wins: number }[]) ?? []);
       } catch {
         setLeaders([]);
       }

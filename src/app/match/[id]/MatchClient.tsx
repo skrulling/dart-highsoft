@@ -162,7 +162,10 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     if (!ongoing) return;
     const total = ongoing.darts.reduce((s, d) => s + d.scored, 0);
     const supabase = getSupabaseClient();
-    await supabase.from('turns').update({ total_scored: total, busted }).eq('id', ongoing.turnId);
+    const { error: updErr } = await supabase.from('turns').update({ total_scored: total, busted }).eq('id', ongoing.turnId);
+    if (updErr) {
+      alert(`Failed to update turn: ${updErr.message}`);
+    }
     ongoingTurnRef.current = null;
     setLocalTurn({ playerId: null, darts: [] });
     await loadAll();
@@ -173,8 +176,17 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     const score = getScoreForPlayer(playerId);
     if (score === 0) {
       const supabase = getSupabaseClient();
-      await supabase.from('legs').update({ winner_player_id: playerId }).eq('id', currentLeg.id);
-      const { data: allLegs } = await supabase.from('legs').select('*').eq('match_id', matchId);
+      const { error: legErr } = await supabase.from('legs').update({ winner_player_id: playerId }).eq('id', currentLeg.id);
+      if (legErr) {
+        alert(`Failed to set leg winner: ${legErr.message}`);
+        return;
+      }
+      const { data: allLegs, error: listErr } = await supabase.from('legs').select('*').eq('match_id', matchId);
+      if (listErr) {
+        alert(`Failed to load legs: ${listErr.message}`);
+        await loadAll();
+        return;
+      }
       const wonCounts = ((allLegs as LegRecord[] | null) ?? []).reduce<Record<string, number>>((acc, l) => {
         if (l.winner_player_id) acc[l.winner_player_id] = (acc[l.winner_player_id] || 0) + 1;
         return acc;
@@ -183,7 +195,10 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       const someoneWonMatch = Object.values(wonCounts).some((c) => c >= target);
       if (!someoneWonMatch) {
         const nextLegNum = (allLegs ?? []).length + 1;
-        await (getSupabaseClient()).from('legs').insert({ match_id: matchId, leg_number: nextLegNum, starting_player_id: playerId });
+        const { error: insErr } = await (getSupabaseClient()).from('legs').insert({ match_id: matchId, leg_number: nextLegNum, starting_player_id: playerId });
+        if (insErr) {
+          alert(`Failed to create next leg: ${insErr.message}`);
+        }
       }
       await loadAll();
     }
@@ -200,9 +215,13 @@ export default function MatchClient({ matchId }: { matchId: string }) {
 
     const newDartIndex = ongoingTurnRef.current!.darts.length + 1;
     const supabase = getSupabaseClient();
-    await supabase
+    const { error: thrErr } = await supabase
       .from('throws')
       .insert({ turn_id: turnId, dart_index: newDartIndex, segment: result.label, scored: result.scored });
+    if (thrErr) {
+      alert(`Failed to save throw: ${thrErr.message}`);
+      return;
+    }
     ongoingTurnRef.current!.darts.push({ scored: result.scored, label: result.label, kind: result.kind });
     setLocalTurn((prev) => ({ playerId: currentPlayer.id, darts: [...prev.darts, { scored: result.scored, label: result.label, kind: result.kind }] }));
 

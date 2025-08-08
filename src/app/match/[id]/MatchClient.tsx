@@ -53,6 +53,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   const [players, setPlayers] = useState<Player[]>([]);
   const [legs, setLegs] = useState<LegRecord[]>([]);
   const [turns, setTurns] = useState<TurnRecord[]>([]); // for current leg only
+  const [turnsByLeg, setTurnsByLeg] = useState<Record<string, TurnRecord[]>>({});
 
   const ongoingTurnRef = useRef<{
     turnId: string;
@@ -96,6 +97,24 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         setTurns(((tns ?? []) as TurnRecord[]).sort((a, b) => a.turn_number - b.turn_number));
       } else {
         setTurns([]);
+      }
+
+      // Load turns for all legs to compute per-leg averages
+      if (legsTyped.length > 0) {
+        const legIds = legsTyped.map((l) => l.id);
+        const { data: allTurns } = await supabase
+          .from('turns')
+          .select('*')
+          .in('leg_id', legIds)
+          .order('turn_number');
+        const grouped: Record<string, TurnRecord[]> = {};
+        for (const t of ((allTurns ?? []) as TurnRecord[])) {
+          if (!grouped[t.leg_id]) grouped[t.leg_id] = [];
+          grouped[t.leg_id].push(t);
+        }
+        setTurnsByLeg(grouped);
+      } else {
+        setTurnsByLeg({});
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Unknown error';
@@ -378,6 +397,47 @@ export default function MatchClient({ matchId }: { matchId: string }) {
             </div>
           </CardContent>
         </Card>
+        {legs.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Legs</CardTitle>
+              <CardDescription>Winners and averages</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-col gap-2">
+                {legs.map((l) => {
+                  const winner = players.find((p) => p.id === l.winner_player_id);
+                  const turns = turnsByLeg[l.id] ?? [];
+                  const byPlayer: Record<string, { total: number; turns: number }> = {};
+                  for (const t of turns) {
+                    if (!byPlayer[t.player_id]) byPlayer[t.player_id] = { total: 0, turns: 0 };
+                    byPlayer[t.player_id].turns += 1;
+                    if (!t.busted) byPlayer[t.player_id].total += t.total_scored;
+                  }
+                  return (
+                    <div key={l.id} className="flex items-center justify-between rounded border px-3 py-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-muted-foreground">Leg {l.leg_number}</span>
+                        {winner && <span>🏆 {winner.display_name}</span>}
+                      </div>
+                      <div className="flex items-center gap-4 text-sm">
+                        {orderPlayers.map((p) => {
+                          const s = byPlayer[p.id] ?? { total: 0, turns: 0 };
+                          const avg = s.turns > 0 ? (s.total / s.turns).toFixed(2) : '0.00';
+                          return (
+                            <span key={p.id} className="text-muted-foreground">
+                              {p.display_name}: {avg}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        )}
         {matchWinnerId && (
           <Card>
             <CardHeader>

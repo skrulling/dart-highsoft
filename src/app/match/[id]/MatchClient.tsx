@@ -438,7 +438,37 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   if (!match || !currentLeg) return <div className="p-4">No leg available</div>;
 
   return (
-    <div className="max-w-6xl mx-auto grid lg:grid-cols-2 gap-6">
+    <div className="max-w-6xl mx-auto space-y-6">
+      {/* Scoring input at top (mobile keypad or desktop board) */}
+      <div className="w-full">
+        {/* Mobile: player indicator + keypad at top */}
+        <div className="md:hidden space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="font-medium">{currentPlayer?.display_name ?? '—'}</div>
+            <div className="flex gap-2">
+              {localTurn.darts.map((d, idx) => (
+                <Badge key={idx} variant="secondary">{d.label}</Badge>
+              ))}
+              {Array.from({ length: 3 - localTurn.darts.length }).map((_, idx) => (
+                <Badge key={`m${idx}`} variant="outline">–</Badge>
+              ))}
+            </div>
+          </div>
+          <div className={`${matchWinnerId ? 'pointer-events-none opacity-50' : ''}`}>
+            <MobileKeypad onHit={(seg) => handleBoardClick(0, 0, seg as unknown as ReturnType<typeof computeHit>)} />
+          </div>
+        </div>
+        {/* Desktop: board */}
+        <div className={`hidden md:flex justify-center ${matchWinnerId ? 'pointer-events-none opacity-50' : ''}`}>
+          <Dartboard onHit={handleBoardClick} />
+        </div>
+        <div className="flex items-center gap-3 mt-2">
+          <Button variant="outline" onClick={undoLastThrow} disabled={!!matchWinnerId}>Undo dart</Button>
+          <div className="text-sm text-gray-600 hidden md:block">Click the board to register throws</div>
+        </div>
+      </div>
+
+      {/* Match info and summaries */}
       <div className="space-y-4">
         <Card>
           <CardHeader>

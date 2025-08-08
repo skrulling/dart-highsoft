@@ -345,9 +345,16 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     }));
 
     if (darts.length === 0) {
-      // Delete empty turn, reload
+      // Delete empty turn
       await supabase.from('turns').delete().eq('id', last.turn_id);
+      // After removing an entire turn, compute whose turn it should be and reopen if it's the previous player's turn
       await loadAll();
+      const prevLeg = (legs ?? []).find((l) => !l.winner_player_id) ?? legs[legs.length - 1];
+      if (!prevLeg) return;
+      const turnCount = turns.filter((t) => t.leg_id === prevLeg.id).length;
+      const prevPlayer = orderPlayers[(turnCount + orderPlayers.length - 1) % orderPlayers.length];
+      ongoingTurnRef.current = { turnId: last.turn_id, playerId: prevPlayer.id, darts: [], startScore: getScoreForPlayer(prevPlayer.id) };
+      setLocalTurn({ playerId: prevPlayer.id, darts: [] });
       return;
     } else {
       // Update turn total to current subtotal and mark not busted

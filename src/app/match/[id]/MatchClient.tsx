@@ -7,6 +7,7 @@ import { getSupabaseClient } from '@/lib/supabaseClient';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 
 type Player = { id: string; display_name: string };
 
@@ -118,6 +119,17 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   const startScore: number = useMemo(() => (match?.start_score ? parseInt(match.start_score, 10) : 501), [match?.start_score]);
   const finishRule: FinishRule = useMemo(() => (match?.finish ?? 'double_out'), [match]);
 
+  // Determine if match has a winner already
+  const matchWinnerId = useMemo(() => {
+    if (!match) return null as string | null;
+    const counts = legs.reduce<Record<string, number>>((acc, l) => {
+      if (l.winner_player_id) acc[l.winner_player_id] = (acc[l.winner_player_id] || 0) + 1;
+      return acc;
+    }, {});
+    const winner = Object.entries(counts).find(([, c]) => c >= match.legs_to_win)?.[0] ?? null;
+    return winner;
+  }, [legs, match]);
+
   const currentPlayer = useMemo(() => {
     if (!orderPlayers.length) return null as Player | null;
     if (localTurn.playerId) {
@@ -205,6 +217,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   }
 
   async function handleBoardClick(_x: number, _y: number, result: ReturnType<typeof computeHit>) {
+    if (matchWinnerId) return; // match over
     if (!currentLeg || !currentPlayer) return;
     const turnId = await startTurnIfNeeded();
     if (!turnId) return;
@@ -240,12 +253,49 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     }
   }
 
+  async function startRematch() {
+    if (!match) return;
+    try {
+      const supabase = getSupabaseClient();
+      // Use the same players as this match
+      const playerIds = players.map((p) => p.id);
+      const order = [...playerIds].sort(() => Math.random() - 0.5);
+      const { data: newMatch, error: mErr } = await supabase
+        .from('matches')
+        .insert({ mode: 'x01', start_score: match.start_score, finish: match.finish, legs_to_win: match.legs_to_win })
+        .select('*')
+        .single();
+      if (mErr || !newMatch) {
+        alert(mErr?.message ?? 'Failed to create rematch');
+        return;
+      }
+      const mp = order.map((id, idx) => ({ match_id: (newMatch as MatchRecord).id, player_id: id, play_order: idx }));
+      const { error: mpErr } = await supabase.from('match_players').insert(mp);
+      if (mpErr) {
+        alert(mpErr.message);
+        return;
+      }
+      const { error: lErr } = await supabase
+        .from('legs')
+        .insert({ match_id: (newMatch as MatchRecord).id, leg_number: 1, starting_player_id: order[0] });
+      if (lErr) {
+        alert(lErr.message);
+        return;
+      }
+      // Redirect to new match page
+      window.location.href = `/match/${(newMatch as MatchRecord).id}`;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Unknown error creating rematch';
+      alert(msg);
+    }
+  }
+
   if (loading) return <div className="p-4">Loading…</div>;
   if (error) return <div className="p-4 text-red-600">{error}</div>;
   if (!match || !currentLeg) return <div className="p-4">No leg available</div>;
 
   return (
-    <div className="max-w-6xl mx-auto p-4 grid lg:grid-cols-2 gap-6">
+    <div className="max-w-6xl mx-auto grid lg:grid-cols-2 gap-6">
       <div className="space-y-4">
         <Card>
           <CardHeader>
@@ -268,7 +318,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                     }`}
                   >
                     <div className="flex items-center gap-2">
-                      {isCurrent && <Badge>Up</Badge>}
+                      {isCurrent && !matchWinnerId && <Badge>Up</Badge>}
                       <div className="font-medium">{p.display_name}</div>
                     </div>
                     <div className="flex items-center gap-3">
@@ -290,6 +340,21 @@ export default function MatchClient({ matchId }: { matchId: string }) {
             </div>
           </CardContent>
         </Card>
+        {matchWinnerId && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Winner</CardTitle>
+              <CardDescription>
+                {players.find((p) => p.id === matchWinnerId)?.display_name} wins the match
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex gap-3">
+                <Button onClick={startRematch}>Rematch</Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
         <Card>
           <CardHeader>
             <CardTitle>Turns</CardTitle>
@@ -308,7 +373,9 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         </Card>
       </div>
       <div className="flex flex-col items-center gap-3">
-        <Dartboard onHit={handleBoardClick} />
+        <div className={`${matchWinnerId ? 'pointer-events-none opacity-50' : ''}`}>
+          <Dartboard onHit={handleBoardClick} />
+        </div>
         <div className="text-sm text-gray-600">Click the board to register throws</div>
       </div>
     </div>

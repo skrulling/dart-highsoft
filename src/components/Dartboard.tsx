@@ -103,8 +103,17 @@ export default function Dartboard({ onHit }: DartboardProps) {
       {/* Board background */}
       <circle cx={cx} cy={cy} r={DOUBLE_OUTER_RADIUS} fill="#222" stroke="#111" strokeWidth={2} />
       {segments.map((seg, i) => (
-        <path key={i} d={seg.d} fill={seg.fill} stroke="#222" strokeWidth={0.5} />
+        <path key={i} d={seg.d} fill={seg.fill} stroke="#111" strokeWidth={1} />
       ))}
+      {/* Thin radial separators for each wedge */}
+      {Array.from({ length: 20 }).map((_, i) => {
+        const angle = ((i * 18 - 90) * Math.PI) / 180;
+        const x1 = cx + OUTER_BULL_RADIUS * Math.cos(angle);
+        const y1 = cy + OUTER_BULL_RADIUS * Math.sin(angle);
+        const x2 = cx + DOUBLE_OUTER_RADIUS * Math.cos(angle);
+        const y2 = cy + DOUBLE_OUTER_RADIUS * Math.sin(angle);
+        return <line key={`sep-${i}`} x1={x1} y1={y1} x2={x2} y2={y2} stroke={COLORS.separators} strokeWidth={0.75} />;
+      })}
       {/* Bulls */}
       <circle cx={cx} cy={cy} r={OUTER_BULL_RADIUS} fill={COLORS.outerBull} />
       <circle cx={cx} cy={cy} r={INNER_BULL_RADIUS} fill={COLORS.innerBull} />

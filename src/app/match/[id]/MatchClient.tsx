@@ -5,6 +5,8 @@ import { computeHit, SegmentResult } from '@/utils/dartboard';
 import { applyThrow, FinishRule } from '@/utils/x01';
 import { getSupabaseClient } from '@/lib/supabaseClient';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 
 type Player = { id: string; display_name: string };
 
@@ -224,33 +226,62 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   if (!match || !currentLeg) return <div className="p-4">No leg available</div>;
 
   return (
-    <div className="max-w-5xl mx-auto p-4 grid md:grid-cols-2 gap-6">
+    <div className="max-w-6xl mx-auto p-4 grid lg:grid-cols-2 gap-6">
       <div className="space-y-4">
-        <h1 className="text-xl font-semibold">Match</h1>
-        <div className="text-sm text-gray-600">Start {match.start_score} • {match.finish.replace('_', ' ')}</div>
-        <div className="grid grid-cols-1 gap-2">
-          {orderPlayers.map((p) => {
-            const score = getScoreForPlayer(p.id);
-            const isCurrent = currentPlayer?.id === p.id;
-            return (
-              <div key={p.id} className={`flex items-center justify-between border rounded px-3 py-2 ${isCurrent ? 'bg-yellow-50 border-yellow-300' : ''}`}>
-                <div className="font-medium">{p.display_name}</div>
-                <div className="text-2xl font-mono">{score}</div>
-              </div>
-            );
-          })}
-        </div>
-        <div className="mt-2">
-          <div className="font-medium mb-1">Turns</div>
-          <div className="max-h-64 overflow-auto border rounded">
-            {(turns ?? []).map((t) => (
-              <div key={t.id} className="px-3 py-2 border-b text-sm flex items-center justify-between">
-                <div>{players.find((p) => p.id === t.player_id)?.display_name}</div>
-                <div className="font-mono">{t.busted ? 'BUST' : t.total_scored}</div>
-              </div>
-            ))}
-          </div>
-        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Match</CardTitle>
+            <CardDescription>
+              Start {match.start_score} • {match.finish.replace('_', ' ')} • Legs to win {match.legs_to_win}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 gap-2">
+              {orderPlayers.map((p) => {
+                const score = getScoreForPlayer(p.id);
+                const isCurrent = currentPlayer?.id === p.id;
+                const isActiveTurn = localTurn.playerId === p.id && localTurn.darts.length > 0;
+                return (
+                  <div key={p.id} className={`flex items-center justify-between rounded px-3 py-2 ${isCurrent ? 'bg-yellow-50 border border-yellow-300' : 'border'}`}>
+                    <div className="flex items-center gap-2">
+                      {isCurrent && <Badge>Up</Badge>}
+                      <div className="font-medium">{p.display_name}</div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {isActiveTurn && (
+                        <div className="flex gap-1">
+                          {localTurn.darts.map((d, idx) => (
+                            <Badge key={idx} variant="secondary">{d.label}</Badge>
+                          ))}
+                          {Array.from({ length: 3 - localTurn.darts.length }).map((_, idx) => (
+                            <Badge key={`p${idx}`} variant="outline">–</Badge>
+                          ))}
+                        </div>
+                      )}
+                      <div className="text-2xl font-mono min-w-[3ch] text-right">{score}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Turns</CardTitle>
+            <CardDescription>History of this leg</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="max-h-72 overflow-auto divide-y">
+              {(turns ?? []).map((t) => (
+                <div key={t.id} className="py-2 text-sm flex items-center justify-between">
+                  <div>{players.find((p) => p.id === t.player_id)?.display_name}</div>
+                  <div className="font-mono">{t.busted ? 'BUST' : t.total_scored}</div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
       </div>
       <div className="flex flex-col items-center gap-3">
         <Dartboard onHit={handleBoardClick} />

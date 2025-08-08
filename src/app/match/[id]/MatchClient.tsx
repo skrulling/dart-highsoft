@@ -524,7 +524,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                       )}
                       <div className="flex flex-col items-end">
                         <div className="text-2xl font-mono min-w-[3ch] text-right">{score}</div>
-                        <div className={`text-xs ${deco.cls}`}>{deco.emoji} {avg.toFixed(2)}</div>
+                        <div className={`text-xs ${deco.cls}`}>{deco.emoji} {avg.toFixed(2)} avg</div>
                       </div>
                     </div>
                   </div>

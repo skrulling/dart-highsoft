@@ -83,9 +83,10 @@ export default function Dartboard({ onHit }: DartboardProps) {
   const numberPositions = useMemo(() => {
     const items: { x: number; y: number; label: string }[] = [];
     const radius = DOUBLE_OUTER_RADIUS + 20;
+    const LABEL_ANGLE_OFFSET_DEG = -2; // small counter-clockwise tweak for visual centering
     for (let i = 0; i < 20; i++) {
-      // Centered label per wedge: use mid-angle (i*18 + 9), then minus 90 to start at top
-      const angle = (((i * 18 + 9) - 90) * Math.PI) / 180;
+      // Centered label per wedge: use mid-angle (i*18 + 9) plus minor tweak, then minus 90 to start at top
+      const angle = (((i * 18 + 9 + LABEL_ANGLE_OFFSET_DEG) - 90) * Math.PI) / 180;
       const x = cx + radius * Math.cos(angle);
       const y = cy + radius * Math.sin(angle);
       items.push({ x, y, label: String(segmentOrder[i]) });

@@ -187,6 +187,66 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     return { cls: 'text-red-600', emoji: '🙁' };
   }
 
+  function computeCheckoutSuggestions(remainingScore: number, dartsLeft: number, finish: FinishRule): string[][] {
+    const suggestions: string[][] = [];
+    if (dartsLeft <= 0) return suggestions;
+    if (remainingScore <= 0) return suggestions;
+    if (remainingScore > dartsLeft * 60) return suggestions; // impossible in remaining darts
+
+    const singles: { label: string; scored: number; isDouble: boolean }[] = [];
+    for (let n = 1; n <= 20; n++) singles.push({ label: `S${n}`, scored: n, isDouble: false });
+    singles.push({ label: 'SB', scored: 25, isDouble: false });
+
+    const doubles: { label: string; scored: number; isDouble: boolean }[] = [];
+    for (let n = 1; n <= 20; n++) doubles.push({ label: `D${n}`, scored: n * 2, isDouble: true });
+    doubles.push({ label: 'DB', scored: 50, isDouble: true });
+
+    const triples: { label: string; scored: number; isDouble: boolean }[] = [];
+    for (let n = 1; n <= 20; n++) triples.push({ label: `T${n}`, scored: n * 3, isDouble: false });
+
+    // Order preference for non-final darts: triples, singles (include bull), doubles
+    const midCandidates = [...triples, ...singles, ...doubles].sort((a, b) => b.scored - a.scored);
+
+    function dfs(rem: number, darts: number, path: string[]) {
+      if (suggestions.length >= 3) return;
+      if (rem < 0) return;
+      if (darts === 0) {
+        if (rem === 0) suggestions.push([...path]);
+        return;
+      }
+      // If this is the last dart
+      if (darts === 1) {
+        if (finish === 'double_out') {
+          for (const d of doubles) {
+            if (d.scored === rem) {
+              suggestions.push([...path, d.label]);
+              if (suggestions.length >= 3) return;
+            }
+          }
+        } else {
+          for (const c of [...triples, ...doubles, ...singles]) {
+            if (c.scored === rem) {
+              suggestions.push([...path, c.label]);
+              if (suggestions.length >= 3) return;
+            }
+          }
+        }
+        return;
+      }
+      // Mid dart choices
+      for (const c of midCandidates) {
+        if (c.scored > rem) continue;
+        path.push(c.label);
+        dfs(rem - c.scored, darts - 1, path);
+        path.pop();
+        if (suggestions.length >= 3) return;
+      }
+    }
+
+    dfs(remainingScore, dartsLeft, []);
+    return suggestions;
+  }
+
   async function startTurnIfNeeded() {
     if (!currentLeg || !currentPlayer) return null as string | null;
     if (ongoingTurnRef.current) return ongoingTurnRef.current.turnId;
@@ -468,6 +528,24 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                 <Badge key={`m${idx}`} variant="outline">–</Badge>
               ))}
             </div>
+          </div>
+          {/* Checkout suggestions */}
+          <div className="text-xs text-muted-foreground">
+            {(() => {
+              const rem = currentPlayer ? getScoreForPlayer(currentPlayer.id) : 0;
+              const dartsLeft = 3 - localTurn.darts.length;
+              const paths = computeCheckoutSuggestions(rem, dartsLeft, finishRule);
+              if (!paths.length || rem === 0) return null;
+              return (
+                <div className="flex flex-wrap gap-2">
+                  {paths.map((p, i) => (
+                    <span key={i} className="px-2 py-1 border rounded">
+                      {p.join(', ')}
+                    </span>
+                  ))}
+                </div>
+              );
+            })()}
           </div>
           <div className={`${matchWinnerId ? 'pointer-events-none opacity-50' : ''}`}>
             <MobileKeypad onHit={(seg) => handleBoardClick(0, 0, seg as unknown as ReturnType<typeof computeHit>)} />

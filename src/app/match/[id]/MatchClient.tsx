@@ -287,6 +287,84 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     }
   }
 
+  async function undoLastThrow() {
+    if (!currentLeg) return;
+    const supabase = await getSupabaseClient();
+    // If we have local darts in the ongoing turn, remove last one
+    if (ongoingTurnRef.current && ongoingTurnRef.current.darts.length > 0) {
+      const turnId = ongoingTurnRef.current.turnId;
+      const lastIndex = ongoingTurnRef.current.darts.length; // 1-based
+      const { error: delErr } = await supabase
+        .from('throws')
+        .delete()
+        .eq('turn_id', turnId)
+        .eq('dart_index', lastIndex);
+      if (delErr) {
+        alert(`Failed to undo throw: ${delErr.message}`);
+        return;
+      }
+      ongoingTurnRef.current.darts.pop();
+      setLocalTurn((prev) => ({ playerId: prev.playerId, darts: prev.darts.slice(0, -1) }));
+      return;
+    }
+
+    // Otherwise, remove the last persisted throw in the current leg
+    const { data: lastList, error: qErr } = await supabase
+      .from('throws')
+      .select('id, turn_id, dart_index, segment, scored, turns:turn_id!inner(leg_id, player_id, turn_number)')
+      .eq('turns.leg_id', currentLeg.id)
+      .order('turns.turn_number', { ascending: false })
+      .order('dart_index', { ascending: false })
+      .limit(1);
+    if (qErr) {
+      alert(`Failed to query last throw: ${qErr.message}`);
+      return;
+    }
+    const last = (lastList ?? [])[0] as
+      | { id: string; turn_id: string; dart_index: number; segment: string; scored: number; turns: { leg_id: string; player_id: string; turn_number: number } }
+      | undefined;
+    if (!last) return; // nothing to undo
+
+    const { error: delErr2 } = await supabase.from('throws').delete().eq('id', last.id);
+    if (delErr2) {
+      alert(`Failed to undo throw: ${delErr2.message}`);
+      return;
+    }
+
+    // Check remaining throws in that turn
+    const { data: remaining } = await supabase
+      .from('throws')
+      .select('dart_index, segment, scored')
+      .eq('turn_id', last.turn_id)
+      .order('dart_index');
+    const darts = ((remaining as { dart_index: number; segment: string; scored: number }[] | null) ?? []).map((r) => ({
+      scored: r.scored,
+      label: r.segment,
+      kind: 'Single' as SegmentResult['kind'], // kind not needed for local subtotal
+    }));
+
+    if (darts.length === 0) {
+      // Delete empty turn, reload
+      await supabase.from('turns').delete().eq('id', last.turn_id);
+      await loadAll();
+      return;
+    } else {
+      // Update turn total to current subtotal and mark not busted
+      const newTotal = darts.reduce((s, d) => s + d.scored, 0);
+      await supabase.from('turns').update({ total_scored: newTotal, busted: false }).eq('id', last.turn_id);
+      // Reopen local turn for that player
+      ongoingTurnRef.current = {
+        turnId: last.turn_id,
+        playerId: last.turns.player_id,
+        darts,
+        startScore: getScoreForPlayer(last.turns.player_id) + newTotal, // reverse the subtotal to original start
+      };
+      setLocalTurn({ playerId: last.turns.player_id, darts });
+      await loadAll();
+      return;
+    }
+  }
+
   const [rematchLoading, setRematchLoading] = useState(false);
 
   async function startRematch() {
@@ -474,7 +552,10 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         <div className={`${matchWinnerId ? 'pointer-events-none opacity-50' : ''}`}>
           <Dartboard onHit={handleBoardClick} />
         </div>
-        <div className="text-sm text-gray-600">Click the board to register throws</div>
+        <div className="flex items-center gap-3">
+          <Button variant="outline" onClick={undoLastThrow} disabled={!!matchWinnerId}>Undo dart</Button>
+          <div className="text-sm text-gray-600">Click the board to register throws</div>
+        </div>
       </div>
     </div>
   );

@@ -31,8 +31,9 @@ export default function Dartboard({ onHit }: DartboardProps) {
   const segments = useMemo(() => {
     const paths: { d: string; fill: string }[] = [];
     for (let i = 0; i < 20; i++) {
-      const startAngle = ((i * 18 - 90) * Math.PI) / 180; // start from top
-      const endAngle = (((i + 1) * 18 - 90) * Math.PI) / 180;
+      // Rotate wedges so 20 is centered up: shift by -9 degrees
+      const startAngle = (((i * 18 - 9) - 90) * Math.PI) / 180; // start from top with -9° shift
+      const endAngle = ((((i + 1) * 18 - 9) - 90) * Math.PI) / 180;
 
       const isDarkSingle = i % 2 === 0; // 20 wedge dark
       const singleFill = isDarkSingle ? COLORS.singleDark : COLORS.singleLight;
@@ -83,7 +84,8 @@ export default function Dartboard({ onHit }: DartboardProps) {
     const items: { x: number; y: number; label: string }[] = [];
     const radius = DOUBLE_OUTER_RADIUS + 20;
     for (let i = 0; i < 20; i++) {
-      const angle = ((i * 18 - 90) * Math.PI) / 180;
+      // Centered label per wedge: use mid-angle (i*18 + 9), then minus 90 to start at top
+      const angle = (((i * 18 + 9) - 90) * Math.PI) / 180;
       const x = cx + radius * Math.cos(angle);
       const y = cy + radius * Math.sin(angle);
       items.push({ x, y, label: String(segmentOrder[i]) });
@@ -107,7 +109,7 @@ export default function Dartboard({ onHit }: DartboardProps) {
       ))}
       {/* Thin radial separators for each wedge */}
       {Array.from({ length: 20 }).map((_, i) => {
-        const angle = ((i * 18 - 90) * Math.PI) / 180;
+        const angle = (((i * 18 - 9) - 90) * Math.PI) / 180;
         const x1 = cx + OUTER_BULL_RADIUS * Math.cos(angle);
         const y1 = cy + OUTER_BULL_RADIUS * Math.sin(angle);
         const x2 = cx + DOUBLE_OUTER_RADIUS * Math.cos(angle);

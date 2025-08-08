@@ -33,7 +33,9 @@ export function polarFromPoint(x: number, y: number, cx: number, cy: number) {
 }
 
 export function getSegmentByAngle(angleFromTopCw: number): number {
-  const index = Math.floor(angleFromTopCw / 18) % 20;
+  // Offset by 9 degrees so that 20 is centered at the top (0°)
+  const adjusted = (angleFromTopCw + 9) % 360;
+  const index = Math.floor(adjusted / 18) % 20;
   return SEGMENT_ORDER[index];
 }
 

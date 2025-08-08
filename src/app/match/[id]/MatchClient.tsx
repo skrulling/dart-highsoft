@@ -172,6 +172,21 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     return current;
   }
 
+  function getAvgForPlayer(playerId: string): number {
+    const legTurns = turns.filter((t) => t.player_id === playerId && t.leg_id === currentLeg?.id);
+    const valid = legTurns.filter((t) => !t.busted);
+    if (valid.length === 0) return 0;
+    const sum = valid.reduce((s, t) => s + (t.total_scored || 0), 0);
+    return sum / valid.length;
+  }
+
+  function decorateAvg(avg: number): { cls: string; emoji: string } {
+    if (avg > 60) return { cls: 'text-purple-600', emoji: '👑' };
+    if (avg >= 40) return { cls: 'text-green-600', emoji: '🙂' };
+    if (avg >= 32) return { cls: 'text-muted-foreground', emoji: '😐' };
+    return { cls: 'text-red-600', emoji: '🙁' };
+  }
+
   async function startTurnIfNeeded() {
     if (!currentLeg || !currentPlayer) return null as string | null;
     if (ongoingTurnRef.current) return ongoingTurnRef.current.turnId;
@@ -481,6 +496,8 @@ export default function MatchClient({ matchId }: { matchId: string }) {
             <div className="grid grid-cols-1 gap-2">
               {orderPlayers.map((p) => {
                 const score = getScoreForPlayer(p.id);
+                const avg = getAvgForPlayer(p.id);
+                const deco = decorateAvg(avg);
                 const isCurrent = currentPlayer?.id === p.id;
                 const isActiveTurn = localTurn.playerId === p.id && localTurn.darts.length > 0;
                 return (
@@ -505,7 +522,10 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                           ))}
                         </div>
                       )}
-                      <div className="text-2xl font-mono min-w-[3ch] text-right">{score}</div>
+                      <div className="flex flex-col items-end">
+                        <div className="text-2xl font-mono min-w-[3ch] text-right">{score}</div>
+                        <div className={`text-xs ${deco.cls}`}>{deco.emoji} {avg.toFixed(2)}</div>
+                      </div>
                     </div>
                   </div>
                 );

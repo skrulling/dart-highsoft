@@ -97,7 +97,7 @@ export default function Dartboard({ onHit }: DartboardProps) {
     <svg
       role="img"
       viewBox={`0 0 ${viewBox} ${viewBox}`}
-      className="w-full max-w-[500px] cursor-crosshair select-none drop-shadow"
+      className="w-full max-w-[500px] cursor-pointer select-none drop-shadow"
       onClick={onClick}
     >
       {/* Number ring background */}

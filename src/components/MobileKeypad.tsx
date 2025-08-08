@@ -3,6 +3,7 @@
 import { segmentFromSelection, type SegmentResult } from '@/utils/dartboard';
 import { Button } from './ui/button';
 import { useState } from 'react';
+import { triggerHaptic } from '@/utils/haptics';
 
 type MobileKeypadProps = {
   onHit: (result: SegmentResult) => void;
@@ -14,6 +15,7 @@ export default function MobileKeypad({ onHit }: MobileKeypadProps) {
   const applyMod = (value: number) => {
     const m = mod === 'none' ? 'S' : mod;
     onHit(segmentFromSelection(m, value));
+    triggerHaptic(10);
   };
 
   return (
@@ -23,12 +25,14 @@ export default function MobileKeypad({ onHit }: MobileKeypadProps) {
         <Button
           onClick={() => setMod((m) => (m === 'D' ? 'none' : 'D'))}
           variant={mod === 'D' ? 'default' : 'outline'}
+          className="cursor-pointer"
         >
           Double
         </Button>
         <Button
           onClick={() => setMod((m) => (m === 'T' ? 'none' : 'T'))}
           variant={mod === 'T' ? 'default' : 'outline'}
+          className="cursor-pointer"
         >
           Triple
         </Button>
@@ -36,15 +40,15 @@ export default function MobileKeypad({ onHit }: MobileKeypadProps) {
       {/* Numbers */}
       <div className="grid grid-cols-5 gap-2">
         {numbers.map((n) => (
-          <Button key={n} className="py-6" onClick={() => applyMod(n)}>
+          <Button key={n} className="py-6 cursor-pointer" onClick={() => applyMod(n)}>
             {n}
           </Button>
         ))}
       </div>
       {/* Bulls */}
       <div className="grid grid-cols-2 gap-2">
-        <Button className="py-6" onClick={() => onHit(segmentFromSelection('SB'))}>Outer Bull (25)</Button>
-        <Button className="py-6" onClick={() => onHit(segmentFromSelection('DB'))}>Inner Bull (50)</Button>
+        <Button className="py-6 cursor-pointer" onClick={() => { onHit(segmentFromSelection('SB')); triggerHaptic(10); }}>Outer Bull (25)</Button>
+        <Button className="py-6 cursor-pointer" onClick={() => { onHit(segmentFromSelection('DB')); triggerHaptic(10); }}>Inner Bull (50)</Button>
       </div>
     </div>
   );

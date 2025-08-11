@@ -188,10 +188,10 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   }
 
   function computeCheckoutSuggestions(remainingScore: number, dartsLeft: number, finish: FinishRule): string[][] {
-    const suggestions: string[][] = [];
-    if (dartsLeft <= 0) return suggestions;
-    if (remainingScore <= 0) return suggestions;
-    if (remainingScore > dartsLeft * 60) return suggestions; // impossible in remaining darts
+    const finalSuggestions: string[][] = [];
+    if (dartsLeft <= 0) return finalSuggestions;
+    if (remainingScore <= 0) return finalSuggestions;
+    if (remainingScore > dartsLeft * 60) return finalSuggestions; // impossible in remaining darts
 
     type Option = { label: string; scored: number; isDouble: boolean };
 
@@ -206,60 +206,123 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     const triples: Option[] = [];
     for (let n = 1; n <= 20; n++) triples.push({ label: `T${n}`, scored: n * 3, isDouble: false });
 
-    // Preference order for searching: big scores first to propose common routes,
-    // but allow early finishes by checking newRem === 0 at each step.
-    const orderedOptions: Option[] = [...triples, ...singles, ...doubles].sort((a, b) => b.scored - a.scored);
+    const orderedTriples = [20, 19, 18, 17, 16, 15, 14, 13, 12, 11];
+    const orderedSingles = [20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 25];
+    const preferredDoublesPoints = [32, 40, 36, 24, 20, 16, 12, 8, 4, 50]; // favor D16/D20 lines, include DB
 
-    const seen = new Set<string>();
+    function doubleLabelFromPoints(points: number): string | null {
+      if (points === 50) return 'DB';
+      if (points % 2 !== 0) return null;
+      const n = points / 2;
+      if (n >= 1 && n <= 20) return `D${n}`;
+      return null;
+    }
 
-    function pushSuggestion(path: string[]) {
+    function addUnique(path: string[]) {
       const key = path.join('>');
-      if (!seen.has(key)) {
-        seen.add(key);
-        suggestions.push(path);
+      if (!finalSuggestions.some((p) => p.join('>') === key)) {
+        finalSuggestions.push(path);
       }
     }
 
+    // Pro-style heuristics for double out
+    function twoDartPlanDoubleOut(rem: number): string[] | null {
+      // Direct finish if already on an ideal double
+      const direct = doubleLabelFromPoints(rem);
+      if (direct && rem <= 50) return [direct];
+
+      // Try single to leave preferred double
+      for (const s of orderedSingles) {
+        const toLeave = rem - s;
+        if (toLeave <= 0) continue;
+        if (!preferredDoublesPoints.includes(toLeave)) continue;
+        const dbl = doubleLabelFromPoints(toLeave);
+        if (!dbl) continue;
+        return [s === 25 ? 'SB' : `S${s}`, dbl];
+      }
+
+      // Try triple to leave preferred double
+      for (const t of orderedTriples) {
+        const toLeave = rem - t * 3;
+        if (toLeave <= 0) continue;
+        if (!preferredDoublesPoints.includes(toLeave)) continue;
+        const dbl = doubleLabelFromPoints(toLeave);
+        if (!dbl) continue;
+        return [`T${t}`, dbl];
+      }
+      return null;
+    }
+
+    function threeDartPlanDoubleOut(rem: number): string[] | null {
+      // Try a triple first to set up a two-dart finish
+      for (const t of orderedTriples) {
+        const afterT = rem - t * 3;
+        if (afterT <= 1) continue;
+        const plan2 = twoDartPlanDoubleOut(afterT);
+        if (plan2) return [`T${t}`, ...plan2];
+      }
+      // Try a single first as a safe setup then two-dart finish
+      for (const s of orderedSingles) {
+        const afterS = rem - s;
+        if (afterS <= 1) continue;
+        const plan2 = twoDartPlanDoubleOut(afterS);
+        if (plan2) return [s === 25 ? 'SB' : `S${s}`, ...plan2];
+      }
+      return null;
+    }
+
+    // Build pro suggestions first
+    if (finish === 'double_out') {
+      if (dartsLeft >= 1) {
+        const direct = doubleLabelFromPoints(remainingScore);
+        if (direct) addUnique([direct]);
+      }
+      if (dartsLeft >= 2) {
+        const plan2 = twoDartPlanDoubleOut(remainingScore);
+        if (plan2) addUnique(plan2);
+      }
+      if (dartsLeft >= 3) {
+        const plan3 = threeDartPlanDoubleOut(remainingScore);
+        if (plan3) addUnique(plan3);
+      }
+    }
+
+    // Fallback DFS to fill remaining options or for single-out mode
+    const dfsSuggestions: string[][] = [];
+    const orderedOptions: Option[] = [...triples, ...singles, ...doubles].sort((a, b) => b.scored - a.scored);
+
     function dfs(rem: number, dartsRemaining: number, path: string[]) {
-      if (suggestions.length >= 3) return;
+      if (dfsSuggestions.length >= 5) return; // gather more to merge later
       if (rem < 0) return;
       if (rem === 0) {
-        // Finished early in fewer darts
-        if (path.length > 0) pushSuggestion([...path]);
+        if (path.length > 0) dfsSuggestions.push([...path]);
         return;
       }
       if (dartsRemaining === 0) return;
 
       for (const opt of orderedOptions) {
         if (opt.scored > rem) continue;
-
         const newRem = rem - opt.scored;
-
-        // If this dart would finish the leg now
         if (newRem === 0) {
-          if (finish === 'double_out' && !opt.isDouble) continue; // must end on a double
-          pushSuggestion([...path, opt.label]);
-          if (suggestions.length >= 3) return;
+          if (finish === 'double_out' && !opt.isDouble) continue;
+          dfsSuggestions.push([...path, opt.label]);
+          if (dfsSuggestions.length >= 5) return;
           continue;
         }
-
-        // If this is not the last dart, ensure we don't leave 1 in double-out
         if (dartsRemaining > 1 && finish === 'double_out' && newRem === 1) continue;
-
-        // If this is the last dart and we haven't finished, skip unless it can finish exactly
         if (dartsRemaining === 1) continue;
-
         dfs(newRem, dartsRemaining - 1, [...path, opt.label]);
-        if (suggestions.length >= 3) return;
+        if (dfsSuggestions.length >= 5) return;
       }
     }
 
     dfs(remainingScore, dartsLeft, []);
 
-    // Sort by fewest darts first, then by a simple heuristic: prefer ending on higher scores
-    suggestions.sort((a, b) => (a.length - b.length) || (b.join(',').length - a.join(',').length));
+    // Merge pro + dfs, unique, then sort by fewest darts
+    for (const p of dfsSuggestions) addUnique(p);
+    finalSuggestions.sort((a, b) => a.length - b.length);
 
-    return suggestions.slice(0, 3);
+    return finalSuggestions.slice(0, 3);
   }
 
   async function startTurnIfNeeded() {

@@ -11,7 +11,12 @@ export default function Home() {
     (async () => {
       try {
         const supabase = await getSupabaseClient();
-        const { data } = await supabase.from('player_summary').select('*').order('wins', { ascending: false }).limit(10);
+        const { data } = await supabase
+          .from('player_summary')
+          .select('*')
+          .not('display_name', 'ilike', '%test%')
+          .order('wins', { ascending: false })
+          .limit(10);
         setLeaders(((data as unknown) as { player_id: string; display_name: string; wins: number; avg_per_turn: number }[]) ?? []);
       } catch {
         setLeaders([]);

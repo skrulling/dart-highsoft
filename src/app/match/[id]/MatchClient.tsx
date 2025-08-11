@@ -543,18 +543,16 @@ export default function MatchClient({ matchId }: { matchId: string }) {
               const dartsLeft = 3 - localTurn.darts.length;
               const paths = computeCheckoutSuggestions(rem, dartsLeft, finishRule);
               return (
-                <div className="flex flex-wrap gap-2 min-h-[2.25rem]">
-                  {paths.length > 0 && rem !== 0 ? (
-                    paths.map((p, i) => (
-                      <span key={i} className="px-2 py-1 border rounded">
-                        {p.join(', ')}
-                      </span>
-                    ))
-                  ) : (
-                    <span className="px-2 py-1 border rounded invisible" aria-hidden>
-                      placeholder
-                    </span>
-                  )}
+                <div className="flex flex-wrap items-center gap-2 min-h-6">
+                  {paths.length > 0 && rem !== 0
+                    ? paths.map((p, i) => (
+                        <Badge key={i} variant="outline">{p.join(', ')}</Badge>
+                      ))
+                    : (
+                        <Badge variant="outline" className="invisible" aria-hidden>
+                          –
+                        </Badge>
+                      )}
                 </div>
               );
             })()}

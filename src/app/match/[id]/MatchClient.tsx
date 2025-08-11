@@ -68,6 +68,12 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     darts: { scored: number; label: string; kind: SegmentResult['kind'] }[];
   }>({ playerId: null, darts: [] });
 
+  // Edit throws modal state
+  const [editOpen, setEditOpen] = useState(false);
+  type EditableThrow = { id: string; turn_id: string; dart_index: number; segment: string; scored: number; player_id: string; turn_number: number };
+  const [editingThrows, setEditingThrows] = useState<EditableThrow[]>([]);
+  const [selectedThrowId, setSelectedThrowId] = useState<string | null>(null);
+
   const loadAll = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -128,6 +134,8 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   useEffect(() => {
     void loadAll();
   }, [loadAll]);
+
+  const playerById = useMemo(() => Object.fromEntries(players.map((p) => [p.id, p])), [players]);
 
   const currentLeg = useMemo(() => (legs ?? []).find((l) => !l.winner_player_id) ?? legs[legs.length - 1], [legs]);
 
@@ -535,6 +543,134 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     }
   }
 
+  // Open edit modal and load throws of current leg
+  const openEditModal = useCallback(async () => {
+    if (!currentLeg) return;
+    const supabase = await getSupabaseClient();
+    const { data, error } = await supabase
+      .from('throws')
+      .select('id, turn_id, dart_index, segment, scored, turns:turn_id!inner(leg_id, turn_number, player_id)')
+      .eq('turns.leg_id', currentLeg.id)
+      .order('turns.turn_number')
+      .order('dart_index');
+    if (error) {
+      alert(error.message);
+      return;
+    }
+    type ThrowRow = { id: string; turn_id: string; dart_index: number; segment: string; scored: number; turns: { leg_id: string; turn_number: number; player_id: string } };
+    const rows = ((data ?? []) as unknown as ThrowRow[]).map((r) => ({
+      id: r.id,
+      turn_id: r.turn_id,
+      dart_index: r.dart_index,
+      segment: r.segment,
+      scored: r.scored,
+      player_id: r.turns.player_id,
+      turn_number: r.turns.turn_number,
+    } satisfies EditableThrow));
+    setEditingThrows(rows);
+    setSelectedThrowId(null);
+    setEditOpen(true);
+  }, [currentLeg]);
+
+  // Recompute leg turns totals and busted flags after an edit
+  const recomputeLegTurns = useCallback(async () => {
+    if (!currentLeg || !match) return;
+    const supabase = await getSupabaseClient();
+    // Load turns and throws for leg
+    const [{ data: tData }, { data: thrData }] = await Promise.all([
+      supabase.from('turns').select('id, player_id, turn_number').eq('leg_id', currentLeg.id).order('turn_number'),
+      supabase
+        .from('throws')
+        .select('id, turn_id, dart_index, segment, scored')
+        .in('turn_id', (turns ?? []).filter((t) => t.leg_id === currentLeg.id).map((t) => t.id))
+        .order('dart_index'),
+    ]);
+
+    const legTurns = ((tData ?? []) as { id: string; player_id: string; turn_number: number }[]).sort(
+      (a, b) => a.turn_number - b.turn_number
+    );
+    const throwsByTurn = new Map<string, { segment: string; scored: number; dart_index: number }[]>();
+    for (const thr of ((thrData ?? []) as { id: string; turn_id: string; dart_index: number; segment: string; scored: number }[])) {
+      if (!throwsByTurn.has(thr.turn_id)) throwsByTurn.set(thr.turn_id, []);
+      throwsByTurn.get(thr.turn_id)!.push({ segment: thr.segment, scored: thr.scored, dart_index: thr.dart_index });
+    }
+    for (const arr of throwsByTurn.values()) arr.sort((a, b) => a.dart_index - b.dart_index);
+
+    // Initialize per-player current scores
+    const perPlayerScore = new Map<string, number>();
+    for (const p of players) perPlayerScore.set(p.id, parseInt(match.start_score, 10));
+
+    const turnUpdates: { id: string; total_scored: number; busted: boolean }[] = [];
+    for (const t of legTurns) {
+      const start = perPlayerScore.get(t.player_id) ?? parseInt(match.start_score, 10);
+      let current = start;
+      let total = 0;
+      let busted = false;
+      let finished = false;
+      const thrList = throwsByTurn.get(t.id) ?? [];
+      // Helper to construct full SegmentResult from stored label
+      const segmentResultFromLabel = (label: string): SegmentResult => {
+        if (label === 'Miss') return { kind: 'Miss', scored: 0, label: 'Miss' };
+        if (label === 'SB') return { kind: 'OuterBull', scored: 25, label: 'SB' };
+        if (label === 'DB') return { kind: 'InnerBull', scored: 50, label: 'DB' };
+        const m = label.match(/^([SDT])(\d{1,2})$/);
+        if (m) {
+          const mod = m[1] as 'S' | 'D' | 'T';
+          const n = parseInt(m[2]!, 10);
+          if (mod === 'S') return { kind: 'Single', value: n, scored: n, label };
+          if (mod === 'D') return { kind: 'Double', value: n, scored: n * 2, label };
+          return { kind: 'Triple', value: n, scored: n * 3, label };
+        }
+        return { kind: 'Miss', scored: 0, label: 'Miss' };
+      };
+
+      for (const thr of thrList) {
+        if (finished || busted) break;
+        const seg = segmentResultFromLabel(thr.segment);
+        const outcome = applyThrow(current, seg, finishRule);
+        if (outcome.busted) {
+          busted = true;
+          total = 0;
+          current = start; // revert
+          break;
+        }
+        total += current - outcome.newScore;
+        current = outcome.newScore;
+        if (outcome.finished) finished = true;
+      }
+      // Apply end-of-turn score if not busted
+      if (!busted) {
+        perPlayerScore.set(t.player_id, current);
+      }
+      turnUpdates.push({ id: t.id, total_scored: total, busted });
+    }
+
+    // Persist only changed values
+    await Promise.all(
+      turnUpdates.map((u) => supabase.from('turns').update({ total_scored: u.total_scored, busted: u.busted }).eq('id', u.id))
+    );
+  }, [currentLeg, finishRule, match, players, turns]);
+
+  // Update a specific throw with a new segment
+  const updateSelectedThrow = useCallback(
+    async (seg: SegmentResult) => {
+      if (!selectedThrowId) return;
+      const supabase = await getSupabaseClient();
+      const { error } = await supabase
+        .from('throws')
+        .update({ segment: seg.label, scored: seg.scored })
+        .eq('id', selectedThrowId);
+      if (error) {
+        alert(error.message);
+        return;
+      }
+      await recomputeLegTurns();
+      await loadAll();
+      await openEditModal(); // reload list
+    },
+    [selectedThrowId, recomputeLegTurns, loadAll, openEditModal]
+  );
+
   const [rematchLoading, setRematchLoading] = useState(false);
 
   async function startRematch() {
@@ -665,6 +801,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         </div>
         <div className="flex items-center gap-3 mt-2">
           <Button variant="outline" onClick={undoLastThrow} disabled={!!matchWinnerId}>Undo dart</Button>
+          <Button variant="outline" onClick={openEditModal} disabled={!currentLeg}>Edit throws</Button>
           <div className="text-sm text-gray-600 hidden md:block">Click the board to register throws</div>
         </div>
         {matchWinnerId && (
@@ -692,6 +829,76 @@ export default function MatchClient({ matchId }: { matchId: string }) {
 
       {/* Match info and summaries */}
       <div className="space-y-4">
+        {/* Edit throws modal */}
+        {editOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/50" onClick={() => setEditOpen(false)} />
+            <div className="relative w-[min(700px,95vw)] max-h-[90vh] overflow-auto rounded-lg border bg-background p-4 shadow-xl">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-lg font-semibold">Edit throws</div>
+                <Button variant="ghost" onClick={() => setEditOpen(false)}>Close</Button>
+              </div>
+              <div className="space-y-3">
+                <div className="text-sm text-muted-foreground">Tap a throw, then use the keypad to set a new value.</div>
+                <div className="max-h-64 overflow-auto rounded border divide-y">
+                  {(() => {
+                    const byTurn = new Map<number, EditableThrow[]>();
+                    for (const r of editingThrows) {
+                      if (!byTurn.has(r.turn_number)) byTurn.set(r.turn_number, [] as EditableThrow[]);
+                      byTurn.get(r.turn_number)!.push(r);
+                    }
+                    const ordered = Array.from(byTurn.entries()).sort((a, b) => a[0] - b[0]);
+                    return ordered.length > 0 ? (
+                      <div>
+                        {ordered.map(([tn, list]) => (
+                          <div key={tn} className="p-2">
+                            <div className="mb-2 flex items-center justify-between text-sm">
+                              <div className="font-medium">Turn {tn}</div>
+                              <div className="text-muted-foreground">
+                                {playerById[list[0].player_id]?.display_name ?? 'Player'}
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-3 gap-2">
+                              {list
+                                .sort((a, b) => a.dart_index - b.dart_index)
+                                .map((thr) => {
+                                  const isSel = selectedThrowId === thr.id;
+                                  return (
+                                    <button
+                                      key={thr.id}
+                                      className={`rounded border px-3 py-2 text-left ${
+                                        isSel ? 'bg-primary/10 border-primary' : 'hover:bg-accent'
+                                      }`}
+                                      onClick={() => setSelectedThrowId(thr.id)}
+                                    >
+                                      <div className="text-xs text-muted-foreground">Dart {thr.dart_index}</div>
+                                      <div className="font-mono">{thr.segment}</div>
+                                    </button>
+                                  );
+                                })}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="p-4 text-center text-sm text-muted-foreground">No throws yet.</div>
+                    );
+                  })()}
+                </div>
+                <div className="mt-3">
+                  {selectedThrowId ? (
+                    <div className="space-y-2">
+                      <div className="text-sm text-muted-foreground">Select a new segment:</div>
+                      <MobileKeypad onHit={(seg) => { void updateSelectedThrow(seg); }} />
+                    </div>
+                  ) : (
+                    <div className="rounded border p-4 text-center text-sm text-muted-foreground">Select a throw above to edit</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
         <Card>
           <CardHeader>
             <CardTitle>Match</CardTitle>

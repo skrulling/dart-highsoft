@@ -33,4 +33,5 @@ before delete on public.players
 for each row execute function public.cascade_delete_player_matches();
 
 -- 3) RLS policy to allow deleting players (adjust in production as needed)
-create policy if not exists "public delete" on public.players for delete using (true);
+drop policy if exists "public delete" on public.players;
+create policy "public delete" on public.players for delete using (true);

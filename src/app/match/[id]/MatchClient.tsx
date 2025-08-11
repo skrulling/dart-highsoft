@@ -193,58 +193,73 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     if (remainingScore <= 0) return suggestions;
     if (remainingScore > dartsLeft * 60) return suggestions; // impossible in remaining darts
 
-    const singles: { label: string; scored: number; isDouble: boolean }[] = [];
+    type Option = { label: string; scored: number; isDouble: boolean };
+
+    const singles: Option[] = [];
     for (let n = 1; n <= 20; n++) singles.push({ label: `S${n}`, scored: n, isDouble: false });
     singles.push({ label: 'SB', scored: 25, isDouble: false });
 
-    const doubles: { label: string; scored: number; isDouble: boolean }[] = [];
+    const doubles: Option[] = [];
     for (let n = 1; n <= 20; n++) doubles.push({ label: `D${n}`, scored: n * 2, isDouble: true });
     doubles.push({ label: 'DB', scored: 50, isDouble: true });
 
-    const triples: { label: string; scored: number; isDouble: boolean }[] = [];
+    const triples: Option[] = [];
     for (let n = 1; n <= 20; n++) triples.push({ label: `T${n}`, scored: n * 3, isDouble: false });
 
-    // Order preference for non-final darts: triples, singles (include bull), doubles
-    const midCandidates = [...triples, ...singles, ...doubles].sort((a, b) => b.scored - a.scored);
+    // Preference order for searching: big scores first to propose common routes,
+    // but allow early finishes by checking newRem === 0 at each step.
+    const orderedOptions: Option[] = [...triples, ...singles, ...doubles].sort((a, b) => b.scored - a.scored);
 
-    function dfs(rem: number, darts: number, path: string[]) {
+    const seen = new Set<string>();
+
+    function pushSuggestion(path: string[]) {
+      const key = path.join('>');
+      if (!seen.has(key)) {
+        seen.add(key);
+        suggestions.push(path);
+      }
+    }
+
+    function dfs(rem: number, dartsRemaining: number, path: string[]) {
       if (suggestions.length >= 3) return;
       if (rem < 0) return;
-      if (darts === 0) {
-        if (rem === 0) suggestions.push([...path]);
+      if (rem === 0) {
+        // Finished early in fewer darts
+        if (path.length > 0) pushSuggestion([...path]);
         return;
       }
-      // If this is the last dart
-      if (darts === 1) {
-        if (finish === 'double_out') {
-          for (const d of doubles) {
-            if (d.scored === rem) {
-              suggestions.push([...path, d.label]);
-              if (suggestions.length >= 3) return;
-            }
-          }
-        } else {
-          for (const c of [...triples, ...doubles, ...singles]) {
-            if (c.scored === rem) {
-              suggestions.push([...path, c.label]);
-              if (suggestions.length >= 3) return;
-            }
-          }
+      if (dartsRemaining === 0) return;
+
+      for (const opt of orderedOptions) {
+        if (opt.scored > rem) continue;
+
+        const newRem = rem - opt.scored;
+
+        // If this dart would finish the leg now
+        if (newRem === 0) {
+          if (finish === 'double_out' && !opt.isDouble) continue; // must end on a double
+          pushSuggestion([...path, opt.label]);
+          if (suggestions.length >= 3) return;
+          continue;
         }
-        return;
-      }
-      // Mid dart choices
-      for (const c of midCandidates) {
-        if (c.scored > rem) continue;
-        path.push(c.label);
-        dfs(rem - c.scored, darts - 1, path);
-        path.pop();
+
+        // If this is not the last dart, ensure we don't leave 1 in double-out
+        if (dartsRemaining > 1 && finish === 'double_out' && newRem === 1) continue;
+
+        // If this is the last dart and we haven't finished, skip unless it can finish exactly
+        if (dartsRemaining === 1) continue;
+
+        dfs(newRem, dartsRemaining - 1, [...path, opt.label]);
         if (suggestions.length >= 3) return;
       }
     }
 
     dfs(remainingScore, dartsLeft, []);
-    return suggestions;
+
+    // Sort by fewest darts first, then by a simple heuristic: prefer ending on higher scores
+    suggestions.sort((a, b) => (a.length - b.length) || (b.join(',').length - a.join(',').length));
+
+    return suggestions.slice(0, 3);
   }
 
   async function startTurnIfNeeded() {

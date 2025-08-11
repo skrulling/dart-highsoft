@@ -576,15 +576,27 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   const recomputeLegTurns = useCallback(async () => {
     if (!currentLeg || !match) return;
     const supabase = await getSupabaseClient();
-    // Load turns and throws for leg
-    const [{ data: tData }, { data: thrData }] = await Promise.all([
-      supabase.from('turns').select('id, player_id, turn_number').eq('leg_id', currentLeg.id).order('turn_number'),
-      supabase
-        .from('throws')
-        .select('id, turn_id, dart_index, segment, scored')
-        .in('turn_id', (turns ?? []).filter((t) => t.leg_id === currentLeg.id).map((t) => t.id))
-        .order('dart_index'),
-    ]);
+    // Load turns for leg
+    const { data: tData, error: tErr } = await supabase
+      .from('turns')
+      .select('id, player_id, turn_number')
+      .eq('leg_id', currentLeg.id)
+      .order('turn_number');
+    if (tErr) {
+      alert(tErr.message);
+      return;
+    }
+    const turnIds = ((tData ?? []) as { id: string }[]).map((t) => t.id);
+    // Load throws for those turns
+    const { data: thrData, error: thrErr } = await supabase
+      .from('throws')
+      .select('id, turn_id, dart_index, segment, scored')
+      .in('turn_id', turnIds)
+      .order('dart_index');
+    if (thrErr) {
+      alert(thrErr.message);
+      return;
+    }
 
     const legTurns = ((tData ?? []) as { id: string; player_id: string; turn_number: number }[]).sort(
       (a, b) => a.turn_number - b.turn_number

@@ -484,7 +484,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       .from('throws')
       .select('id, turn_id, dart_index, segment, scored, turns:turn_id!inner(leg_id, player_id, turn_number)')
       .eq('turns.leg_id', currentLeg.id)
-      .order('turns.turn_number', { ascending: false })
+      .order('turn_number', { ascending: false, foreignTable: 'turns' })
       .order('dart_index', { ascending: false })
       .limit(1);
     if (qErr) {
@@ -551,7 +551,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       .from('throws')
       .select('id, turn_id, dart_index, segment, scored, turns:turn_id!inner(leg_id, turn_number, player_id)')
       .eq('turns.leg_id', currentLeg.id)
-      .order('turns.turn_number')
+      .order('turn_number', { foreignTable: 'turns' })
       .order('dart_index');
     if (error) {
       alert(error.message);

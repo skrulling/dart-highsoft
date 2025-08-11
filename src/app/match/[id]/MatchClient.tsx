@@ -517,10 +517,17 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       {/* Scoring input at top (mobile keypad or desktop board) */}
       <div className="w-full">
         {/* Mobile: player indicator + keypad at top */}
-        <div className="md:hidden space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="font-medium">{currentPlayer?.display_name ?? '—'}</div>
-            <div className="flex gap-2">
+          <div className="md:hidden space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="font-medium">{currentPlayer?.display_name ?? '—'}</div>
+                {currentPlayer && (
+                  <span className="rounded-full border border-emerald-400/60 bg-emerald-50 px-3 py-1 text-sm font-mono text-emerald-700 shadow-sm dark:border-emerald-700/60 dark:bg-emerald-900/30 dark:text-emerald-200">
+                    {getScoreForPlayer(currentPlayer.id)} pts
+                  </span>
+                )}
+              </div>
+              <div className="flex gap-2">
               {localTurn.darts.map((d, idx) => (
                 <Badge key={idx} variant="secondary">{d.label}</Badge>
               ))}
@@ -549,6 +556,17 @@ export default function MatchClient({ matchId }: { matchId: string }) {
           </div>
           <div className={`${matchWinnerId ? 'pointer-events-none opacity-50' : ''}`}>
             <MobileKeypad onHit={(seg) => handleBoardClick(0, 0, seg as unknown as ReturnType<typeof computeHit>)} />
+          </div>
+        </div>
+        {/* Desktop: current player header */}
+        <div className="hidden md:flex items-center justify-center mt-2">
+          <div className="flex items-center gap-3">
+            <div className="text-lg font-medium">{currentPlayer?.display_name ?? '—'}</div>
+            {currentPlayer && (
+              <span className="rounded-full border border-emerald-400/60 bg-emerald-50 px-3 py-1 text-sm font-mono text-emerald-700 shadow-sm dark:border-emerald-700/60 dark:bg-emerald-900/30 dark:text-emerald-200">
+                {getScoreForPlayer(currentPlayer.id)} pts
+              </span>
+            )}
           </div>
         </div>
         {/* Desktop: board */}

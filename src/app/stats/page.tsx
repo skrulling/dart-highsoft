@@ -21,8 +21,16 @@ export default function StatsPage() {
       try {
         const supabase = await getSupabaseClient();
         const [{ data: s }, { data: p }, { data: l }] = await Promise.all([
-          supabase.from('player_summary').select('*').order('wins', { ascending: false }),
-          supabase.from('players').select('id, display_name').order('display_name'),
+          supabase
+            .from('player_summary')
+            .select('*')
+            .not('display_name', 'ilike', '%test%')
+            .order('wins', { ascending: false }),
+          supabase
+            .from('players')
+            .select('id, display_name')
+            .not('display_name', 'ilike', '%test%')
+            .order('display_name'),
           supabase.from('legs').select('*').order('created_at'),
         ]);
         setSummary(((s as unknown) as SummaryRow[]) ?? []);

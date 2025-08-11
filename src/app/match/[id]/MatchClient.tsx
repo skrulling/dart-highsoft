@@ -542,14 +542,19 @@ export default function MatchClient({ matchId }: { matchId: string }) {
               const rem = currentPlayer ? getScoreForPlayer(currentPlayer.id) : 0;
               const dartsLeft = 3 - localTurn.darts.length;
               const paths = computeCheckoutSuggestions(rem, dartsLeft, finishRule);
-              if (!paths.length || rem === 0) return null;
               return (
-                <div className="flex flex-wrap gap-2">
-                  {paths.map((p, i) => (
-                    <span key={i} className="px-2 py-1 border rounded">
-                      {p.join(', ')}
+                <div className="flex flex-wrap gap-2 min-h-[2.25rem]">
+                  {paths.length > 0 && rem !== 0 ? (
+                    paths.map((p, i) => (
+                      <span key={i} className="px-2 py-1 border rounded">
+                        {p.join(', ')}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="px-2 py-1 border rounded invisible" aria-hidden>
+                      placeholder
                     </span>
-                  ))}
+                  )}
                 </div>
               );
             })()}

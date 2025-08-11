@@ -559,6 +559,27 @@ export default function MatchClient({ matchId }: { matchId: string }) {
           <Button variant="outline" onClick={undoLastThrow} disabled={!!matchWinnerId}>Undo dart</Button>
           <div className="text-sm text-gray-600 hidden md:block">Click the board to register throws</div>
         </div>
+        {matchWinnerId && (
+          <Card className="mt-4 overflow-hidden border-2 border-green-500/80 shadow-md ring-2 ring-green-400/30 bg-gradient-to-br from-emerald-50 to-green-50 dark:from-emerald-900/20 dark:to-green-900/10">
+            <CardContent className="py-6">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <span className="text-3xl animate-bounce">🏆</span>
+                  <div>
+                    <div className="text-xs uppercase tracking-wide text-green-700 dark:text-green-300">Winner</div>
+                    <div className="text-2xl font-extrabold">
+                      {players.find((p) => p.id === matchWinnerId)?.display_name}
+                    </div>
+                    <div className="text-sm text-green-700/80 dark:text-green-200/80">wins the match!</div>
+                  </div>
+                </div>
+                <Button onClick={startRematch} disabled={rematchLoading}>
+                  {rematchLoading ? 'Starting…' : 'Rematch'}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       {/* Match info and summaries */}
@@ -581,8 +602,8 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                 return (
                   <div
                     key={p.id}
-                    className={`flex items-center justify-between rounded px-3 py-2 ${
-                      isCurrent ? 'border border-accent bg-accent/30' : 'border'
+                    className={`flex items-center justify-between rounded px-3 py-2 transition-colors ${
+                      isCurrent ? 'border-2 border-green-500 bg-green-500/10' : 'border'
                     }`}
                   >
                     <div className="flex items-center gap-2">
@@ -652,21 +673,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
             </CardContent>
           </Card>
         )}
-        {matchWinnerId && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Winner</CardTitle>
-              <CardDescription>
-                {players.find((p) => p.id === matchWinnerId)?.display_name} wins the match
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="flex gap-3">
-                <Button onClick={startRematch} disabled={rematchLoading}>{rematchLoading ? 'Starting…' : 'Rematch'}</Button>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+        {false && matchWinnerId && null}
         <Card>
           <CardHeader>
             <CardTitle>Turns</CardTitle>

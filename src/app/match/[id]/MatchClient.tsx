@@ -389,7 +389,16 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     const someoneWonMatch = Object.entries(wonCounts).find(([, c]) => c >= target);
     if (!someoneWonMatch) {
       const nextLegNum = (allLegs ?? []).length + 1;
-      const { error: insErr } = await supabase.from('legs').insert({ match_id: matchId, leg_number: nextLegNum, starting_player_id: winnerPlayerId });
+      // Determine next starter by rotating the initial player order, not by winner
+      const nextStarterId = (() => {
+        if (!currentLeg || players.length === 0) return winnerPlayerId; // fallback
+        const currentIdx = players.findIndex((p) => p.id === currentLeg.starting_player_id);
+        const nextIdx = currentIdx >= 0 ? (currentIdx + 1) % players.length : 0;
+        return players[nextIdx]?.id ?? winnerPlayerId;
+      })();
+      const { error: insErr } = await supabase
+        .from('legs')
+        .insert({ match_id: matchId, leg_number: nextLegNum, starting_player_id: nextStarterId });
       if (insErr) {
         alert(`Failed to create next leg: ${insErr.message}`);
       }

@@ -10,7 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 type Player = { id: string; display_name: string };
 
@@ -48,8 +48,14 @@ type MatchPlayersRow = {
 
 export default function MatchClient({ matchId }: { matchId: string }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // Spectator mode state
+  const [isSpectatorMode, setIsSpectatorMode] = useState(false);
+  const [spectatorLoading, setSpectatorLoading] = useState(false);
+  const [turnThrowCounts, setTurnThrowCounts] = useState<Record<string, number>>({});
 
   const [match, setMatch] = useState<MatchRecord | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
@@ -137,9 +143,114 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     }
   }, [matchId]);
 
+  // Separate loading function for spectator mode that doesn't show loading screen
+  const loadAllSpectator = useCallback(async () => {
+    setSpectatorLoading(true);
+    try {
+      const supabase = await getSupabaseClient();
+      const { data: m } = await supabase.from('matches').select('*').eq('id', matchId).single();
+      if (m) setMatch(m as MatchRecord);
+
+      const { data: mp } = await supabase
+        .from('match_players')
+        .select('*, players:player_id(*)')
+        .eq('match_id', matchId)
+        .order('play_order');
+      if (mp) {
+        const flatPlayers = ((mp as MatchPlayersRow[] | null) ?? []).map((r) => r.players);
+        setPlayers(flatPlayers);
+      }
+
+      const { data: lgs } = await supabase.from('legs').select('*').eq('match_id', matchId).order('leg_number');
+      const legsTyped = (lgs ?? []) as LegRecord[];
+      if (lgs) setLegs(legsTyped);
+
+      const currentLeg = legsTyped.find((l) => !l.winner_player_id) || legsTyped[legsTyped.length - 1];
+      if (currentLeg) {
+        const { data: tns } = await supabase
+          .from('turns')
+          .select('*')
+          .eq('leg_id', currentLeg.id)
+          .order('turn_number');
+        if (tns) setTurns(((tns ?? []) as TurnRecord[]).sort((a, b) => a.turn_number - b.turn_number));
+      } else {
+        setTurns([]);
+      }
+
+      // Load turns for all legs to compute per-leg averages
+      if (legsTyped.length > 0) {
+        const legIds = legsTyped.map((l) => l.id);
+        const { data: allTurns } = await supabase
+          .from('turns')
+          .select('*')
+          .in('leg_id', legIds)
+          .order('turn_number');
+        const grouped: Record<string, TurnRecord[]> = {};
+        for (const t of ((allTurns ?? []) as TurnRecord[])) {
+          if (!grouped[t.leg_id]) grouped[t.leg_id] = [];
+          grouped[t.leg_id].push(t);
+        }
+        setTurnsByLeg(grouped);
+      } else {
+        setTurnsByLeg({});
+      }
+
+      // Count throws per turn to determine current player correctly
+      const { data: allCurrentLegThrows } = await supabase
+          .from('throws')
+          .select(`
+            turn_id,
+            turns!inner (
+              id,
+              player_id,
+              turn_number,
+              leg_id
+            )
+          `)
+          .eq('turns.leg_id', currentLeg.id)
+          .order('turn_number', { foreignTable: 'turns' });
+
+        if (allCurrentLegThrows) {
+          const throwCountsByTurn: Record<string, number> = {};
+          for (const throwData of allCurrentLegThrows as { turns: { id: string } }[]) {
+            const turnId = throwData.turns.id;
+            throwCountsByTurn[turnId] = (throwCountsByTurn[turnId] || 0) + 1;
+          }
+          setTurnThrowCounts(throwCountsByTurn);
+        }
+    } catch (e) {
+      console.error('Spectator mode refresh error:', e);
+      // Don't set error state in spectator mode to avoid disrupting the view
+    } finally {
+      setSpectatorLoading(false);
+    }
+  }, [matchId]);
+
   useEffect(() => {
     void loadAll();
   }, [loadAll]);
+
+  // Check for spectator mode from URL params
+  useEffect(() => {
+    const spectatorParam = searchParams.get('spectator');
+    if (spectatorParam === 'true') {
+      setIsSpectatorMode(true);
+    }
+  }, [searchParams]);
+
+  // Auto-refresh in spectator mode
+  useEffect(() => {
+    if (!isSpectatorMode) return;
+    
+    const interval = setInterval(() => {
+      // Only reload if not currently loading to prevent flickering
+      if (!spectatorLoading) {
+        void loadAllSpectator();
+      }
+    }, 2000); // Refresh every 2 seconds
+    
+    return () => clearInterval(interval);
+  }, [isSpectatorMode, loadAllSpectator, spectatorLoading]);
 
   const playerById = useMemo(() => Object.fromEntries(players.map((p) => [p.id, p])), [players]);
 
@@ -192,6 +303,26 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     const idx = turns.length % orderPlayers.length;
     return orderPlayers[idx];
   }, [orderPlayers, turns.length, localTurn.playerId]);
+
+  // For spectator mode, determine current player based on incomplete turns
+  const spectatorCurrentPlayer = useMemo(() => {
+    if (!orderPlayers.length || !currentLeg) return null as Player | null;
+    
+    // Check if the last turn is incomplete (has fewer than 3 throws)
+    if (turns.length > 0) {
+      const lastTurn = turns[turns.length - 1];
+      const throwCount = turnThrowCounts[lastTurn.id] || 0;
+      
+      // If the last turn has fewer than 3 throws (and wasn't busted), that player is still playing
+      if (throwCount < 3 && !lastTurn.busted) {
+        return orderPlayers.find(p => p.id === lastTurn.player_id) || orderPlayers[0];
+      }
+    }
+    
+    // Otherwise, it's the next player's turn
+    const idx = turns.length % orderPlayers.length;
+    return orderPlayers[idx];
+  }, [orderPlayers, turns, turnThrowCounts, currentLeg]);
 
   function getScoreForPlayer(playerId: string): number {
     const legTurns = turns.filter((t) => t.player_id === playerId && t.leg_id === currentLeg?.id);
@@ -847,6 +978,21 @@ export default function MatchClient({ matchId }: { matchId: string }) {
 
   const [rematchLoading, setRematchLoading] = useState(false);
 
+  // Toggle spectator mode
+  const toggleSpectatorMode = useCallback(() => {
+    const newSpectatorMode = !isSpectatorMode;
+    setIsSpectatorMode(newSpectatorMode);
+    
+    // Update URL without page reload
+    const url = new URL(window.location.href);
+    if (newSpectatorMode) {
+      url.searchParams.set('spectator', 'true');
+    } else {
+      url.searchParams.delete('spectator');
+    }
+    window.history.replaceState({}, '', url.toString());
+  }, [isSpectatorMode]);
+
   async function startRematch() {
     if (!match) return;
     try {
@@ -908,6 +1054,115 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   if (loading) return <div className="p-4">Loading…</div>;
   if (error) return <div className="p-4 text-red-600">{error}</div>;
   if (!match || !currentLeg) return <div className="p-4">No leg available</div>;
+
+  // Spectator Mode View
+  if (isSpectatorMode) {
+    return (
+      <div className="w-full space-y-3 md:space-y-6 md:max-w-6xl md:mx-auto">
+        {/* Subtle refresh indicator in top-right corner */}
+        {spectatorLoading && (
+          <div className="fixed top-4 right-4 z-50">
+            <div className="w-3 h-3 bg-blue-500 rounded-full animate-pulse"></div>
+          </div>
+        )}
+        
+        <Card>
+          <CardHeader>
+            <CardTitle>Live Match</CardTitle>
+            <CardDescription>
+              {match.start_score} • {match.finish.replace('_', ' ')} • Legs to win {match.legs_to_win}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              {/* Current player indicator */}
+              {spectatorCurrentPlayer && (
+                <div className="text-center">
+                  <div className="text-lg font-semibold text-muted-foreground">Current Turn</div>
+                  <div className="text-3xl font-bold text-primary">{spectatorCurrentPlayer.display_name}</div>
+                </div>
+              )}
+              
+              {/* Player scores */}
+              <div className="grid gap-3">
+                {orderPlayers.map((player) => {
+                  const score = getScoreForPlayer(player.id);
+                  const avg = getAvgForPlayer(player.id);
+                  const deco = decorateAvg(avg);
+                  const isCurrent = spectatorCurrentPlayer?.id === player.id;
+                  
+                  return (
+                    <div
+                      key={player.id}
+                      className={`p-4 rounded-lg transition-all duration-500 ease-in-out ${
+                        isCurrent 
+                          ? 'border-2 border-primary bg-primary/5 shadow-lg scale-[1.02]' 
+                          : 'border bg-card hover:bg-accent/30'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          {isCurrent && <Badge variant="default">Playing</Badge>}
+                          <div className="font-semibold text-lg">{player.display_name}</div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-3xl font-mono font-bold">{score}</div>
+                          <div className={`text-sm font-medium ${deco.cls}`}>
+                            {deco.emoji} {avg.toFixed(1)} avg
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Match winner */}
+        {matchWinnerId && (
+          <Card className="border-2 border-green-500 bg-green-50 dark:bg-green-900/20">
+            <CardContent className="py-6 text-center">
+              <div className="text-4xl animate-bounce mb-2">🏆</div>
+              <div className="text-2xl font-bold">
+                {players.find((p) => p.id === matchWinnerId)?.display_name} Wins!
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Legs summary */}
+        {legs.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Legs Summary</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-2">
+                {legs.map((leg) => {
+                  const winner = players.find((p) => p.id === leg.winner_player_id);
+                  return (
+                    <div key={leg.id} className="flex items-center justify-between py-2 px-3 rounded border">
+                      <span className="text-sm font-medium">Leg {leg.leg_number}</span>
+                      <span>{winner ? `🏆 ${winner.display_name}` : 'In Progress'}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+        
+        {/* Exit Spectator Mode Button */}
+        <div className="flex justify-center pt-4">
+          <Button variant="outline" onClick={toggleSpectatorMode} className="w-full max-w-xs">
+            Exit Spectator Mode
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full space-y-3 md:space-y-6 md:max-w-6xl md:mx-auto">
@@ -1274,6 +1529,13 @@ export default function MatchClient({ matchId }: { matchId: string }) {
             </div>
           </CardContent>
         </Card>
+        
+        {/* Spectator Mode Button */}
+        <div className="flex justify-center pt-4">
+          <Button variant="outline" onClick={toggleSpectatorMode} className="w-full max-w-xs">
+            Enter Spectator Mode
+          </Button>
+        </div>
       </div>
     </div>
   );

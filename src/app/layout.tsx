@@ -37,7 +37,7 @@ export default function RootLayout({
               <Link href="/stats">Statistics</Link>
             </div>
           </nav>
-          <main className="p-4 md:p-6 max-w-6xl mx-auto">{children}</main>
+          <main className="px-3 py-2 md:p-6 max-w-6xl mx-auto">{children}</main>
           <nav className="md:hidden fixed bottom-0 left-0 right-0 border-t bg-card">
             <div className="grid grid-cols-2">
               <Link href="/" className="flex flex-col items-center justify-center py-2 gap-1">

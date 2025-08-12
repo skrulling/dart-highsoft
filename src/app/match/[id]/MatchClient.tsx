@@ -910,7 +910,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   if (!match || !currentLeg) return <div className="p-4">No leg available</div>;
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
+    <div className="w-full space-y-3 md:space-y-6 md:max-w-6xl md:mx-auto">
       {/* Scoring input at top (mobile keypad or desktop board) */}
       <div className="w-full">
         {/* Mobile: player indicator + keypad at top */}

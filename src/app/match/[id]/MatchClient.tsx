@@ -212,7 +212,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
 
         if (allCurrentLegThrows) {
           const throwCountsByTurn: Record<string, number> = {};
-          for (const throwData of allCurrentLegThrows as { turns: { id: string } }[]) {
+          for (const throwData of allCurrentLegThrows as unknown as { turn_id: string; turns: { id: string; player_id: string; turn_number: number; leg_id: string; } }[]) {
             const turnId = throwData.turns.id;
             throwCountsByTurn[turnId] = (throwCountsByTurn[turnId] || 0) + 1;
           }
@@ -816,7 +816,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     await Promise.all(
       turnUpdates.map((u) => supabase.from('turns').update({ total_scored: u.total_scored, busted: u.busted }).eq('id', u.id))
     );
-  }, [currentLeg, finishRule, match, players, turns]);
+  }, [currentLeg, finishRule, match, players]);
 
   // Open edit players modal and load all available players
   const openEditPlayersModal = useCallback(async () => {

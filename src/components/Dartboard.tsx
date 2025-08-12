@@ -11,10 +11,6 @@ export default function Dartboard({ onHit }: DartboardProps) {
   const viewBox = 500;
   const cx = viewBox / 2;
   const cy = viewBox / 2;
-  const segmentOrder = [
-    20, 1, 18, 4, 13, 6, 10, 15, 2, 17,
-    3, 19, 7, 16, 8, 11, 14, 9, 12, 5,
-  ];
 
   // Colors approximating a standard board
   const COLORS = {
@@ -49,7 +45,7 @@ export default function Dartboard({ onHit }: DartboardProps) {
       paths.push({ d: annularSector(DOUBLE_INNER_RADIUS, DOUBLE_OUTER_RADIUS, startAngle, endAngle), fill: ringFill });
     }
     return paths;
-  }, []);
+  }, [COLORS.ringGreen, COLORS.ringRed, COLORS.singleDark, COLORS.singleLight]);
 
   function annularSector(r1: number, r2: number, start: number, end: number) {
     const cx = viewBox / 2;
@@ -81,6 +77,10 @@ export default function Dartboard({ onHit }: DartboardProps) {
 
   // Numbers around the board
   const numberPositions = useMemo(() => {
+    const segmentOrder = [
+      20, 1, 18, 4, 13, 6, 10, 15, 2, 17,
+      3, 19, 7, 16, 8, 11, 14, 9, 12, 5,
+    ];
     const items: { x: number; y: number; label: string }[] = [];
     const radius = DOUBLE_OUTER_RADIUS + 20;
     for (let i = 0; i < 20; i++) {
@@ -91,7 +91,7 @@ export default function Dartboard({ onHit }: DartboardProps) {
       items.push({ x, y, label: String(segmentOrder[i]) });
     }
     return items;
-  }, [cx, cy, segmentOrder]);
+  }, [cx, cy]);
 
   return (
     <svg

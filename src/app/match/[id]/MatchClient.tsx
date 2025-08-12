@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { useRouter } from 'next/navigation';
 
 type Player = { id: string; display_name: string };
@@ -73,6 +74,11 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   type EditableThrow = { id: string; turn_id: string; dart_index: number; segment: string; scored: number; player_id: string; turn_number: number };
   const [editingThrows, setEditingThrows] = useState<EditableThrow[]>([]);
   const [selectedThrowId, setSelectedThrowId] = useState<string | null>(null);
+
+  // Edit players modal state
+  const [editPlayersOpen, setEditPlayersOpen] = useState(false);
+  const [availablePlayers, setAvailablePlayers] = useState<Player[]>([]);
+  const [newPlayerName, setNewPlayerName] = useState('');
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -159,6 +165,24 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     const winner = Object.entries(counts).find(([, c]) => c >= match.legs_to_win)?.[0] ?? null;
     return winner;
   }, [legs, match]);
+
+  // Check if first round is completed (all players have had at least one turn)
+  const canEditPlayers = useMemo(() => {
+    if (!currentLeg || !players.length || matchWinnerId) return false;
+    
+    // If no turns yet, players can be edited
+    if (turns.length === 0) return true;
+    
+    // Check if first round is completed (all players have had at least one turn)
+    const playerTurnCounts = new Map<string, number>();
+    for (const turn of turns) {
+      playerTurnCounts.set(turn.player_id, (playerTurnCounts.get(turn.player_id) || 0) + 1);
+    }
+    
+    // First round is completed if all players have at least 1 turn
+    const firstRoundComplete = players.every(p => (playerTurnCounts.get(p.id) || 0) >= 1);
+    return !firstRoundComplete;
+  }, [currentLeg, players, turns, matchWinnerId]);
 
   const currentPlayer = useMemo(() => {
     if (!orderPlayers.length) return null as Player | null;
@@ -663,6 +687,144 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     );
   }, [currentLeg, finishRule, match, players, turns]);
 
+  // Open edit players modal and load all available players
+  const openEditPlayersModal = useCallback(async () => {
+    if (!canEditPlayers) return;
+    const supabase = await getSupabaseClient();
+    const { data, error } = await supabase.from('players').select('*').order('display_name');
+    if (error) {
+      alert(error.message);
+      return;
+    }
+    setAvailablePlayers((data as Player[]) ?? []);
+    setEditPlayersOpen(true);
+  }, [canEditPlayers]);
+
+  // Add new player to the database and match
+  const addNewPlayer = useCallback(async () => {
+    const name = newPlayerName.trim();
+    if (!name) return;
+    
+    const supabase = await getSupabaseClient();
+    
+    // Create new player
+    const { data: newPlayer, error: playerError } = await supabase
+      .from('players')
+      .insert({ display_name: name })
+      .select('*')
+      .single();
+    
+    if (playerError) {
+      alert(playerError.message);
+      return;
+    }
+    
+    // Add to match with next play order
+    const nextOrder = Math.max(...players.map((_, i) => i), -1) + 1;
+    const { error: matchPlayerError } = await supabase
+      .from('match_players')
+      .insert({ 
+        match_id: matchId, 
+        player_id: (newPlayer as Player).id, 
+        play_order: nextOrder 
+      });
+    
+    if (matchPlayerError) {
+      alert(matchPlayerError.message);
+      return;
+    }
+    
+    setNewPlayerName('');
+    setAvailablePlayers(prev => [...prev, newPlayer as Player]);
+    await loadAll(); // Reload match data
+  }, [newPlayerName, matchId, players, loadAll]);
+
+  // Add existing player to match
+  const addPlayerToMatch = useCallback(async (playerId: string) => {
+    const supabase = await getSupabaseClient();
+    
+    // Check if player is already in match
+    if (players.some(p => p.id === playerId)) {
+      alert('Player is already in this match');
+      return;
+    }
+    
+    const nextOrder = Math.max(...players.map((_, i) => i), -1) + 1;
+    const { error } = await supabase
+      .from('match_players')
+      .insert({ 
+        match_id: matchId, 
+        player_id: playerId, 
+        play_order: nextOrder 
+      });
+    
+    if (error) {
+      alert(error.message);
+      return;
+    }
+    
+    await loadAll(); // Reload match data
+  }, [matchId, players, loadAll]);
+
+  // Remove player from match
+  const removePlayerFromMatch = useCallback(async (playerId: string) => {
+    if (players.length <= 2) {
+      alert('Cannot remove player - match needs at least 2 players');
+      return;
+    }
+    
+    try {
+      const supabase = await getSupabaseClient();
+      
+      // First delete the player from match_players
+      const { error } = await supabase
+        .from('match_players')
+        .delete()
+        .eq('match_id', matchId)
+        .eq('player_id', playerId);
+      
+      if (error) {
+        console.error('Delete error:', error);
+        alert(`Failed to remove player: ${error.message}. This might be a database permissions issue.`);
+        return;
+      }
+      
+      // Get remaining players and reorder them properly
+      const { data: remainingPlayersData, error: fetchError } = await supabase
+        .from('match_players')
+        .select('*, players:player_id(*)')
+        .eq('match_id', matchId)
+        .order('play_order');
+      
+      if (fetchError) {
+        console.error('Fetch error:', fetchError);
+        alert(`Failed to fetch remaining players: ${fetchError.message}`);
+        return;
+      }
+      
+      // Update play orders to be sequential (0, 1, 2, ...)
+      const remainingPlayers = ((remainingPlayersData as MatchPlayersRow[] | null) ?? []);
+      for (let i = 0; i < remainingPlayers.length; i++) {
+        const { error: updateError } = await supabase
+          .from('match_players')
+          .update({ play_order: i })
+          .eq('match_id', matchId)
+          .eq('player_id', remainingPlayers[i].player_id);
+        
+        if (updateError) {
+          console.error('Update error:', updateError);
+          alert(`Failed to reorder players: ${updateError.message}. This might be a database permissions issue.`);
+          return;
+        }
+      }
+      
+      await loadAll(); // Reload match data
+    } catch (err) {
+      console.error('Unexpected error:', err);
+      alert('An unexpected error occurred while removing the player.');
+    }
+  }, [matchId, players.length, loadAll]);
+
   // Update a specific throw with a new segment
   const updateSelectedThrow = useCallback(
     async (seg: SegmentResult) => {
@@ -811,9 +973,16 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         <div className={`hidden md:flex justify-center ${matchWinnerId ? 'pointer-events-none opacity-50' : ''}`}>
           <Dartboard onHit={handleBoardClick} />
         </div>
-        <div className="flex items-center gap-3 mt-2">
-          <Button variant="outline" onClick={undoLastThrow} disabled={!!matchWinnerId}>Undo dart</Button>
-          <Button variant="outline" onClick={openEditModal} disabled={!currentLeg}>Edit throws</Button>
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3 mt-2">
+          <Button variant="outline" size="sm" onClick={undoLastThrow} disabled={!!matchWinnerId} className="text-xs sm:text-sm">
+            Undo dart
+          </Button>
+          <Button variant="outline" size="sm" onClick={openEditModal} disabled={!currentLeg} className="text-xs sm:text-sm">
+            Edit throws
+          </Button>
+          <Button variant="outline" size="sm" onClick={openEditPlayersModal} disabled={!canEditPlayers} className="text-xs sm:text-sm">
+            Edit players
+          </Button>
           <div className="text-sm text-gray-600 hidden md:block">Click the board to register throws</div>
         </div>
         {matchWinnerId && (
@@ -911,6 +1080,94 @@ export default function MatchClient({ matchId }: { matchId: string }) {
             </div>
           </div>
         )}
+        
+        {/* Edit players modal */}
+        {editPlayersOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/50" onClick={() => setEditPlayersOpen(false)} />
+            <div className="relative w-full max-w-[600px] max-h-[90vh] overflow-auto rounded-lg border bg-background p-4 shadow-xl">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-lg font-semibold">Edit Players</div>
+                <Button variant="ghost" onClick={() => setEditPlayersOpen(false)}>Close</Button>
+              </div>
+              
+              <div className="space-y-4">
+                <div className="text-sm text-muted-foreground">
+                  {canEditPlayers 
+                    ? 'You can add or remove players before the first round is completed.' 
+                    : 'Players cannot be edited after the first round is completed.'}
+                </div>
+                
+                {/* Current players */}
+                <div>
+                  <div className="font-medium mb-2">Current Players ({players.length})</div>
+                  <div className="space-y-2 max-h-48 overflow-auto border rounded p-2">
+                    {players.map((player, index) => (
+                      <div key={player.id} className="flex items-center gap-2 py-2 px-3 bg-accent/30 rounded">
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          <span className="text-sm text-muted-foreground">#{index + 1}</span>
+                          <span className="truncate">{player.display_name}</span>
+                        </div>
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => removePlayerFromMatch(player.id)}
+                          disabled={players.length <= 2}
+                          className="shrink-0 min-w-[70px]"
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                
+                {/* Add new player */}
+                <div>
+                  <div className="font-medium mb-2">Add New Player</div>
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="Player name"
+                      value={newPlayerName}
+                      onChange={(e) => setNewPlayerName(e.target.value)}
+                    />
+                    <Button onClick={addNewPlayer} disabled={!newPlayerName.trim()}>
+                      Add New
+                    </Button>
+                  </div>
+                </div>
+                
+                {/* Add existing players */}
+                <div>
+                  <div className="font-medium mb-2">Add Existing Player</div>
+                  <div className="space-y-2 max-h-48 overflow-auto border rounded p-2">
+                    {availablePlayers
+                      .filter(player => !players.some(p => p.id === player.id))
+                      .map(player => (
+                        <div key={player.id} className="flex items-center gap-2 py-2 px-3 hover:bg-accent/30 rounded">
+                          <span className="flex-1 min-w-0 truncate">{player.display_name}</span>
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => addPlayerToMatch(player.id)}
+                            className="shrink-0 min-w-[50px]"
+                          >
+                            Add
+                          </Button>
+                        </div>
+                      ))}
+                    {availablePlayers.filter(player => !players.some(p => p.id === player.id)).length === 0 && (
+                      <div className="text-center text-sm text-muted-foreground py-4">
+                        No additional players available
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+        
         <Card>
           <CardHeader>
             <CardTitle>Match</CardTitle>

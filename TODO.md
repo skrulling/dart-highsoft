@@ -5,6 +5,7 @@
     This is so that it will be easier for people from Bergen and Vik to play in the same game.
 - Realtime db for online games between Vik and Bergen
 - Games page, with link in navbar. SHould show currently active games and past games. Clicking a game will go to match ui
+- Spectator mode. Shows a nice UI with live score updates. Perhaps even AI generated comments
 
 ### Small fixes
 - More feedback when clicking buttons, so you know a score has been registered

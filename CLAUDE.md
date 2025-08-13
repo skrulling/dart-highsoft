@@ -6,6 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Next.js
 - Shadcn ui
 - Supabase
+- lucide icons
 
 ## Development Commands
 

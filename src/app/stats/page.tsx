@@ -139,6 +139,21 @@ export default function StatsPage() {
     const legsWon = legs.filter(l => l.winner_player_id === selectedPlayer).length;
     const matchesWon = matches.filter(m => m.winner_player_id === selectedPlayer).length;
     
+    // Calculate total games and legs played
+    const playerLegs = legs.filter(l => 
+      playerTurns.some(t => t.leg_id === l.id)
+    );
+    const legsPlayed = playerLegs.length;
+    
+    const playerMatches = matches.filter(m => 
+      playerLegs.some(l => l.match_id === m.id)
+    );
+    const gamesPlayed = playerMatches.length;
+    
+    // Calculate win rates
+    const gameWinRate = gamesPlayed > 0 ? Math.round((matchesWon / gamesPlayed) * 100) : 0;
+    const legWinRate = legsPlayed > 0 ? Math.round((legsWon / legsPlayed) * 100) : 0;
+    
     // Top 3 highest rounds
     const topRounds = playerTurns
       .filter(t => !t.busted)
@@ -151,6 +166,10 @@ export default function StatsPage() {
       avgScore,
       legsWon,
       matchesWon,
+      gamesPlayed,
+      legsPlayed,
+      gameWinRate,
+      legWinRate,
       topRounds,
       throws: playerThrows,
       turns: playerTurns
@@ -303,22 +322,45 @@ export default function StatsPage() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">Matches Won</CardTitle>
+                <CardTitle className="text-sm font-medium">Games Played</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{selectedPlayerData.matchesWon}</div>
+                <div className="text-2xl font-bold">{selectedPlayerData.gamesPlayed}</div>
               </CardContent>
             </Card>
             
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">Legs Won</CardTitle>
+                <CardTitle className="text-sm font-medium">Legs Played</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{selectedPlayerData.legsWon}</div>
+                <div className="text-2xl font-bold">{selectedPlayerData.legsPlayed}</div>
               </CardContent>
             </Card>
             
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Game Win Rate</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{selectedPlayerData.gameWinRate}%</div>
+                <p className="text-xs text-muted-foreground">{selectedPlayerData.matchesWon}/{selectedPlayerData.gamesPlayed} wins</p>
+              </CardContent>
+            </Card>
+            
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Leg Win Rate</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{selectedPlayerData.legWinRate}%</div>
+                <p className="text-xs text-muted-foreground">{selectedPlayerData.legsWon}/{selectedPlayerData.legsPlayed} wins</p>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Additional Stats Cards */}
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium">Average Score</CardTitle>
@@ -335,6 +377,15 @@ export default function StatsPage() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{selectedPlayerData.totalTurns}</div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Total Throws</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{selectedPlayerData.totalThrows}</div>
               </CardContent>
             </Card>
           </div>

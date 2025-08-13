@@ -16,6 +16,7 @@ type MatchWithDetails = {
   legs_to_win: number;
   created_at: string;
   winner_player_id: string | null;
+  ended_early?: boolean;
   players: Array<{
     id: string;
     display_name: string;
@@ -43,7 +44,7 @@ export default function GamesPage() {
       setLoading(true);
       const supabase = await getSupabaseClient();
       
-      // Get matches with players and legs
+      // Get matches with players and legs (exclude ended early games)
       const { data: matches } = await supabase
         .from('matches')
         .select(`
@@ -54,6 +55,7 @@ export default function GamesPage() {
           legs_to_win,
           created_at,
           winner_player_id,
+          ended_early,
           match_players!inner (
             play_order,
             players!inner (
@@ -66,6 +68,7 @@ export default function GamesPage() {
             winner_player_id
           )
         `)
+        .eq('ended_early', false)
         .order('created_at', { ascending: false })
         .limit(20);
 

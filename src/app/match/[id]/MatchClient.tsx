@@ -10,6 +10,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 type Player = { id: string; display_name: string };
@@ -20,6 +29,7 @@ type MatchRecord = {
   start_score: '201' | '301' | '501';
   finish: FinishRule;
   legs_to_win: number;
+  ended_early?: boolean;
 };
 
 type LegRecord = {
@@ -85,6 +95,10 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   const [editPlayersOpen, setEditPlayersOpen] = useState(false);
   const [availablePlayers, setAvailablePlayers] = useState<Player[]>([]);
   const [newPlayerName, setNewPlayerName] = useState('');
+
+  // End game early state
+  const [endGameDialogOpen, setEndGameDialogOpen] = useState(false);
+  const [endGameLoading, setEndGameLoading] = useState(false);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -1051,6 +1065,38 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     }
   }
 
+  // End game early function
+  async function endGameEarly() {
+    if (!match) return;
+    try {
+      setEndGameLoading(true);
+      const supabase = await getSupabaseClient();
+      
+      // Mark the match as ended early
+      const { error } = await supabase
+        .from('matches')
+        .update({ ended_early: true })
+        .eq('id', matchId);
+      
+      if (error) {
+        alert(`Failed to end game early: ${error.message}`);
+        return;
+      }
+      
+      // Close the dialog and reload the match data
+      setEndGameDialogOpen(false);
+      await loadAll();
+      
+      // Redirect to home page
+      router.push('/');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Unknown error ending game';
+      alert(msg);
+    } finally {
+      setEndGameLoading(false);
+    }
+  }
+
   if (loading) return <div className="p-4">Loading…</div>;
   if (error) return <div className="p-4 text-red-600">{error}</div>;
   if (!match || !currentLeg) return <div className="p-4">No leg available</div>;
@@ -1530,9 +1576,39 @@ export default function MatchClient({ matchId }: { matchId: string }) {
           </CardContent>
         </Card>
         
-        {/* Spectator Mode Button */}
-        <div className="flex justify-center pt-4">
-          <Button variant="outline" onClick={toggleSpectatorMode} className="w-full max-w-xs">
+        {/* Action Buttons */}
+        <div className="flex flex-col sm:flex-row gap-2 pt-4">
+          {/* End Game Early Button - Show when match is ongoing */}
+          {!matchWinnerId && (
+            <Dialog open={endGameDialogOpen} onOpenChange={setEndGameDialogOpen}>
+              <DialogTrigger asChild>
+                <Button variant="destructive" className="flex-1 sm:max-w-xs">
+                  End Game Early
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>End Game Early?</DialogTitle>
+                  <DialogDescription>
+                    Are you sure you want to end this game early? This action cannot be undone.
+                    <br /><br />
+                    <strong>Warning:</strong> This match and all its statistics will not count towards player records.
+                  </DialogDescription>
+                </DialogHeader>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setEndGameDialogOpen(false)} disabled={endGameLoading}>
+                    Cancel
+                  </Button>
+                  <Button variant="destructive" onClick={endGameEarly} disabled={endGameLoading}>
+                    {endGameLoading ? 'Ending...' : 'End Game'}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          )}
+
+          {/* Spectator Mode Button */}
+          <Button variant="outline" onClick={toggleSpectatorMode} className="flex-1 sm:max-w-xs">
             Enter Spectator Mode
           </Button>
         </div>

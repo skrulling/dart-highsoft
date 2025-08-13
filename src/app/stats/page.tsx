@@ -14,7 +14,7 @@ type SummaryRow = { player_id: string; display_name: string; wins: number; avg_p
 type LegRow = { id: string; match_id: string; leg_number: number; created_at: string; winner_player_id: string | null };
 type TurnRow = { id: string; leg_id: string; player_id: string; total_scored: number; busted: boolean; turn_number: number; created_at: string };
 type ThrowRow = { id: string; turn_id: string; dart_index: number; segment: string; scored: number };
-type MatchRow = { id: string; created_at: string; winner_player_id: string | null };
+type MatchRow = { id: string; created_at: string; winner_player_id: string | null; ended_early?: boolean };
 
 export default function StatsPage() {
   const [summary, setSummary] = useState<SummaryRow[]>([]);
@@ -49,8 +49,16 @@ export default function StatsPage() {
             .select('id, display_name')
             .not('display_name', 'ilike', '%test%')
             .order('display_name'),
-          supabase.from('legs').select('*').order('created_at'),
-          supabase.from('matches').select('id, created_at, winner_player_id').order('created_at')
+          supabase
+            .from('legs')
+            .select('*, matches!inner(ended_early)')
+            .eq('matches.ended_early', false)
+            .order('created_at'),
+          supabase
+            .from('matches')
+            .select('id, created_at, winner_player_id')
+            .eq('ended_early', false)
+            .order('created_at')
         ]);
         
         setSummary(((s as unknown) as SummaryRow[]) ?? []);

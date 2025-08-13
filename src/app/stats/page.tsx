@@ -338,11 +338,44 @@ export default function StatsPage() {
             </CardHeader>
             <CardContent>
               <div className="flex flex-wrap gap-2">
-                {selectedPlayerData.topRounds.map((turn, index) => (
-                  <Badge key={turn.id} variant={index === 0 ? "default" : "secondary"} className="text-lg py-2 px-4">
-                    #{index + 1}: {turn.total_scored}
-                  </Badge>
-                ))}
+                {selectedPlayerData.topRounds.map((turn, index) => {
+                  const getTrophyStyle = (position: number) => {
+                    switch (position) {
+                      case 0:
+                        return {
+                          emoji: '🏆',
+                          className: 'bg-yellow-100 text-yellow-800 border-yellow-300 hover:bg-yellow-200'
+                        };
+                      case 1:
+                        return {
+                          emoji: '🥈',
+                          className: 'bg-gray-100 text-gray-800 border-gray-300 hover:bg-gray-200'
+                        };
+                      case 2:
+                        return {
+                          emoji: '🥉',
+                          className: 'bg-orange-100 text-orange-800 border-orange-300 hover:bg-orange-200'
+                        };
+                      default:
+                        return {
+                          emoji: '',
+                          className: 'bg-blue-100 text-blue-800 border-blue-300 hover:bg-blue-200'
+                        };
+                    }
+                  };
+                  
+                  const { emoji, className } = getTrophyStyle(index);
+                  
+                  return (
+                    <Badge 
+                      key={turn.id} 
+                      variant="outline" 
+                      className={`text-lg py-2 px-4 ${className}`}
+                    >
+                      {emoji} {turn.total_scored}
+                    </Badge>
+                  );
+                })}
                 {selectedPlayerData.topRounds.length === 0 && (
                   <p className="text-muted-foreground">No valid rounds recorded</p>
                 )}

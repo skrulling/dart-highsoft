@@ -34,6 +34,9 @@ export default function Home() {
           <Link href="/new">New Match</Link>
         </Button>
         <Button asChild variant="outline">
+          <Link href="/practice">Practice</Link>
+        </Button>
+        <Button asChild variant="outline">
           <Link href="/players">Players</Link>
         </Button>
       </div>

@@ -65,15 +65,6 @@ export default function Dartboard({ onHit }: DartboardProps) {
     ].join(' ');
   }
 
-  function onClick(evt: React.MouseEvent<SVGSVGElement>) {
-    const rect = (evt.target as SVGElement).ownerSVGElement!.getBoundingClientRect();
-    const x = evt.clientX - rect.left;
-    const y = evt.clientY - rect.top;
-    const svgX = (x / rect.width) * viewBox;
-    const svgY = (y / rect.height) * viewBox;
-    const result = computeHit(svgX, svgY, viewBox);
-    onHit(svgX, svgY, result);
-  }
 
   // Numbers around the board
   const numberPositions = useMemo(() => {
@@ -93,12 +84,21 @@ export default function Dartboard({ onHit }: DartboardProps) {
     return items;
   }, [cx, cy]);
 
+  const handleClick = (event: React.MouseEvent<SVGElement>) => {
+    const svgElement = event.currentTarget;
+    const rect = svgElement.getBoundingClientRect();
+    const x = ((event.clientX - rect.left) / rect.width) * viewBox;
+    const y = ((event.clientY - rect.top) / rect.height) * viewBox;
+    const result = computeHit(x, y, viewBox);
+    onHit(x, y, result);
+  };
+
   return (
     <svg
       role="img"
       viewBox={`0 0 ${viewBox} ${viewBox}`}
       className="w-full max-w-[500px] cursor-pointer select-none drop-shadow"
-      onClick={onClick}
+      onClick={handleClick}
     >
       {/* Number ring background */}
       <circle cx={cx} cy={cy} r={DOUBLE_OUTER_RADIUS + 26} fill={COLORS.numberRingBg} />

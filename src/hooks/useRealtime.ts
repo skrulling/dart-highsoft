@@ -74,7 +74,7 @@ export function useRealtime(matchId: string) {
         );
 
       // Subscribe to the channel
-      newChannel.subscribe((status, err) => {
+      newChannel.subscribe((status) => {
         if (status === 'SUBSCRIBED') {
           setConnectionStatus('connected');
         } else if (status === 'CHANNEL_ERROR') {

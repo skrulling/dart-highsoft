@@ -57,6 +57,18 @@ type MatchPlayersRow = {
   players: Player;
 };
 
+type ThrowRecord = {
+  id: string;
+  turn_id: string;
+  dart_index: number;
+  segment: string;
+  scored: number;
+};
+
+type TurnWithThrows = TurnRecord & {
+  throws: ThrowRecord[];
+};
+
 export default function MatchClient({ matchId }: { matchId: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -67,6 +79,12 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   const [isSpectatorMode, setIsSpectatorMode] = useState(false);
   const [spectatorLoading, setSpectatorLoading] = useState(false);
   const [turnThrowCounts, setTurnThrowCounts] = useState<Record<string, number>>({});
+  const [celebration, setCelebration] = useState<{
+    score: number;
+    playerName: string;
+    level: 'good' | 'excellent';
+  } | null>(null);
+  const celebratedTurns = useRef<Set<string>>(new Set());
 
   const [match, setMatch] = useState<MatchRecord | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
@@ -299,6 +317,50 @@ export default function MatchClient({ matchId }: { matchId: string }) {
               .order('turn_number', { ascending: true });
 
             if (updatedTurns) {
+              // Check for newly completed turns and trigger celebrations (spectator mode only)
+              if (isSpectatorMode) {
+                const newThrowCounts: Record<string, number> = {};
+                for (const turn of updatedTurns) {
+                  const throws = (turn as TurnWithThrows).throws || [];
+                  newThrowCounts[turn.id] = throws.length;
+                }
+                
+                // Compare with previous counts to find completed turns
+                const prevCounts = turnThrowCounts;
+                for (const turn of updatedTurns) {
+                  const currentCount = newThrowCounts[turn.id] || 0;
+                  const previousCount = prevCounts[turn.id] || 0;
+                  
+                  // Check if turn just completed (became 3 throws or busted)
+                  // Only trigger for complete rounds, not individual high darts
+                  if (previousCount < 3 && (currentCount === 3 || turn.busted) && turn.total_scored > 0) {
+                    // Check if we've already celebrated this turn
+                    if (!celebratedTurns.current.has(turn.id)) {
+                      const playerName = players.find(p => p.id === turn.player_id)?.display_name || 'Player';
+                      
+                      // Trigger celebration based on total round score
+                      if (turn.total_scored >= 70) {
+                        celebratedTurns.current.add(turn.id);
+                        setCelebration({
+                          score: turn.total_scored,
+                          playerName,
+                          level: 'excellent'
+                        });
+                        setTimeout(() => setCelebration(null), 5000); // 5 seconds
+                      } else if (turn.total_scored >= 50) {
+                        celebratedTurns.current.add(turn.id);
+                        setCelebration({
+                          score: turn.total_scored,
+                          playerName,
+                          level: 'good'
+                        });
+                        setTimeout(() => setCelebration(null), 4000); // 4 seconds
+                      }
+                    }
+                  }
+                }
+              }
+              
               // Force React to re-render by using functional state updates
               setTurns(prev => {
                 const newTurns = updatedTurns as unknown as TurnRecord[];
@@ -308,7 +370,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
               // Update throw counts for current turn visualization
               const throwCounts: Record<string, number> = {};
               for (const turn of updatedTurns) {
-                const throws = (turn as any).throws || [];
+                const throws = (turn as TurnWithThrows).throws || [];
                 throwCounts[turn.id] = throws.length;
               }
               
@@ -318,7 +380,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
             }
           }
         }
-      } catch (error) {
+      } catch {
         // Fallback to full reload only on error
         void loadAllSpectator();
       }
@@ -366,7 +428,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                   shouldClearOngoing = true;
                 } else {
                   // Check if our turn was completed by another client
-                  const throwCount = (ourTurn as any).throws?.length || 0;
+                  const throwCount = (ourTurn as TurnWithThrows).throws?.length || 0;
                   if (throwCount === 3 || ourTurn.busted) {
                     shouldClearOngoing = true;
                   }
@@ -387,7 +449,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
               // Update throw counts
               const throwCounts: Record<string, number> = {};
               for (const turn of updatedTurns) {
-                const throws = (turn as any).throws || [];
+                const throws = (turn as TurnWithThrows).throws || [];
                 throwCounts[turn.id] = throws.length;
               }
               
@@ -397,7 +459,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
             }
           }
         }
-      } catch (error) {
+      } catch {
         // Fallback to full reload
         void loadAll();
       }
@@ -414,7 +476,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     };
 
     // Handle leg changes - requires full reload for leg transitions
-    const handleLegChange = (event: CustomEvent) => {
+    const handleLegChange = () => {
       if (isSpectatorMode) {
         void loadAllSpectator();
       } else {
@@ -432,22 +494,23 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     };
 
     // Add event listeners
-    window.addEventListener('supabase-throws-change', handleThrowChange as EventListener);
-    window.addEventListener('supabase-turns-change', handleTurnChange as EventListener);
-    window.addEventListener('supabase-legs-change', handleLegChange as EventListener);
-    window.addEventListener('supabase-matches-change', handleMatchChange as EventListener);
+    window.addEventListener('supabase-throws-change', handleThrowChange as unknown as EventListener);
+    window.addEventListener('supabase-turns-change', handleTurnChange as unknown as EventListener);
+    window.addEventListener('supabase-legs-change', handleLegChange as unknown as EventListener);
+    window.addEventListener('supabase-matches-change', handleMatchChange as unknown as EventListener);
 
     // Update presence to indicate we're viewing this match
     realtime.updatePresence(isSpectatorMode);
 
     // Cleanup function
     return () => {
-      window.removeEventListener('supabase-throws-change', handleThrowChange as EventListener);
-      window.removeEventListener('supabase-turns-change', handleTurnChange as EventListener);
-      window.removeEventListener('supabase-legs-change', handleLegChange as EventListener);
-      window.removeEventListener('supabase-matches-change', handleMatchChange as EventListener);
+      window.removeEventListener('supabase-throws-change', handleThrowChange as unknown as EventListener);
+      window.removeEventListener('supabase-turns-change', handleTurnChange as unknown as EventListener);
+      window.removeEventListener('supabase-legs-change', handleLegChange as unknown as EventListener);
+      window.removeEventListener('supabase-matches-change', handleMatchChange as unknown as EventListener);
     };
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [realtime.isConnected, realtimeEnabled, matchId]);
 
   // Check for spectator mode from URL params
@@ -477,7 +540,14 @@ export default function MatchClient({ matchId }: { matchId: string }) {
 
   const playerById = useMemo(() => Object.fromEntries(players.map((p) => [p.id, p])), [players]);
 
-  const currentLeg = useMemo(() => (legs ?? []).find((l) => !l.winner_player_id) ?? legs[legs.length - 1], [legs]);
+  const currentLeg = useMemo(() => {
+    const newCurrentLeg = (legs ?? []).find((l) => !l.winner_player_id) ?? legs[legs.length - 1];
+    // Clear celebrated turns when moving to a new leg
+    if (newCurrentLeg && celebratedTurns.current.size > 0) {
+      celebratedTurns.current.clear();
+    }
+    return newCurrentLeg;
+  }, [legs]);
 
   const orderPlayers = useMemo(() => {
     if (!match || players.length === 0 || !currentLeg) return [] as Player[];
@@ -580,8 +650,8 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       const throwCount = turnThrowCounts[lastTurn.id] || 0;
       if (throwCount > 0 && throwCount < 3) {
         // This player has an incomplete turn with throws from another client
-        const currentThrows = (lastTurn as any).throws || [];
-        const incompleteTotal = currentThrows.reduce((sum: number, thr: any) => sum + thr.scored, 0);
+        const currentThrows = (lastTurn as TurnWithThrows).throws || [];
+        const incompleteTotal = currentThrows.reduce((sum: number, thr: ThrowRecord) => sum + thr.scored, 0);
         current -= incompleteTotal;
       }
     }
@@ -1344,7 +1414,58 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   // Spectator Mode View
   if (isSpectatorMode) {
     return (
-      <div className="w-full space-y-3 md:space-y-6 md:max-w-6xl md:mx-auto">
+      <div className="w-full space-y-3 md:space-y-6 md:max-w-6xl md:mx-auto relative">
+        {/* Celebration Overlay */}
+        {celebration && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
+            <div
+              className={`text-center transform transition-all duration-1000 ${
+                celebration.level === 'excellent'
+                  ? 'animate-bounce scale-110'
+                  : 'animate-pulse scale-105'
+              }`}
+            >
+              <div
+                className={`text-6xl md:text-8xl font-extrabold mb-2 ${
+                  celebration.level === 'excellent'
+                    ? 'text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 via-red-500 to-pink-500 drop-shadow-lg'
+                    : 'text-transparent bg-clip-text bg-gradient-to-r from-blue-500 to-green-500 drop-shadow-lg'
+                }`}
+                style={{
+                  textShadow: celebration.level === 'excellent' 
+                    ? '0 0 20px rgba(255, 215, 0, 0.8), 0 0 40px rgba(255, 215, 0, 0.6)' 
+                    : '0 0 15px rgba(59, 130, 246, 0.8), 0 0 30px rgba(59, 130, 246, 0.6)'
+                }}
+              >
+                {celebration.score}
+              </div>
+              <div
+                className={`text-2xl md:text-4xl font-bold mb-2 ${
+                  celebration.level === 'excellent'
+                    ? 'text-yellow-400'
+                    : 'text-blue-500'
+                }`}
+              >
+                {celebration.playerName}
+              </div>
+              <div
+                className={`text-lg md:text-2xl font-medium ${
+                  celebration.level === 'excellent'
+                    ? 'text-red-400'
+                    : 'text-green-500'
+                }`}
+              >
+                {celebration.level === 'excellent' ? '🔥 EXCELLENT! 🔥' : '⚡ GREAT ROUND! ⚡'}
+              </div>
+              {celebration.level === 'excellent' && (
+                <div className="absolute inset-0 animate-ping">
+                  <div className="w-full h-full bg-gradient-to-r from-yellow-400 via-red-500 to-pink-500 rounded-full opacity-20"></div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        
         {/* Connection status and refresh indicator */}
         <div className="fixed bottom-4 right-4 z-50 flex items-center gap-2">
           {/* Real-time connection status */}
@@ -1403,8 +1524,8 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                     if (lastTurn && !lastTurn.busted) {
                       const throwCount = turnThrowCounts[lastTurn.id] || 0;
                       if (throwCount > 0 && throwCount < 3) {
-                        const currentThrows = (lastTurn as any).throws || [];
-                        const incompleteTotal = currentThrows.reduce((sum: number, thr: any) => sum + thr.scored, 0);
+                        const currentThrows = (lastTurn as TurnWithThrows).throws || [];
+                        const incompleteTotal = currentThrows.reduce((sum: number, thr: ThrowRecord) => sum + thr.scored, 0);
                         current -= incompleteTotal;
                       }
                     }
@@ -1462,8 +1583,8 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                     if (lastTurn && !lastTurn.busted) {
                       const throwCount = turnThrowCounts[lastTurn.id] || 0;
                       if (throwCount > 0 && throwCount < 3) {
-                        const currentThrows = (lastTurn as any).throws || [];
-                        const incompleteTotal = currentThrows.reduce((sum: number, thr: any) => sum + thr.scored, 0);
+                        const currentThrows = (lastTurn as TurnWithThrows).throws || [];
+                        const incompleteTotal = currentThrows.reduce((sum: number, thr: ThrowRecord) => sum + thr.scored, 0);
                         current -= incompleteTotal;
                       }
                     }
@@ -1477,7 +1598,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                   const isCurrent = spectatorCurrentPlayer?.id === player.id;
                   
                   // Get throws to display for this player
-                  let displayThrows: any[] = [];
+                  let displayThrows: ThrowRecord[] = [];
                   const playerTurns = turns.filter(turn => turn.player_id === player.id);
                   const lastTurn = playerTurns.length > 0 ? playerTurns[playerTurns.length - 1] : null;
                   
@@ -1490,10 +1611,10 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                       displayThrows = [];
                     } else if (isCurrent && throwCount > 0 && throwCount < 3) {
                       // Current player with incomplete turn - show current throws
-                      displayThrows = (lastTurn as any).throws || [];
+                      displayThrows = (lastTurn as TurnWithThrows).throws || [];
                     } else if (!isCurrent && (throwCount === 3 || lastTurn.busted)) {
                       // Show last completed turn for non-current players
-                      displayThrows = (lastTurn as any).throws || [];
+                      displayThrows = (lastTurn as TurnWithThrows).throws || [];
                     }
                     
                     displayThrows.sort((a, b) => a.dart_index - b.dart_index);
@@ -1654,7 +1775,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                   if (lastTurn && !lastTurn.busted) {
                     const throwCount = turnThrowCounts[lastTurn.id] || 0;
                     if (throwCount > 0 && throwCount < 3) {
-                      const currentThrows = (lastTurn as any).throws || [];
+                      const currentThrows = (lastTurn as TurnWithThrows).throws || [];
                       currentThrows.sort((a, b) => a.dart_index - b.dart_index);
                       return (
                         <>
@@ -1948,7 +2069,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                 const isLocalActiveTurn = localTurn.playerId === p.id && localTurn.darts.length > 0;
                 
                 // Check for throws from any client (including other clients)
-                let currentThrows: any[] = [];
+                let currentThrows: ThrowRecord[] = [];
                 let isRemoteActiveTurn = false;
                 const playerTurns = turns.filter(turn => turn.player_id === p.id);
                 const lastTurn = playerTurns.length > 0 ? playerTurns[playerTurns.length - 1] : null;
@@ -1956,7 +2077,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                   const throwCount = turnThrowCounts[lastTurn.id] || 0;
                   if (throwCount > 0 && throwCount < 3) {
                     isRemoteActiveTurn = true;
-                    currentThrows = (lastTurn as any).throws || [];
+                    currentThrows = (lastTurn as TurnWithThrows).throws || [];
                     currentThrows.sort((a, b) => a.dart_index - b.dart_index);
                   }
                 }

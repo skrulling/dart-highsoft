@@ -20,6 +20,7 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { useRealtime } from '@/hooks/useRealtime';
 
 type Player = { id: string; display_name: string };
 
@@ -99,6 +100,10 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   // End game early state
   const [endGameDialogOpen, setEndGameDialogOpen] = useState(false);
   const [endGameLoading, setEndGameLoading] = useState(false);
+
+  // Real-time connection
+  const realtime = useRealtime(matchId);
+  const realtimeEnabled = true; // For now, always enabled
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -244,6 +249,207 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     void loadAll();
   }, [loadAll]);
 
+  // Set up real-time event listeners
+  useEffect(() => {
+    if (!realtime.isConnected || !realtimeEnabled) {
+      console.log('Real-time not ready:', { 
+        connected: realtime.isConnected, 
+        enabled: realtimeEnabled,
+        status: realtime.connectionStatus 
+      });
+      return;
+    }
+
+
+    // Handle throw changes - hot update without full reload
+    const handleThrowChange = async (event: CustomEvent) => {
+      // Route to appropriate handler based on mode
+      if (isSpectatorMode) {
+        await handleSpectatorThrowChange(event);
+      } else {
+        await handleMatchUIUpdate(event);
+      }
+    };
+    
+    // Spectator-specific throw change handler
+    const handleSpectatorThrowChange = async (event: CustomEvent) => {
+      const payload = event.detail;
+
+      try {
+        const supabase = await getSupabaseClient();
+        
+        if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+          // Hot update: fetch latest legs to avoid stale closure
+          const { data: currentLegs } = await supabase
+            .from('legs')
+            .select('*')
+            .eq('match_id', matchId)
+            .order('leg_number', { ascending: true });
+            
+          const currentLeg = currentLegs?.find(l => !l.winner_player_id);
+          
+          if (currentLeg) {
+            const { data: updatedTurns } = await supabase
+              .from('turns')
+              .select(`
+                id, leg_id, player_id, turn_number, total_scored, busted, created_at,
+                throws:throws(id, turn_id, dart_index, segment, scored)
+              `)
+              .eq('leg_id', currentLeg.id)
+              .order('turn_number', { ascending: true });
+
+            if (updatedTurns) {
+              // Force React to re-render by using functional state updates
+              setTurns(prev => {
+                const newTurns = updatedTurns as unknown as TurnRecord[];
+                return JSON.stringify(prev) !== JSON.stringify(newTurns) ? newTurns : prev;
+              });
+              
+              // Update throw counts for current turn visualization
+              const throwCounts: Record<string, number> = {};
+              for (const turn of updatedTurns) {
+                const throws = (turn as any).throws || [];
+                throwCounts[turn.id] = throws.length;
+              }
+              
+              setTurnThrowCounts(prev => {
+                return JSON.stringify(prev) !== JSON.stringify(throwCounts) ? throwCounts : prev;
+              });
+            }
+          }
+        }
+      } catch (error) {
+        // Fallback to full reload only on error
+        void loadAllSpectator();
+      }
+    };
+    
+    // Handle real-time updates for normal match UI (non-spectator)
+    const handleMatchUIUpdate = async (event: CustomEvent) => {
+      if (isSpectatorMode) return; // Only for normal match UI
+      
+      const payload = event.detail;
+      
+      try {
+        const supabase = await getSupabaseClient();
+        
+        if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+          // Get fresh data for current leg
+          const { data: currentLegs } = await supabase
+            .from('legs')
+            .select('*')
+            .eq('match_id', matchId)
+            .order('leg_number', { ascending: true });
+            
+          const currentLeg = currentLegs?.find(l => !l.winner_player_id);
+          
+          if (currentLeg) {
+            const { data: updatedTurns } = await supabase
+              .from('turns')
+              .select(`
+                id, leg_id, player_id, turn_number, total_scored, busted, created_at,
+                throws:throws(id, turn_id, dart_index, segment, scored)
+              `)
+              .eq('leg_id', currentLeg.id)
+              .order('turn_number', { ascending: true });
+
+            if (updatedTurns) {
+              // Check if our ongoing turn is still valid/current
+              const ongoing = ongoingTurnRef.current;
+              let shouldClearOngoing = false;
+              
+              if (ongoing) {
+                // Check if someone else finished this turn or if there's a newer turn
+                const ourTurn = updatedTurns.find(t => t.id === ongoing.turnId);
+                if (!ourTurn) {
+                  // Our turn was deleted (probably by another client)
+                  shouldClearOngoing = true;
+                } else {
+                  // Check if our turn was completed by another client
+                  const throwCount = (ourTurn as any).throws?.length || 0;
+                  if (throwCount === 3 || ourTurn.busted) {
+                    shouldClearOngoing = true;
+                  }
+                }
+              }
+              
+              if (shouldClearOngoing) {
+                ongoingTurnRef.current = null;
+                setLocalTurn({ playerId: '', darts: [] });
+              }
+              
+              // Update state with functional updates
+              setTurns(prev => {
+                const newTurns = updatedTurns as unknown as TurnRecord[];
+                return JSON.stringify(prev) !== JSON.stringify(newTurns) ? newTurns : prev;
+              });
+              
+              // Update throw counts
+              const throwCounts: Record<string, number> = {};
+              for (const turn of updatedTurns) {
+                const throws = (turn as any).throws || [];
+                throwCounts[turn.id] = throws.length;
+              }
+              
+              setTurnThrowCounts(prev => {
+                return JSON.stringify(prev) !== JSON.stringify(throwCounts) ? throwCounts : prev;
+              });
+            }
+          }
+        }
+      } catch (error) {
+        // Fallback to full reload
+        void loadAll();
+      }
+    };
+
+    // Handle turn changes - hot update
+    const handleTurnChange = async (event: CustomEvent) => {
+      // Use spectator logic for spectator mode, match UI logic for normal mode
+      if (isSpectatorMode) {
+        await handleThrowChange(event);
+      } else {
+        await handleMatchUIUpdate(event);
+      }
+    };
+
+    // Handle leg changes - requires full reload for leg transitions
+    const handleLegChange = (event: CustomEvent) => {
+      if (isSpectatorMode) {
+        void loadAllSpectator();
+      } else {
+        void loadAll();
+      }
+    };
+
+    // Handle match changes - requires full reload
+    const handleMatchChange = (event: CustomEvent) => {
+      const payload = event.detail;
+      if (payload?.new) {
+        setMatch(payload.new as MatchRecord);
+      }
+      void loadAll();
+    };
+
+    // Add event listeners
+    window.addEventListener('supabase-throws-change', handleThrowChange as EventListener);
+    window.addEventListener('supabase-turns-change', handleTurnChange as EventListener);
+    window.addEventListener('supabase-legs-change', handleLegChange as EventListener);
+    window.addEventListener('supabase-matches-change', handleMatchChange as EventListener);
+
+    // Update presence to indicate we're viewing this match
+    realtime.updatePresence(isSpectatorMode);
+
+    // Cleanup function
+    return () => {
+      window.removeEventListener('supabase-throws-change', handleThrowChange as EventListener);
+      window.removeEventListener('supabase-turns-change', handleTurnChange as EventListener);
+      window.removeEventListener('supabase-legs-change', handleLegChange as EventListener);
+      window.removeEventListener('supabase-matches-change', handleMatchChange as EventListener);
+    };
+
+  }, [realtime.isConnected, realtimeEnabled, matchId]);
+
   // Check for spectator mode from URL params
   useEffect(() => {
     const spectatorParam = searchParams.get('spectator');
@@ -252,19 +458,22 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     }
   }, [searchParams]);
 
-  // Auto-refresh in spectator mode
+  // Auto-refresh in spectator mode (fallback when real-time is not available)
   useEffect(() => {
     if (!isSpectatorMode) return;
+    
+    // Only use polling if real-time is not connected or disabled
+    if (realtime.isConnected && realtimeEnabled) return;
     
     const interval = setInterval(() => {
       // Only reload if not currently loading to prevent flickering
       if (!spectatorLoading) {
         void loadAllSpectator();
       }
-    }, 2000); // Refresh every 2 seconds
+    }, 2000); // Refresh every 2 seconds as fallback
     
     return () => clearInterval(interval);
-  }, [isSpectatorMode, loadAllSpectator, spectatorLoading]);
+  }, [isSpectatorMode, loadAllSpectator, spectatorLoading, realtime.isConnected, realtimeEnabled]);
 
   const playerById = useMemo(() => Object.fromEntries(players.map((p) => [p.id, p])), [players]);
 
@@ -310,13 +519,28 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   }, [currentLeg, players, turns, matchWinnerId]);
 
   const currentPlayer = useMemo(() => {
-    if (!orderPlayers.length) return null as Player | null;
+    if (!orderPlayers.length || !currentLeg) return null as Player | null;
+    
+    // If we have a local turn active, that player is current
     if (localTurn.playerId) {
       return orderPlayers.find((p) => p.id === localTurn.playerId) ?? orderPlayers[0];
     }
+    
+    // Check if the last turn is incomplete (has fewer than 3 throws and not busted)
+    if (turns.length > 0) {
+      const lastTurn = turns[turns.length - 1];
+      const throwCount = turnThrowCounts[lastTurn.id] || 0;
+      
+      // If the last turn has fewer than 3 throws (and wasn't busted), that player is still playing
+      if (throwCount < 3 && !lastTurn.busted) {
+        return orderPlayers.find(p => p.id === lastTurn.player_id) || orderPlayers[0];
+      }
+    }
+    
+    // Otherwise, it's the next player's turn
     const idx = turns.length % orderPlayers.length;
     return orderPlayers[idx];
-  }, [orderPlayers, turns.length, localTurn.playerId]);
+  }, [orderPlayers, turns, turnThrowCounts, currentLeg, localTurn.playerId]);
 
   // For spectator mode, determine current player based on incomplete turns
   const spectatorCurrentPlayer = useMemo(() => {
@@ -341,12 +565,28 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   function getScoreForPlayer(playerId: string): number {
     const legTurns = turns.filter((t) => t.player_id === playerId && t.leg_id === currentLeg?.id);
     const scored = legTurns.reduce((sum, t) => (t.busted ? sum : sum + (t.total_scored || 0)), 0);
-    const current = startScore - scored;
+    let current = startScore - scored;
+    
+    // Check for local turn first (our client's active turn)
     if (localTurn.playerId === playerId) {
       const sub = localTurn.darts.reduce((s, d) => s + d.scored, 0);
       return Math.max(0, current - sub);
     }
-    return current;
+    
+    // Check for incomplete turns from other clients
+    const playerTurns = turns.filter(turn => turn.player_id === playerId);
+    const lastTurn = playerTurns.length > 0 ? playerTurns[playerTurns.length - 1] : null;
+    if (lastTurn && !lastTurn.busted) {
+      const throwCount = turnThrowCounts[lastTurn.id] || 0;
+      if (throwCount > 0 && throwCount < 3) {
+        // This player has an incomplete turn with throws from another client
+        const currentThrows = (lastTurn as any).throws || [];
+        const incompleteTotal = currentThrows.reduce((sum: number, thr: any) => sum + thr.scored, 0);
+        current -= incompleteTotal;
+      }
+    }
+    
+    return Math.max(0, current);
   }
 
   function getAvgForPlayer(playerId: string): number {
@@ -1105,12 +1345,29 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   if (isSpectatorMode) {
     return (
       <div className="w-full space-y-3 md:space-y-6 md:max-w-6xl md:mx-auto">
-        {/* Subtle refresh indicator in top-right corner */}
-        {spectatorLoading && (
-          <div className="fixed top-4 right-4 z-50">
-            <div className="w-3 h-3 bg-blue-500 rounded-full animate-pulse"></div>
+        {/* Connection status and refresh indicator */}
+        <div className="fixed bottom-4 right-4 z-50 flex items-center gap-2">
+          {/* Real-time connection status */}
+          <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-white/90 dark:bg-gray-800/90 shadow-sm text-xs">
+            <div className={`w-2 h-2 rounded-full ${
+              realtime.connectionStatus === 'connected' ? 'bg-green-500' :
+              realtime.connectionStatus === 'connecting' ? 'bg-yellow-500 animate-pulse' :
+              realtime.connectionStatus === 'error' ? 'bg-red-500' :
+              'bg-gray-500'
+            }`} />
+            <span className="font-medium">
+              {realtime.connectionStatus === 'connected' ? 'Live' :
+               realtime.connectionStatus === 'connecting' ? 'Connecting...' :
+               realtime.connectionStatus === 'error' ? 'Error' :
+               'Offline'}
+            </span>
           </div>
-        )}
+          
+          {/* Loading indicator for fallback polling */}
+          {spectatorLoading && !realtime.isConnected && (
+            <div className="w-3 h-3 bg-blue-500 rounded-full animate-pulse"></div>
+          )}
+        </div>
         
         <Card>
           <CardHeader>
@@ -1129,13 +1386,118 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                 </div>
               )}
               
-              {/* Player scores */}
+              {/* Checkout suggestions - with space reservation */}
+              <div className="min-h-8 flex justify-center">
+                {(() => {
+                  if (!spectatorCurrentPlayer) return <div className="invisible">-</div>;
+                  
+                  // Calculate current score including incomplete throws
+                  const getSpectatorScore = (playerId: string): number => {
+                    const legTurns = turns.filter((t) => t.player_id === playerId && t.leg_id === currentLeg?.id);
+                    const scored = legTurns.reduce((sum, t) => (t.busted ? sum : sum + (t.total_scored || 0)), 0);
+                    let current = startScore - scored;
+                    
+                    // Add incomplete throws from current turn
+                    const playerTurns = turns.filter(turn => turn.player_id === playerId);
+                    const lastTurn = playerTurns.length > 0 ? playerTurns[playerTurns.length - 1] : null;
+                    if (lastTurn && !lastTurn.busted) {
+                      const throwCount = turnThrowCounts[lastTurn.id] || 0;
+                      if (throwCount > 0 && throwCount < 3) {
+                        const currentThrows = (lastTurn as any).throws || [];
+                        const incompleteTotal = currentThrows.reduce((sum: number, thr: any) => sum + thr.scored, 0);
+                        current -= incompleteTotal;
+                      }
+                    }
+                    
+                    return Math.max(0, current);
+                  };
+                  
+                  const currentScore = getSpectatorScore(spectatorCurrentPlayer.id);
+                  const playerTurns = turns.filter(turn => turn.player_id === spectatorCurrentPlayer.id);
+                  const lastTurn = playerTurns.length > 0 ? playerTurns[playerTurns.length - 1] : null;
+                  const throwCount = lastTurn ? turnThrowCounts[lastTurn.id] || 0 : 0;
+                  
+                  // Determine if this is a new turn starting or continuing an incomplete turn
+                  // New turn if: no turns yet, last turn was busted, or last turn completed (3 throws)
+                  const isNewTurnStarting = !lastTurn || lastTurn.busted || throwCount === 3;
+                  const dartsLeft = isNewTurnStarting ? 3 : Math.max(0, 3 - throwCount);
+                  
+                  const paths = computeCheckoutSuggestions(currentScore, dartsLeft, finishRule);
+                  
+                  // Only show checkout suggestions if we're actually in a checkout scenario
+                  const shouldShowCheckout = currentScore > 0 && currentScore <= 170 && dartsLeft > 0;
+                  
+                  return (
+                    <div className="flex flex-wrap items-center justify-center gap-2">
+                      {shouldShowCheckout && paths.length > 0
+                        ? paths.map((p, i) => (
+                            <Badge key={i} variant="outline" className="text-xs">
+                              {p.join(', ')}
+                            </Badge>
+                          ))
+                        : shouldShowCheckout ? (
+                            <Badge variant="outline" className="text-xs text-muted-foreground">
+                              No checkout available
+                            </Badge>
+                          ) : (
+                            <div className="invisible">-</div>
+                          )}
+                    </div>
+                  );
+                })()}
+              </div>
+              
+              {/* Player scores with inline throw indicators */}
               <div className="grid gap-3">
                 {orderPlayers.map((player) => {
-                  const score = getScoreForPlayer(player.id);
+                  // Use live score calculation for spectator mode
+                  const getSpectatorScore = (playerId: string): number => {
+                    const legTurns = turns.filter((t) => t.player_id === playerId && t.leg_id === currentLeg?.id);
+                    const scored = legTurns.reduce((sum, t) => (t.busted ? sum : sum + (t.total_scored || 0)), 0);
+                    let current = startScore - scored;
+                    
+                    // Add incomplete throws from current turn
+                    const playerTurns = turns.filter(turn => turn.player_id === playerId);
+                    const lastTurn = playerTurns.length > 0 ? playerTurns[playerTurns.length - 1] : null;
+                    if (lastTurn && !lastTurn.busted) {
+                      const throwCount = turnThrowCounts[lastTurn.id] || 0;
+                      if (throwCount > 0 && throwCount < 3) {
+                        const currentThrows = (lastTurn as any).throws || [];
+                        const incompleteTotal = currentThrows.reduce((sum: number, thr: any) => sum + thr.scored, 0);
+                        current -= incompleteTotal;
+                      }
+                    }
+                    
+                    return Math.max(0, current);
+                  };
+                  
+                  const score = getSpectatorScore(player.id);
                   const avg = getAvgForPlayer(player.id);
                   const deco = decorateAvg(avg);
                   const isCurrent = spectatorCurrentPlayer?.id === player.id;
+                  
+                  // Get throws to display for this player
+                  let displayThrows: any[] = [];
+                  const playerTurns = turns.filter(turn => turn.player_id === player.id);
+                  const lastTurn = playerTurns.length > 0 ? playerTurns[playerTurns.length - 1] : null;
+                  
+                  if (lastTurn) {
+                    const throwCount = turnThrowCounts[lastTurn.id] || 0;
+                    const isPlayerNewTurnStarting = lastTurn.busted || throwCount === 3;
+                    
+                    if (isCurrent && isPlayerNewTurnStarting) {
+                      // Current player starting new turn - don't show any throws yet
+                      displayThrows = [];
+                    } else if (isCurrent && throwCount > 0 && throwCount < 3) {
+                      // Current player with incomplete turn - show current throws
+                      displayThrows = (lastTurn as any).throws || [];
+                    } else if (!isCurrent && (throwCount === 3 || lastTurn.busted)) {
+                      // Show last completed turn for non-current players
+                      displayThrows = (lastTurn as any).throws || [];
+                    }
+                    
+                    displayThrows.sort((a, b) => a.dart_index - b.dart_index);
+                  }
                   
                   return (
                     <div
@@ -1150,6 +1512,34 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                         <div className="flex items-center gap-3">
                           {isCurrent && <Badge variant="default">Playing</Badge>}
                           <div className="font-semibold text-lg">{player.display_name}</div>
+                          
+                          {/* Inline throw indicators */}
+                          {displayThrows.length > 0 && (
+                            <div className="flex items-center gap-1 ml-2">
+                              {Array.from({ length: 3 }, (_, index) => {
+                                const throwData = displayThrows[index];
+                                const hasThrow = index < displayThrows.length;
+                                const isIncomplete = isCurrent && hasThrow && displayThrows.length < 3;
+                                return (
+                                  <div
+                                    key={index}
+                                    className={`min-w-[20px] h-5 px-1 rounded border flex items-center justify-center text-xs font-medium transition-all duration-300 ${
+                                      hasThrow 
+                                        ? isIncomplete
+                                          ? 'border-primary bg-primary/10 text-primary' 
+                                          : 'border-muted-foreground bg-muted-foreground/10 text-muted-foreground'
+                                        : 'border-dashed border-muted-foreground/40 text-muted-foreground/40'
+                                    }`}
+                                  >
+                                    {hasThrow ? throwData.scored : '—'}
+                                  </div>
+                                );
+                              })}
+                              <span className="text-xs text-muted-foreground ml-1">
+                                {displayThrows.length}/3
+                              </span>
+                            </div>
+                          )}
                         </div>
                         <div className="text-right">
                           <div className="text-3xl font-mono font-bold">{score}</div>
@@ -1211,7 +1601,24 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   }
 
   return (
-    <div className="w-full space-y-3 md:space-y-6 md:max-w-6xl md:mx-auto">
+    <div className="w-full space-y-3 md:space-y-6 md:max-w-6xl md:mx-auto relative">
+      {/* Connection status indicator */}
+      <div className="fixed bottom-4 right-4 z-50">
+        <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-white/90 dark:bg-gray-800/90 shadow-sm text-xs">
+          <div className={`w-2 h-2 rounded-full ${
+            realtime.connectionStatus === 'connected' ? 'bg-green-500' :
+            realtime.connectionStatus === 'connecting' ? 'bg-yellow-500 animate-pulse' :
+            realtime.connectionStatus === 'error' ? 'bg-red-500' :
+            'bg-gray-500'
+          }`} />
+          <span className="font-medium">
+            {realtime.connectionStatus === 'connected' ? 'Live' :
+             realtime.connectionStatus === 'connecting' ? 'Connecting...' :
+             realtime.connectionStatus === 'error' ? 'Error' :
+             'Offline'}
+          </span>
+        </div>
+      </div>
       {/* Scoring input at top (mobile keypad or desktop board) */}
       <div className="w-full">
         {/* Mobile: player indicator + keypad at top */}
@@ -1220,25 +1627,80 @@ export default function MatchClient({ matchId }: { matchId: string }) {
               <div className="flex items-center gap-2">
                 <div className="font-medium">{currentPlayer?.display_name ?? '—'}</div>
                 {currentPlayer && (
-                  <span className="rounded-full border border-emerald-400/60 bg-emerald-50 px-3 py-1 text-sm font-mono text-emerald-700 shadow-sm dark:border-emerald-700/60 dark:bg-emerald-900/30 dark:text-emerald-200">
+                  <span className="rounded-full border border-yellow-400/60 bg-yellow-50 px-3 py-1 text-sm font-mono text-yellow-700 shadow-sm dark:border-yellow-700/60 dark:bg-yellow-900/30 dark:text-yellow-200">
                     {getScoreForPlayer(currentPlayer.id)} pts
                   </span>
                 )}
               </div>
               <div className="flex gap-2">
-              {localTurn.darts.map((d, idx) => (
-                <Badge key={idx} variant="secondary">{d.label}</Badge>
-              ))}
-              {Array.from({ length: 3 - localTurn.darts.length }).map((_, idx) => (
-                <Badge key={`m${idx}`} variant="outline">–</Badge>
-              ))}
+              {(() => {
+                // Show throws from current player (could be local or remote)
+                if (currentPlayer && localTurn.playerId === currentPlayer.id) {
+                  // Local turn - show local darts
+                  return (
+                    <>
+                      {localTurn.darts.map((d, idx) => (
+                        <Badge key={idx} variant="secondary">{d.label}</Badge>
+                      ))}
+                      {Array.from({ length: 3 - localTurn.darts.length }).map((_, idx) => (
+                        <Badge key={`m${idx}`} variant="outline">–</Badge>
+                      ))}
+                    </>
+                  );
+                } else if (currentPlayer) {
+                  // Remote turn - show remote throws
+                  const playerTurns = turns.filter(turn => turn.player_id === currentPlayer.id);
+                  const lastTurn = playerTurns.length > 0 ? playerTurns[playerTurns.length - 1] : null;
+                  if (lastTurn && !lastTurn.busted) {
+                    const throwCount = turnThrowCounts[lastTurn.id] || 0;
+                    if (throwCount > 0 && throwCount < 3) {
+                      const currentThrows = (lastTurn as any).throws || [];
+                      currentThrows.sort((a, b) => a.dart_index - b.dart_index);
+                      return (
+                        <>
+                          {currentThrows.map((thr, idx) => (
+                            <Badge key={idx} variant="default" className="bg-blue-500">{thr.scored}</Badge>
+                          ))}
+                          {Array.from({ length: 3 - currentThrows.length }).map((_, idx) => (
+                            <Badge key={`r${idx}`} variant="outline">–</Badge>
+                          ))}
+                        </>
+                      );
+                    }
+                  }
+                  // No active turn - show empty darts
+                  return (
+                    <>
+                      {Array.from({ length: 3 }).map((_, idx) => (
+                        <Badge key={`e${idx}`} variant="outline">–</Badge>
+                      ))}
+                    </>
+                  );
+                }
+                return null;
+              })()}
             </div>
           </div>
           {/* Checkout suggestions */}
           <div className="text-xs text-muted-foreground">
             {(() => {
               const rem = currentPlayer ? getScoreForPlayer(currentPlayer.id) : 0;
-              const dartsLeft = 3 - localTurn.darts.length;
+              
+              // Calculate darts left - could be from local or remote turn
+              let dartsLeft = 3;
+              if (currentPlayer && localTurn.playerId === currentPlayer.id) {
+                dartsLeft = 3 - localTurn.darts.length;
+              } else if (currentPlayer) {
+                const playerTurns = turns.filter(turn => turn.player_id === currentPlayer.id);
+                const lastTurn = playerTurns.length > 0 ? playerTurns[playerTurns.length - 1] : null;
+                if (lastTurn && !lastTurn.busted) {
+                  const throwCount = turnThrowCounts[lastTurn.id] || 0;
+                  if (throwCount > 0 && throwCount < 3) {
+                    dartsLeft = 3 - throwCount;
+                  }
+                }
+              }
+              
               const paths = computeCheckoutSuggestions(rem, dartsLeft, finishRule);
               return (
                 <div className="flex flex-wrap items-center gap-2 min-h-6">
@@ -1264,7 +1726,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
           <div className="flex items-center gap-3">
             <div className="text-lg font-medium">{currentPlayer?.display_name ?? '—'}</div>
             {currentPlayer && (
-              <span className="rounded-full border border-emerald-400/60 bg-emerald-50 px-3 py-1 text-sm font-mono text-emerald-700 shadow-sm dark:border-emerald-700/60 dark:bg-emerald-900/30 dark:text-emerald-200">
+              <span className="rounded-full border border-yellow-400/60 bg-yellow-50 px-3 py-1 text-sm font-mono text-yellow-700 shadow-sm dark:border-yellow-700/60 dark:bg-yellow-900/30 dark:text-yellow-200">
                 {getScoreForPlayer(currentPlayer.id)} pts
               </span>
             )}
@@ -1483,12 +1945,28 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                 const avg = getAvgForPlayer(p.id);
                 const deco = decorateAvg(avg);
                 const isCurrent = currentPlayer?.id === p.id;
-                const isActiveTurn = localTurn.playerId === p.id && localTurn.darts.length > 0;
+                const isLocalActiveTurn = localTurn.playerId === p.id && localTurn.darts.length > 0;
+                
+                // Check for throws from any client (including other clients)
+                let currentThrows: any[] = [];
+                let isRemoteActiveTurn = false;
+                const playerTurns = turns.filter(turn => turn.player_id === p.id);
+                const lastTurn = playerTurns.length > 0 ? playerTurns[playerTurns.length - 1] : null;
+                if (lastTurn && !lastTurn.busted && localTurn.playerId !== p.id) {
+                  const throwCount = turnThrowCounts[lastTurn.id] || 0;
+                  if (throwCount > 0 && throwCount < 3) {
+                    isRemoteActiveTurn = true;
+                    currentThrows = (lastTurn as any).throws || [];
+                    currentThrows.sort((a, b) => a.dart_index - b.dart_index);
+                  }
+                }
+                
+                const isActiveTurn = isLocalActiveTurn || isRemoteActiveTurn;
                 return (
                   <div
                     key={p.id}
                     className={`flex items-center justify-between rounded px-3 py-2 transition-colors ${
-                      isCurrent ? 'border-2 border-green-500 bg-green-500/10' : 'border'
+                      isCurrent ? 'border-2 border-yellow-500 bg-yellow-500/10' : 'border'
                     }`}
                   >
                     <div className="flex items-center gap-2">
@@ -1498,12 +1976,27 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                     <div className="flex items-center gap-3">
                       {isActiveTurn && (
                         <div className="flex gap-1">
-                          {localTurn.darts.map((d, idx) => (
-                            <Badge key={idx} variant="secondary">{d.label}</Badge>
-                          ))}
-                          {Array.from({ length: 3 - localTurn.darts.length }).map((_, idx) => (
-                            <Badge key={`p${idx}`} variant="outline">–</Badge>
-                          ))}
+                          {isLocalActiveTurn ? (
+                            // Show local client's throws
+                            <>
+                              {localTurn.darts.map((d, idx) => (
+                                <Badge key={idx} variant="secondary">{d.label}</Badge>
+                              ))}
+                              {Array.from({ length: 3 - localTurn.darts.length }).map((_, idx) => (
+                                <Badge key={`p${idx}`} variant="outline">–</Badge>
+                              ))}
+                            </>
+                          ) : (
+                            // Show remote client's throws
+                            <>
+                              {currentThrows.map((thr, idx) => (
+                                <Badge key={idx} variant="default" className="bg-blue-500">{thr.scored}</Badge>
+                              ))}
+                              {Array.from({ length: 3 - currentThrows.length }).map((_, idx) => (
+                                <Badge key={`r${idx}`} variant="outline">–</Badge>
+                              ))}
+                            </>
+                          )}
                         </div>
                       )}
                       <div className="flex flex-col items-end">

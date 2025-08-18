@@ -1652,7 +1652,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                                         : 'border-dashed border-muted-foreground/40 text-muted-foreground/40'
                                     }`}
                                   >
-                                    {hasThrow ? throwData.scored : '—'}
+                                    {hasThrow ? throwData.segment : '—'}
                                   </div>
                                 );
                               })}
@@ -2111,7 +2111,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                             // Show remote client's throws
                             <>
                               {currentThrows.map((thr, idx) => (
-                                <Badge key={idx} variant="default" className="bg-blue-500">{thr.scored}</Badge>
+                                <Badge key={idx} variant="default" className="bg-blue-500">{thr.segment}</Badge>
                               ))}
                               {Array.from({ length: 3 - currentThrows.length }).map((_, idx) => (
                                 <Badge key={`r${idx}`} variant="outline">–</Badge>

@@ -1428,10 +1428,11 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   // Spectator Mode View
   if (isSpectatorMode) {
     return (
-      <div className="w-full space-y-3 md:space-y-6 md:max-w-6xl md:mx-auto relative">
+      <div className="fixed inset-0 overflow-y-auto bg-background">
+        <div className="w-full space-y-3 md:space-y-6 px-4 md:px-6 xl:px-8 py-6 relative">
         {/* Round Score Modal */}
         <Dialog open={!!celebration} onOpenChange={() => {}}>
-          <DialogContent className="sm:max-w-md" hideCloseButton>
+          <DialogContent className="sm:max-w-md [&>button]:hidden">
             <DialogTitle className="sr-only">
               {celebration?.level === 'bust' 
                 ? `${celebration?.playerName} busted with ${celebration?.score} points`
@@ -1509,8 +1510,10 @@ export default function MatchClient({ matchId }: { matchId: string }) {
           )}
         </div>
         
-        {/* Live Match Card */}
-        <Card>
+        {/* Cards Row - responsive layout */}
+        <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
+          {/* Live Match Card */}
+          <Card className="xl:col-span-2">
           <CardHeader>
             <CardTitle>Live Match</CardTitle>
             <CardDescription>
@@ -1718,10 +1721,8 @@ export default function MatchClient({ matchId }: { matchId: string }) {
               </div>
             </div>
           </CardContent>
-        </Card>
+          </Card>
 
-        {/* Statistics Cards Row - responsive layout */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Legs Summary */}
           {legs.length > 0 && (
             <Card>
@@ -1836,6 +1837,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
           <Button variant="outline" onClick={toggleSpectatorMode} className="w-full max-w-xs">
             Exit Spectator Mode
           </Button>
+        </div>
         </div>
       </div>
     );

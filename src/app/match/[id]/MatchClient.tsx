@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/dialog';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useRealtime } from '@/hooks/useRealtime';
+import { updateMatchEloRatings, shouldMatchBeRated } from '@/utils/eloRating';
 
 type Player = { id: string; display_name: string };
 
@@ -905,9 +906,25 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       }
     } else {
       const [winnerPid] = someoneWonMatch;
-      const { error: setWinnerErr } = await supabase.from('matches').update({ winner_player_id: winnerPid }).eq('id', matchId);
+      const { error: setWinnerErr } = await supabase.from('matches').update({ 
+        winner_player_id: winnerPid,
+        completed_at: new Date().toISOString()
+      }).eq('id', matchId);
       if (setWinnerErr) {
         alert(`Failed to set match winner: ${setWinnerErr.message}`);
+      } else {
+        // Update ELO ratings if this is a 1v1 match
+        if (shouldMatchBeRated(players.length)) {
+          const loserId = players.find(p => p.id !== winnerPid)?.id;
+          if (loserId) {
+            try {
+              await updateMatchEloRatings(matchId, winnerPid, loserId);
+            } catch (error) {
+              console.error('Failed to update ELO ratings:', error);
+              // Don't show error to user as match completion is more important
+            }
+          }
+        }
       }
     }
     await loadAll();

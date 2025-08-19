@@ -7,6 +7,9 @@ import { getSupabaseClient } from '@/lib/supabaseClient';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
+import { EloLeaderboard } from '@/components/EloLeaderboard';
+import { PlayerEloStats } from '@/components/PlayerEloStats';
+import { Button } from '@/components/ui/button';
 
 
 type PlayerRow = { id: string; display_name: string };
@@ -25,6 +28,7 @@ export default function StatsPage() {
   const [matches, setMatches] = useState<MatchRow[]>([]);
   const [selectedPlayer, setSelectedPlayer] = useState<string>('');
   const [loading, setLoading] = useState(true);
+  const [activeView, setActiveView] = useState<'traditional' | 'elo'>('traditional');
 
 
   useEffect(() => {
@@ -222,12 +226,74 @@ export default function StatsPage() {
 
   return (
     <div className="container mx-auto p-4 space-y-6">
-      <div className="space-y-2">
-        <h1 className="text-3xl font-bold">Statistics</h1>
-        <p className="text-muted-foreground">Comprehensive dart game analytics and insights</p>
+      <div className="space-y-4">
+        <div className="space-y-2">
+          <h1 className="text-3xl font-bold">Statistics</h1>
+          <p className="text-muted-foreground">Comprehensive dart game analytics and insights</p>
+        </div>
+        
+        {/* View Toggle */}
+        <div className="flex gap-2">
+          <Button
+            variant={activeView === 'traditional' ? 'default' : 'outline'}
+            onClick={() => setActiveView('traditional')}
+          >
+            📊 Traditional Stats
+          </Button>
+          <Button
+            variant={activeView === 'elo' ? 'default' : 'outline'}
+            onClick={() => setActiveView('elo')}
+          >
+            🏆 ELO Rankings
+          </Button>
+        </div>
       </div>
 
-      {/* Overall Statistics Cards */}
+      {/* ELO View */}
+      {activeView === 'elo' && (
+        <div className="space-y-6">
+          <div className="grid md:grid-cols-2 gap-6">
+            <div>
+              <EloLeaderboard limit={20} showRecentChanges={true} />
+            </div>
+            
+            <div>
+              {selectedPlayer ? (
+                <PlayerEloStats 
+                  player={players.find(p => p.id === selectedPlayer) || { id: selectedPlayer, display_name: 'Unknown' }} 
+                  showHistory={true}
+                />
+              ) : (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Player ELO Stats</CardTitle>
+                    <CardDescription>Select a player below to view their ELO rating and history</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <Select value={selectedPlayer} onValueChange={setSelectedPlayer}>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Select a player..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {players.map(player => (
+                          <SelectItem key={player.id} value={player.id}>
+                            {player.display_name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Traditional Stats View */}
+      {activeView === 'traditional' && (
+        <div className="space-y-6">
+          {/* Overall Statistics Cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         <Card>
           <CardHeader className="pb-2">
@@ -614,6 +680,8 @@ export default function StatsPage() {
           </CardContent>
         </Card>
       </div>
+        </div>
+      )}
     </div>
   );
 }

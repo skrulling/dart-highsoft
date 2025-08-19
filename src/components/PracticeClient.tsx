@@ -31,6 +31,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import AroundTheWorldGame from '@/components/AroundTheWorldGame';
 
 type Player = { id: string; display_name: string };
 
@@ -38,7 +39,10 @@ type Props = {
   player: Player;
 };
 
+type GameMode = 'menu' | 'traditional' | 'around-the-world';
+
 export default function PracticeClient({ player }: Props) {
+  const [gameMode, setGameMode] = useState<GameMode>('menu');
   const [session, setSession] = useState<PracticeSession | null>(null);
   const [turns, setTurns] = useState<PracticeTurn[]>([]);
   const [, setCurrentTurn] = useState<PracticeTurn | null>(null);
@@ -220,10 +224,19 @@ export default function PracticeClient({ player }: Props) {
     }
   }, [session, loadSessionData]);
 
-  // Auto-start practice session on component mount
+  // Check for existing traditional practice session on component mount
   useEffect(() => {
-    startPractice();
-  }, [startPractice]);
+    const checkExistingSession = async () => {
+      const existingSession = await getActivePracticeSession(player.id);
+      if (existingSession) {
+        // Continue existing traditional practice session
+        setGameMode('traditional');
+        setSession(existingSession);
+      }
+    };
+    
+    checkExistingSession();
+  }, [player.id]);
 
   // Calculate trend data for charts
   const trendData = useMemo(() => {
@@ -240,11 +253,78 @@ export default function PracticeClient({ player }: Props) {
     });
   }, [turns]);
 
+  // Handle different game modes
+  if (gameMode === 'around-the-world') {
+    return (
+      <AroundTheWorldGame 
+        player={player} 
+        onBack={() => setGameMode('menu')}
+      />
+    );
+  }
+
+  if (gameMode === 'menu') {
+    return (
+      <div className="container mx-auto p-6 max-w-2xl">
+        <h1 className="text-3xl font-bold mb-6">Practice Mode</h1>
+        <p className="text-lg text-muted-foreground mb-8">
+          Welcome {player.display_name}! Choose your training game:
+        </p>
+
+        <div className="grid gap-6">
+          <Card className="hover:shadow-lg transition-shadow cursor-pointer" onClick={() => {
+            setGameMode('traditional');
+            startPractice();
+          }}>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-3">
+                <span className="text-2xl">🎯</span>
+                Traditional Practice
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-muted-foreground mb-4">
+                Classic dart practice with score tracking, averages, and turn-by-turn analysis.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <span className="text-xs bg-muted px-2 py-1 rounded">501 game</span>
+                <span className="text-xs bg-muted px-2 py-1 rounded">Score tracking</span>
+                <span className="text-xs bg-muted px-2 py-1 rounded">Dart statistics</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="hover:shadow-lg transition-shadow cursor-pointer" onClick={() => setGameMode('around-the-world')}>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-3">
+                <span className="text-2xl">⏱️</span>
+                Around the World
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-muted-foreground mb-4">
+                Speed challenge: Hit numbers 1-20 in sequence as fast as possible. Choose single or double mode.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <span className="text-xs bg-muted px-2 py-1 rounded">Timer-based</span>
+                <span className="text-xs bg-muted px-2 py-1 rounded">Single/Double modes</span>
+                <span className="text-xs bg-muted px-2 py-1 rounded">Personal bests</span>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
   if (isStarting || !session) {
     return (
       <div className="container mx-auto p-6">
         <div className="text-center space-y-4">
-          <h1 className="text-2xl font-bold">Practice Mode</h1>
+          <Button variant="outline" onClick={() => setGameMode('menu')} className="mb-4">
+            ← Back to Practice Menu
+          </Button>
+          <h1 className="text-2xl font-bold">Traditional Practice</h1>
           <p>Starting practice session for {player.display_name}...</p>
           <p className="text-sm text-muted-foreground">
             If this is taking too long, make sure the database migration has been applied.
@@ -268,12 +348,16 @@ export default function PracticeClient({ player }: Props) {
 
   return (
     <div className="container mx-auto p-3 lg:p-6">
+      <Button variant="outline" onClick={() => setGameMode('menu')} className="mb-4">
+        ← Back to Practice Menu
+      </Button>
+      
       <div className="flex flex-col gap-4 lg:flex-row lg:gap-6">
         {/* Main game area */}
         <div className="flex-1 order-1">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h1 className="text-xl lg:text-2xl font-bold">Practice Mode</h1>
+              <h1 className="text-xl lg:text-2xl font-bold">Traditional Practice</h1>
               <p className="text-sm text-muted-foreground">{player.display_name}</p>
               {session.session_goal && (
                 <p className="text-xs lg:text-sm text-blue-600 mt-1">Goal: {session.session_goal}</p>

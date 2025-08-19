@@ -82,7 +82,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   const [celebration, setCelebration] = useState<{
     score: number;
     playerName: string;
-    level: 'good' | 'excellent';
+    level: 'info' | 'good' | 'excellent';
   } | null>(null);
   const celebratedTurns = useRef<Set<string>>(new Set());
 
@@ -338,9 +338,10 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                     if (!celebratedTurns.current.has(turn.id)) {
                       const playerName = players.find(p => p.id === turn.player_id)?.display_name || 'Player';
                       
-                      // Trigger celebration based on total round score
+                      // Show all round scores with different levels of celebration
+                      celebratedTurns.current.add(turn.id);
+                      
                       if (turn.total_scored >= 70) {
-                        celebratedTurns.current.add(turn.id);
                         setCelebration({
                           score: turn.total_scored,
                           playerName,
@@ -348,13 +349,19 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                         });
                         setTimeout(() => setCelebration(null), 5000); // 5 seconds
                       } else if (turn.total_scored >= 50) {
-                        celebratedTurns.current.add(turn.id);
                         setCelebration({
                           score: turn.total_scored,
                           playerName,
                           level: 'good'
                         });
                         setTimeout(() => setCelebration(null), 4000); // 4 seconds
+                      } else {
+                        setCelebration({
+                          score: turn.total_scored,
+                          playerName,
+                          level: 'info'
+                        });
+                        setTimeout(() => setCelebration(null), 2000); // 2 seconds for basic info
                       }
                     }
                   }
@@ -1415,56 +1422,49 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   if (isSpectatorMode) {
     return (
       <div className="w-full space-y-3 md:space-y-6 md:max-w-6xl md:mx-auto relative">
-        {/* Celebration Overlay */}
-        {celebration && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
-            <div
-              className={`text-center transform transition-all duration-1000 ${
-                celebration.level === 'excellent'
-                  ? 'animate-bounce scale-110'
-                  : 'animate-pulse scale-105'
-              }`}
-            >
+        {/* Round Score Modal */}
+        <Dialog open={!!celebration} onOpenChange={() => setCelebration(null)}>
+          <DialogContent className="sm:max-w-md">
+            <DialogTitle className="sr-only">
+              Round Score: {celebration?.playerName} scored {celebration?.score} points
+            </DialogTitle>
+            <div className="text-center space-y-4">
               <div
-                className={`text-6xl md:text-8xl font-extrabold mb-2 ${
-                  celebration.level === 'excellent'
-                    ? 'text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 via-red-500 to-pink-500 drop-shadow-lg'
-                    : 'text-transparent bg-clip-text bg-gradient-to-r from-blue-500 to-green-500 drop-shadow-lg'
-                }`}
-                style={{
-                  textShadow: celebration.level === 'excellent' 
-                    ? '0 0 20px rgba(255, 215, 0, 0.8), 0 0 40px rgba(255, 215, 0, 0.6)' 
-                    : '0 0 15px rgba(59, 130, 246, 0.8), 0 0 30px rgba(59, 130, 246, 0.6)'
-                }}
-              >
-                {celebration.score}
-              </div>
-              <div
-                className={`text-2xl md:text-4xl font-bold mb-2 ${
-                  celebration.level === 'excellent'
-                    ? 'text-yellow-400'
-                    : 'text-blue-500'
+                className={`font-extrabold ${
+                  celebration?.level === 'excellent'
+                    ? 'text-5xl md:text-6xl bg-gradient-to-r from-yellow-400 via-red-500 to-pink-500 bg-clip-text text-transparent'
+                    : celebration?.level === 'good'
+                    ? 'text-5xl md:text-6xl bg-gradient-to-r from-blue-500 to-green-500 bg-clip-text text-transparent'
+                    : 'text-4xl md:text-5xl text-foreground'
                 }`}
               >
-                {celebration.playerName}
+                {celebration?.score}
               </div>
               <div
-                className={`text-lg md:text-2xl font-medium ${
-                  celebration.level === 'excellent'
-                    ? 'text-red-400'
-                    : 'text-green-500'
+                className={`font-bold text-xl md:text-2xl ${
+                  celebration?.level === 'excellent'
+                    ? 'text-yellow-600 dark:text-yellow-400'
+                    : celebration?.level === 'good'
+                    ? 'text-blue-600 dark:text-blue-400'
+                    : 'text-foreground'
                 }`}
               >
-                {celebration.level === 'excellent' ? '🔥 EXCELLENT! 🔥' : '⚡ GREAT ROUND! ⚡'}
+                {celebration?.playerName}
               </div>
-              {celebration.level === 'excellent' && (
-                <div className="absolute inset-0 animate-ping">
-                  <div className="w-full h-full bg-gradient-to-r from-yellow-400 via-red-500 to-pink-500 rounded-full opacity-20"></div>
+              {celebration?.level !== 'info' && (
+                <div
+                  className={`text-lg md:text-xl font-semibold ${
+                    celebration?.level === 'excellent'
+                      ? 'text-red-500 dark:text-red-400'
+                      : 'text-green-600 dark:text-green-400'
+                  }`}
+                >
+                  {celebration?.level === 'excellent' ? '🔥 EXCELLENT! 🔥' : '⚡ GREAT ROUND! ⚡'}
                 </div>
               )}
             </div>
-          </div>
-        )}
+          </DialogContent>
+        </Dialog>
         
         {/* Connection status and refresh indicator */}
         <div className="fixed bottom-4 right-4 z-50 flex items-center gap-2">
@@ -1490,6 +1490,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
           )}
         </div>
         
+        {/* Live Match Card */}
         <Card>
           <CardHeader>
             <CardTitle>Live Match</CardTitle>
@@ -1664,8 +1665,31 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                         </div>
                         <div className="text-right">
                           <div className="text-3xl font-mono font-bold">{score}</div>
-                          <div className={`text-sm font-medium ${deco.cls}`}>
-                            {deco.emoji} {avg.toFixed(1)} avg
+                          <div className="flex flex-col items-end gap-1">
+                            <div className={`text-sm font-medium ${deco.cls}`}>
+                              {deco.emoji} {avg.toFixed(1)} avg
+                            </div>
+                            {(() => {
+                              // Get player's turn data for this leg
+                              const legTurns = turns.filter((t) => t.player_id === player.id && t.leg_id === currentLeg?.id && !t.busted);
+                              
+                              // Last round score (most recent completed turn)
+                              const lastRoundScore = legTurns.length > 0 ? legTurns[legTurns.length - 1].total_scored : 0;
+                              
+                              // Best round score (highest score in this leg)
+                              const bestRoundScore = legTurns.length > 0 ? Math.max(...legTurns.map(t => t.total_scored)) : 0;
+                              
+                              return (
+                                <div className="space-y-0.5">
+                                  <div className="text-xs text-muted-foreground">
+                                    Last: {lastRoundScore}
+                                  </div>
+                                  <div className="text-xs text-muted-foreground">
+                                    Best: {bestRoundScore}
+                                  </div>
+                                </div>
+                              );
+                            })()}
                           </div>
                         </div>
                       </div>
@@ -1676,6 +1700,104 @@ export default function MatchClient({ matchId }: { matchId: string }) {
             </div>
           </CardContent>
         </Card>
+
+        {/* Statistics Cards Row - responsive layout */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Legs Summary */}
+          {legs.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Legs Summary</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {legs.map((leg) => {
+                  const winner = players.find((p) => p.id === leg.winner_player_id);
+                  return (
+                    <div key={leg.id} className="flex items-center justify-between p-3 rounded-md bg-muted/30 hover:bg-muted/50 transition-colors">
+                      <span className="font-medium">Leg {leg.leg_number}</span>
+                      {winner ? (
+                        <span className="font-semibold text-green-600 dark:text-green-400">🏆 {winner.display_name}</span>
+                      ) : (
+                        <span className="text-muted-foreground">In Progress</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Round Statistics */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Round Statistics</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Top 3 Round Scores */}
+              <div>
+                <h4 className="font-semibold mb-3">Top 3 Rounds</h4>
+                <div className="space-y-1">
+                  {(() => {
+                    // Get all completed turns from current leg, sorted by score
+                    const allTurns = turns
+                      .filter((t) => t.leg_id === currentLeg?.id && !t.busted && t.total_scored > 0)
+                      .sort((a, b) => b.total_scored - a.total_scored)
+                      .slice(0, 3);
+
+                    return allTurns.length > 0 ? allTurns.map((turn, index) => {
+                      const player = players.find((p) => p.id === turn.player_id);
+                      const medal = ['🥇', '🥈', '🥉'][index] || '🏆';
+                      
+                      return (
+                        <div key={turn.id} className="flex items-center justify-between p-3 rounded-md bg-muted/30 hover:bg-muted/50 transition-colors">
+                          <div className="flex items-center gap-3">
+                            <span className="text-xl">{medal}</span>
+                            <span className="font-medium">{player?.display_name || 'Unknown'}</span>
+                          </div>
+                          <span className="text-lg font-bold text-primary">{turn.total_scored}</span>
+                        </div>
+                      );
+                    }) : (
+                      <div className="text-center py-4 text-muted-foreground">
+                        <div className="text-sm">No completed rounds yet</div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+
+              {/* Last 3 Rounds */}
+              <div>
+                <h4 className="font-semibold mb-3">Recent Rounds</h4>
+                <div className="space-y-1">
+                  {(() => {
+                    // Get last 3 completed turns from current leg, sorted by turn number
+                    const recentTurns = turns
+                      .filter((t) => t.leg_id === currentLeg?.id && !t.busted)
+                      .sort((a, b) => b.turn_number - a.turn_number)
+                      .slice(0, 3)
+                      .reverse(); // Show oldest to newest
+
+                    return recentTurns.length > 0 ? recentTurns.map((turn) => {
+                      const player = players.find((p) => p.id === turn.player_id);
+                      
+                      return (
+                        <div key={turn.id} className="flex items-center justify-between p-3 rounded-md bg-muted/30 hover:bg-muted/50 transition-colors">
+                          <span className="font-medium">{player?.display_name || 'Unknown'}</span>
+                          <span className="font-mono font-semibold">{turn.total_scored}</span>
+                        </div>
+                      );
+                    }) : (
+                      <div className="text-center py-4 text-muted-foreground">
+                        <div className="text-sm">No recent rounds yet</div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
 
         {/* Match winner */}
         {matchWinnerId && (
@@ -1689,27 +1811,6 @@ export default function MatchClient({ matchId }: { matchId: string }) {
           </Card>
         )}
 
-        {/* Legs summary */}
-        {legs.length > 0 && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Legs Summary</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-2">
-                {legs.map((leg) => {
-                  const winner = players.find((p) => p.id === leg.winner_player_id);
-                  return (
-                    <div key={leg.id} className="flex items-center justify-between py-2 px-3 rounded border">
-                      <span className="text-sm font-medium">Leg {leg.leg_number}</span>
-                      <span>{winner ? `🏆 ${winner.display_name}` : 'In Progress'}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </CardContent>
-          </Card>
-        )}
         
         {/* Exit Spectator Mode Button */}
         <div className="flex justify-center pt-4">

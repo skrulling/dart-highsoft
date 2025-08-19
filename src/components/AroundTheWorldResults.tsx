@@ -159,7 +159,7 @@ export function AroundTheWorldResults({ player, session, onClose, onPlayAgain, o
             </CardHeader>
             <CardContent>
               <div className="space-y-2">
-                {recentHistory.map((historySession, index) => (
+                {recentHistory.map((historySession) => (
                   <div 
                     key={historySession.session_id} 
                     className={`flex items-center justify-between p-3 rounded-lg ${

@@ -153,7 +153,7 @@ export default function AroundTheWorldGame({ player, onBack }: Props) {
         <CardHeader>
           <CardTitle className="flex items-center gap-3">
             <span>🎯</span>
-            {player.display_name}'s Session
+            {player.display_name}&apos;s Session
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -269,7 +269,7 @@ export default function AroundTheWorldGame({ player, onBack }: Props) {
             <div className="flex items-start gap-3">
               <Badge variant="secondary">4</Badge>
               <div>
-                <div className="font-semibold">Click "Done" when finished</div>
+                <div className="font-semibold">Click &quot;Done&quot; when finished</div>
                 <div className="text-sm text-muted-foreground">
                   Your time will be saved and compared to previous attempts
                 </div>

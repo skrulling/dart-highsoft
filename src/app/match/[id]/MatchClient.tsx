@@ -82,7 +82,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   const [celebration, setCelebration] = useState<{
     score: number;
     playerName: string;
-    level: 'info' | 'good' | 'excellent';
+    level: 'info' | 'good' | 'excellent' | 'bust';
   } | null>(null);
   const celebratedTurns = useRef<Set<string>>(new Set());
 
@@ -336,12 +336,19 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                   if (previousCount < 3 && (currentCount === 3 || turn.busted) && turn.total_scored > 0) {
                     // Check if we've already celebrated this turn
                     if (!celebratedTurns.current.has(turn.id)) {
-                      const playerName = players.find(p => p.id === turn.player_id)?.display_name || 'Player';
+                      const playerName = playerById[turn.player_id]?.display_name || 'Player';
                       
                       // Show all round scores with different levels of celebration
                       celebratedTurns.current.add(turn.id);
                       
-                      if (turn.total_scored >= 70) {
+                      if (turn.busted) {
+                        setCelebration({
+                          score: turn.total_scored,
+                          playerName,
+                          level: 'bust'
+                        });
+                        setTimeout(() => setCelebration(null), 3000); // 3 seconds for bust
+                      } else if (turn.total_scored >= 70) {
                         setCelebration({
                           score: turn.total_scored,
                           playerName,
@@ -1423,26 +1430,32 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     return (
       <div className="w-full space-y-3 md:space-y-6 md:max-w-6xl md:mx-auto relative">
         {/* Round Score Modal */}
-        <Dialog open={!!celebration} onOpenChange={() => setCelebration(null)}>
-          <DialogContent className="sm:max-w-md">
+        <Dialog open={!!celebration} onOpenChange={() => {}}>
+          <DialogContent className="sm:max-w-md" hideCloseButton>
             <DialogTitle className="sr-only">
-              Round Score: {celebration?.playerName} scored {celebration?.score} points
+              {celebration?.level === 'bust' 
+                ? `${celebration?.playerName} busted with ${celebration?.score} points`
+                : `Round Score: ${celebration?.playerName} scored ${celebration?.score} points`}
             </DialogTitle>
             <div className="text-center space-y-4">
               <div
                 className={`font-extrabold ${
-                  celebration?.level === 'excellent'
+                  celebration?.level === 'bust'
+                    ? 'text-5xl md:text-6xl text-red-600 dark:text-red-400'
+                    : celebration?.level === 'excellent'
                     ? 'text-5xl md:text-6xl bg-gradient-to-r from-yellow-400 via-red-500 to-pink-500 bg-clip-text text-transparent'
                     : celebration?.level === 'good'
                     ? 'text-5xl md:text-6xl bg-gradient-to-r from-blue-500 to-green-500 bg-clip-text text-transparent'
                     : 'text-4xl md:text-5xl text-foreground'
                 }`}
               >
-                {celebration?.score}
+                {celebration?.level === 'bust' ? 'BUST' : celebration?.score}
               </div>
               <div
                 className={`font-bold text-xl md:text-2xl ${
-                  celebration?.level === 'excellent'
+                  celebration?.level === 'bust'
+                    ? 'text-red-600 dark:text-red-400'
+                    : celebration?.level === 'excellent'
                     ? 'text-yellow-600 dark:text-yellow-400'
                     : celebration?.level === 'good'
                     ? 'text-blue-600 dark:text-blue-400'
@@ -1454,12 +1467,18 @@ export default function MatchClient({ matchId }: { matchId: string }) {
               {celebration?.level !== 'info' && (
                 <div
                   className={`text-lg md:text-xl font-semibold ${
-                    celebration?.level === 'excellent'
+                    celebration?.level === 'bust'
+                      ? 'text-red-600 dark:text-red-400'
+                      : celebration?.level === 'excellent'
                       ? 'text-red-500 dark:text-red-400'
                       : 'text-green-600 dark:text-green-400'
                   }`}
                 >
-                  {celebration?.level === 'excellent' ? '🔥 EXCELLENT! 🔥' : '⚡ GREAT ROUND! ⚡'}
+                  {celebration?.level === 'bust' 
+                    ? '💥 BUST! 💥'
+                    : celebration?.level === 'excellent' 
+                    ? '🔥 EXCELLENT! 🔥' 
+                    : '⚡ GREAT ROUND! ⚡'}
                 </div>
               )}
             </div>

@@ -30,7 +30,7 @@ export default function StatsPage() {
   const [throws, setThrows] = useState<ThrowRow[]>([]);
   const [matches, setMatches] = useState<MatchRow[]>([]);
   const [playerSegments, setPlayerSegments] = useState<PlayerSegmentRow[]>([]);
-  const [playerAccuracy, setPlayerAccuracy] = useState<PlayerAccuracyRow[]>([]);
+  const [, setPlayerAccuracy] = useState<PlayerAccuracyRow[]>([]);
   const [playerAdjacency, setPlayerAdjacency] = useState<PlayerAdjacencyRow[]>([]);
   const [selectedPlayer, setSelectedPlayer] = useState<string>('');
   const [loading, setLoading] = useState(true);
@@ -80,8 +80,8 @@ export default function StatsPage() {
         setMatches(mt);
         
         // Load basic data for statistics calculations - use batched approach
-        let allTurns: TurnRow[] = [];
-        let allThrows: ThrowRow[] = [];
+        const allTurns: TurnRow[] = [];
+        const allThrows: ThrowRow[] = [];
         
         if (lg.length > 0) {
           // Load turns in smaller batches to avoid URL length issues

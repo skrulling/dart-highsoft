@@ -1,5 +1,6 @@
 "use client";
 import Link from 'next/link';
+import Image from 'next/image';
 import { Button } from '@/components/ui/button';
 import { getSupabaseClient } from '@/lib/supabaseClient';
 import { useEffect, useState } from 'react';
@@ -35,7 +36,10 @@ export default function Home() {
 
   return (
     <main className="p-4 md:p-6 space-y-6 max-w-5xl mx-auto">
-      <h1 className="text-2xl font-semibold">Dart Scoreboard</h1>
+      <div className="flex items-center gap-3">
+        <Image src="/favicon.ico" alt="Dart Scoreboard" width={32} height={32} className="rounded" />
+        <h1 className="text-2xl font-semibold">Dart Scoreboard</h1>
+      </div>
       <div className="flex gap-3">
         <Button asChild>
           <Link href="/new">New Match</Link>

@@ -16,8 +16,25 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Highsoft Dart Scoreboard",
-  description: "A scoreboard for tracking dart matches in Highsoft",
+  title: "Dart Highsoft - Dart Scoring App",
+  description: "A modern, real-time dart scoring application for competitive matches and practice sessions",
+  manifest: "/manifest.json",
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "32x32" },
+      { url: "/favicon-96x96.png", sizes: "96x96", type: "image/png" },
+      { url: "/icon.svg", type: "image/svg+xml" }
+    ],
+    apple: { url: "/apple-icon.png", sizes: "180x180", type: "image/png" }
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "Dart Highsoft"
+  },
+  formatDetection: {
+    telephone: false
+  }
 };
 
 export default function RootLayout({

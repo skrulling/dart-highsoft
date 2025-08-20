@@ -2,6 +2,7 @@
 
 import Dartboard from '@/components/Dartboard';
 import MobileKeypad from '@/components/MobileKeypad';
+import { ScoreProgressChart } from '@/components/ScoreProgressChart';
 import { computeHit, SegmentResult } from '@/utils/dartboard';
 import { applyThrow, FinishRule } from '@/utils/x01';
 import { getSupabaseClient } from '@/lib/supabaseClient';
@@ -22,6 +23,7 @@ import {
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useRealtime } from '@/hooks/useRealtime';
 import { updateMatchEloRatings, shouldMatchBeRated } from '@/utils/eloRating';
+import { Home } from 'lucide-react';
 
 type Player = { id: string; display_name: string };
 
@@ -1446,7 +1448,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   if (isSpectatorMode) {
     return (
       <div className="fixed inset-0 overflow-y-auto bg-background">
-        <div className="w-full space-y-3 md:space-y-6 px-4 md:px-6 xl:px-8 py-6 relative">
+        <div className="w-full space-y-3 md:space-y-6 px-4 md:px-6 xl:px-8 py-6 pb-24 md:pb-6 relative">
         {/* Round Score Modal */}
         <Dialog open={!!celebration} onOpenChange={() => {}}>
           <DialogContent className="sm:max-w-md [&>button]:hidden">
@@ -1836,6 +1838,24 @@ export default function MatchClient({ matchId }: { matchId: string }) {
           </Card>
         </div>
 
+        {/* Score Progress Chart - Second Row */}
+        <Card className="w-full">
+          <CardHeader>
+            <CardTitle>Score Progress</CardTitle>
+            <CardDescription>
+              Player scores by round - showing the remaining points for each player over time
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ScoreProgressChart
+              players={orderPlayers}
+              turns={turns}
+              startScore={parseInt(match.start_score)}
+              currentLegId={currentLeg?.id}
+            />
+          </CardContent>
+        </Card>
+
         {/* Match winner */}
         {matchWinnerId && (
           <Card className="border-2 border-green-500 bg-green-50 dark:bg-green-900/20">
@@ -1849,9 +1869,21 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         )}
 
         
-        {/* Exit Spectator Mode Button */}
-        <div className="flex justify-center pt-4">
-          <Button variant="outline" onClick={toggleSpectatorMode} className="w-full max-w-xs">
+        {/* Navigation Buttons */}
+        <div className="flex justify-center gap-3 pt-6 pb-20 md:pb-6">
+          <Button 
+            variant="outline" 
+            onClick={() => router.push('/')}
+            className="flex items-center gap-2 flex-1 max-w-xs"
+          >
+            <Home size={16} />
+            Home
+          </Button>
+          <Button 
+            variant="outline" 
+            onClick={toggleSpectatorMode} 
+            className="flex-1 max-w-xs"
+          >
             Exit Spectator Mode
           </Button>
         </div>

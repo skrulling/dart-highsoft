@@ -1,36 +1,299 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Dart Highsoft 🎯
 
-## Getting Started
+A modern, real-time dart scoring application built with Next.js, Supabase, and Highcharts. Perfect for casual players and competitive matches with comprehensive scoring, statistics, and spectator modes.
 
-First, run the development server:
+## ✨ Features
+
+### 🎮 Game Modes
+- **X01 Games**: Support for 201, 301, and 501 point games
+- **Practice Mode**: Individual practice sessions with trend tracking
+- **Around the World**: Classic dart training game
+- **Custom Match Settings**: Configurable finish rules (single/double out) and legs to win
+
+### 📊 Real-time Experience
+- **Live Match Updates**: Real-time scoring and turn updates
+- **Spectator Mode**: Dedicated UI for watching matches with live score progress charts
+- **Haptic Feedback**: Mobile device vibration for scoring events
+- **Celebration Animations**: Visual feedback for excellent throws and game completions
+
+### 📱 Multi-Platform Interface
+- **Mobile-First Design**: Touch-optimized keypad for mobile scoring
+- **Desktop Dartboard**: Interactive dartboard interface for desktop users
+- **Responsive Layout**: Seamless experience across all screen sizes
+
+### 📈 Statistics & Analytics
+- **ELO Rating System**: Competitive ranking system for players
+- **Match Analytics**: Detailed statistics including averages, best rounds, and progression charts
+- **Practice Tracking**: Session history and improvement trends
+- **Leaderboards**: Global and filtered player rankings
+
+### 🔧 Advanced Features
+- **Real-time Synchronization**: Supabase realtime for live match updates
+- **Player Management**: Create, edit, and manage player profiles
+- **Match History**: Complete game records and replay functionality
+- **Export Capabilities**: Data visualization with Highcharts integration
+
+## 🚀 Getting Started
+
+### Prerequisites
+- Node.js (v18 or higher)
+- npm or yarn
+- Supabase account and project
+
+### Installation
+
+1. **Clone the repository**
+   ```bash
+   git clone <repository-url>
+   cd dart-highsoft
+   ```
+
+2. **Install dependencies**
+   ```bash
+   npm install
+   ```
+
+3. **Environment Setup**
+   Create a `.env.local` file with your Supabase credentials:
+   ```env
+   NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+   NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+   ```
+
+4. **Database Setup**
+   Run the migrations in the `supabase/migrations/` directory through your Supabase dashboard or CLI.
+
+5. **Start the development server**
+   ```bash
+   npm run dev
+   ```
+
+6. **Open your browser**
+   Navigate to [http://localhost:3000](http://localhost:3000)
+
+## 🛠 Development Commands
 
 ```bash
+# Start development server with Turbopack
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+
+# Build for production
+npm run build
+
+# Start production server
+npm start
+
+# Run linter
+npm run lint
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## 🏗 Architecture
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Tech Stack
+- **Frontend**: Next.js 15 with React 19
+- **Backend**: Supabase (PostgreSQL + Real-time)
+- **UI Framework**: Tailwind CSS with shadcn/ui components
+- **Charts**: Highcharts with React integration
+- **Icons**: Lucide React
+- **Deployment**: Vercel (recommended)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### Core Components
 
-## Learn More
+#### Game Engine (`src/utils/x01.ts`)
+- Dart scoring logic and validation
+- Bust rule enforcement
+- Finish condition detection
+- Turn and throw management
 
-To learn more about Next.js, take a look at the following resources:
+#### Match Management (`src/app/match/[id]/MatchClient.tsx`)
+- Real-time match state synchronization
+- Player rotation and turn management
+- Spectator mode with live updates
+- Mobile and desktop input handling
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+#### Data Model
+- **Players**: Global player management with ELO ratings
+- **Matches**: Game configuration (start score, finish rule, legs to win)
+- **Match Players**: Junction table with play order
+- **Legs**: Individual games within a match
+- **Turns**: Player attempts within a leg
+- **Throws**: Individual dart throws (1-3 per turn)
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## 🌐 API Documentation
 
-## Deploy on Vercel
+### Match Creation API
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Create matches programmatically using the REST API.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+**Endpoint**: `POST /api/matches`
+
+#### Request Format
+```json
+{
+  "type": 501,
+  "legs": 2,
+  "checkout": "double",
+  "participants": ["Player1", "Player2"]
+}
+```
+
+#### Request Parameters
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `type` | number | ✅ | Start score: `201`, `301`, or `501` |
+| `legs` | number | ✅ | Number of legs to win (must be > 0) |
+| `checkout` | string | ✅ | Finish rule: `"single"` or `"double"` |
+| `participants` | string[] | ✅ | Array of player names (minimum 2) |
+
+#### Response Format
+```json
+{
+  "scoringMode": "http://localhost:3000/match/abc123",
+  "spectatorMode": "http://localhost:3000/match/abc123?spectator=true"
+}
+```
+
+#### Response Fields
+| Field | Type | Description |
+|-------|------|-------------|
+| `scoringMode` | string | URL for the match scoring interface |
+| `spectatorMode` | string | URL for the spectator view with live updates |
+
+#### Example Usage
+
+**cURL**
+```bash
+curl -X POST http://localhost:3000/api/matches \
+  -H "Content-Type: application/json" \
+  -d '{
+    "type": 501,
+    "legs": 3,
+    "checkout": "double",
+    "participants": ["Alice", "Bob", "Charlie"]
+  }'
+```
+
+**JavaScript/Fetch**
+```javascript
+const response = await fetch('/api/matches', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    type: 301,
+    legs: 1,
+    checkout: 'single',
+    participants: ['Player A', 'Player B']
+  })
+});
+
+const match = await response.json();
+console.log('Scoring URL:', match.scoringMode);
+console.log('Spectator URL:', match.spectatorMode);
+```
+
+**Python**
+```python
+import requests
+
+response = requests.post('http://localhost:3000/api/matches', json={
+    'type': 501,
+    'legs': 2,
+    'checkout': 'double',
+    'participants': ['Player1', 'Player2']
+})
+
+match_data = response.json()
+print(f"Scoring URL: {match_data['scoringMode']}")
+print(f"Spectator URL: {match_data['spectatorMode']}")
+```
+
+#### Error Responses
+
+| Status Code | Description | Example Response |
+|-------------|-------------|------------------|
+| 400 | Invalid request parameters | `{"error": "Invalid type. Must be 201, 301, or 501"}` |
+| 500 | Server error | `{"error": "Failed to create match"}` |
+
+#### Player Management
+- **Existing Players**: If a participant name matches an existing player, that player is used
+- **New Players**: If a participant name doesn't exist, a new player is automatically created
+- **Name Validation**: Player names cannot be empty after trimming whitespace
+
+## 🎯 Usage Guide
+
+### Creating a Match
+1. Navigate to the "New Match" page
+2. Select players or create new ones
+3. Configure game settings (start score, finish rule, legs to win)
+4. Start the match
+
+### Scoring a Match
+- **Mobile**: Use the touch keypad for quick scoring
+- **Desktop**: Click on the interactive dartboard
+- **Undo**: Edit individual throws if mistakes are made
+- **Real-time**: All players see updates instantly
+
+### Spectator Mode
+- Access via `?spectator=true` URL parameter
+- Live score updates and progress charts
+- No scoring controls - perfect for displays or streaming
+- Real-time turn indicators and checkout suggestions
+
+### Practice Mode
+- Individual practice sessions
+- Track progress over time
+- Multiple practice game types
+- Statistics and trend analysis
+
+## 🔧 Configuration
+
+### Database Settings
+Configure Row Level Security (RLS) policies in Supabase for proper access control. See migration files in `supabase/migrations/` for the complete schema.
+
+### Real-time Features
+Enable real-time subscriptions in your Supabase project for live match updates.
+
+### Environment Variables
+```env
+# Required
+NEXT_PUBLIC_SUPABASE_URL=your-supabase-url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
+
+# Optional (for development)
+NODE_ENV=development
+```
+
+## 📦 Deployment
+
+### Vercel (Recommended)
+1. Connect your repository to Vercel
+2. Add environment variables in the Vercel dashboard
+3. Deploy automatically on push to main branch
+
+### Manual Deployment
+```bash
+npm run build
+npm start
+```
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## 📝 License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## 🙋‍♂️ Support
+
+For questions, issues, or feature requests, please open an issue on GitHub or contact the maintainers.
+
+---
+
+Built with ❤️ for dart enthusiasts worldwide 🎯

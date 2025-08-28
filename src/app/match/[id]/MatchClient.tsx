@@ -86,6 +86,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     score: number;
     playerName: string;
     level: 'info' | 'good' | 'excellent' | 'bust';
+    throws: { segment: string; scored: number; dart_index: number }[];
   } | null>(null);
   const celebratedTurns = useRef<Set<string>>(new Set());
 
@@ -340,6 +341,8 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                     // Check if we've already celebrated this turn
                     if (!celebratedTurns.current.has(turn.id)) {
                       const playerName = playerById[turn.player_id]?.display_name || 'Player';
+                      const throws = (turn as TurnWithThrows).throws || [];
+                      const sortedThrows = throws.sort((a, b) => a.dart_index - b.dart_index);
                       
                       // Show all round scores with different levels of celebration
                       celebratedTurns.current.add(turn.id);
@@ -348,28 +351,32 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                         setCelebration({
                           score: turn.total_scored,
                           playerName,
-                          level: 'bust'
+                          level: 'bust',
+                          throws: sortedThrows
                         });
                         setTimeout(() => setCelebration(null), 3000); // 3 seconds for bust
                       } else if (turn.total_scored >= 70) {
                         setCelebration({
                           score: turn.total_scored,
                           playerName,
-                          level: 'excellent'
+                          level: 'excellent',
+                          throws: sortedThrows
                         });
                         setTimeout(() => setCelebration(null), 5000); // 5 seconds
                       } else if (turn.total_scored >= 50) {
                         setCelebration({
                           score: turn.total_scored,
                           playerName,
-                          level: 'good'
+                          level: 'good',
+                          throws: sortedThrows
                         });
                         setTimeout(() => setCelebration(null), 4000); // 4 seconds
                       } else {
                         setCelebration({
                           score: turn.total_scored,
                           playerName,
-                          level: 'info'
+                          level: 'info',
+                          throws: sortedThrows
                         });
                         setTimeout(() => setCelebration(null), 2000); // 2 seconds for basic info
                       }
@@ -1499,6 +1506,23 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                     : celebration?.level === 'excellent' 
                     ? '🔥 EXCELLENT! 🔥' 
                     : '⚡ GREAT ROUND! ⚡'}
+                </div>
+              )}
+              
+              {/* Individual Dart Throws */}
+              {celebration?.throws && celebration.throws.length > 0 && (
+                <div className="space-y-2">
+                  <div className="text-sm font-medium text-muted-foreground">Darts Thrown</div>
+                  <div className="flex justify-center items-center gap-3">
+                    {celebration.throws.map((dart, index) => (
+                      <div 
+                        key={`${dart.dart_index}-${index}`}
+                        className="bg-muted/50 rounded-lg px-3 py-2 font-mono text-lg font-semibold"
+                      >
+                        {dart.segment === 'MISS' || dart.segment === 'Miss' ? 'Miss' : dart.segment}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>

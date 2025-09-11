@@ -23,6 +23,7 @@ import {
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useRealtime } from '@/hooks/useRealtime';
 import { updateMatchEloRatings, shouldMatchBeRated } from '@/utils/eloRating';
+import { updateMatchEloRatingsMultiplayer, shouldMatchBeRatedMultiplayer, type MultiplayerResult } from '@/utils/eloRatingMultiplayer';
 import { Home } from 'lucide-react';
 
 type Player = { id: string; display_name: string };
@@ -922,7 +923,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       if (setWinnerErr) {
         alert(`Failed to set match winner: ${setWinnerErr.message}`);
       } else {
-        // Update ELO ratings if this is a 1v1 match
+        // Update ELO ratings
         if (shouldMatchBeRated(players.length)) {
           const loserId = players.find(p => p.id !== winnerPid)?.id;
           if (loserId) {
@@ -932,6 +933,17 @@ export default function MatchClient({ matchId }: { matchId: string }) {
               console.error('Failed to update ELO ratings:', error);
               // Don't show error to user as match completion is more important
             }
+          }
+        } else if (shouldMatchBeRatedMultiplayer(players.length)) {
+          // Multiplayer rating: winner rank 1, all others tied at rank 2
+          const results: MultiplayerResult[] = players.map(p => ({
+            playerId: p.id,
+            rank: p.id === winnerPid ? 1 : 2,
+          }));
+          try {
+            await updateMatchEloRatingsMultiplayer(matchId, results);
+          } catch (error) {
+            console.error('Failed to update multiplayer ELO ratings:', error);
           }
         }
       }

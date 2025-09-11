@@ -11,6 +11,7 @@ import { EloLeaderboard } from '@/components/EloLeaderboard';
 import { PlayerEloStats } from '@/components/PlayerEloStats';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import Link from 'next/link';
 
 type PlayerRow = { id: string; display_name: string };
 type SummaryRow = { player_id: string; display_name: string; wins: number; avg_per_turn: number };
@@ -556,6 +557,9 @@ export default function StatsPage() {
             onClick={() => setActiveView('elo')}
           >
             🏆 ELO Rankings
+          </Button>
+          <Button asChild variant="outline">
+            <Link href="/elo-multi">👥 Multiplayer ELO</Link>
           </Button>
         </div>
       </div>

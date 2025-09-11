@@ -1,33 +1,40 @@
 "use client";
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { Button } from '@/components/ui/button';
 import { getSupabaseClient } from '@/lib/supabaseClient';
 import { useEffect, useState } from 'react';
 import { getEloLeaderboard, getEloTier, type EloLeaderboardEntry } from '@/utils/eloRating';
+import { getMultiEloLeaderboard, type MultiEloLeaderboardEntry } from '@/utils/eloRatingMultiplayer';
 
 export default function Home() {
+  const router = useRouter();
   const [leaders, setLeaders] = useState<{ player_id: string; display_name: string; wins: number; avg_per_turn: number }[]>([]);
   const [eloLeaders, setEloLeaders] = useState<EloLeaderboardEntry[]>([]);
+  const [eloMultiLeaders, setEloMultiLeaders] = useState<MultiEloLeaderboardEntry[]>([]);
 
   useEffect(() => {
     (async () => {
       try {
         const supabase = await getSupabaseClient();
-        const [{ data }, eloData] = await Promise.all([
+        const [{ data }, eloData, eloMultiData] = await Promise.all([
           supabase
             .from('player_summary')
             .select('*')
             .not('display_name', 'ilike', '%test%')
             .order('wins', { ascending: false })
             .limit(10),
-          getEloLeaderboard(10)
+          getEloLeaderboard(10),
+          getMultiEloLeaderboard(10)
         ]);
         setLeaders(((data as unknown) as { player_id: string; display_name: string; wins: number; avg_per_turn: number }[]) ?? []);
         setEloLeaders(eloData);
+        setEloMultiLeaders(eloMultiData);
       } catch {
         setLeaders([]);
         setEloLeaders([]);
+        setEloMultiLeaders([]);
       }
     })();
   }, []);
@@ -50,9 +57,48 @@ export default function Home() {
         <Button asChild variant="outline">
           <Link href="/players">Players</Link>
         </Button>
+        <Button asChild variant="outline">
+          <Link href="/elo-multi">Multiplayer ELO</Link>
+        </Button>
       </div>
 
       <div className="grid md:grid-cols-2 gap-6">
+        <section className="space-y-3">
+          <h2 className="text-xl font-semibold">Top 10 Multiplayer ELO Ratings</h2>
+          <ul
+            className="divide-y border rounded bg-card cursor-pointer"
+            onClick={() => router.push('/elo-multi')}
+            title="View full Multiplayer ELO leaderboard"
+          >
+            {eloMultiLeaders.map((entry, idx) => {
+              const tier = getEloTier(entry.current_rating);
+              return (
+                <li key={entry.player_id} className="flex items-center justify-between px-3 py-2">
+                  <div className="flex items-center gap-3">
+                    <span className="w-8 text-lg text-center">{medal(idx)}</span>
+                    <div>
+                      <div>{entry.display_name}</div>
+                      <div className={`text-xs ${tier.color}`}>
+                        {tier.icon} {tier.name}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-6">
+                    <div className="font-mono tabular-nums text-lg font-bold">{entry.current_rating}</div>
+                    <div className="text-sm text-muted-foreground">{entry.win_percentage}% win</div>
+                  </div>
+                </li>
+              );
+            })}
+            {eloMultiLeaders.length === 0 && (
+              <li className="px-3 py-4 text-sm text-muted-foreground">
+                <div>No multiplayer ELO ratings yet.</div>
+                <div className="text-xs mt-1">Complete some 3+ player matches to see rankings!</div>
+              </li>
+            )}
+          </ul>
+        </section>
+
         <section className="space-y-3">
           <h2 className="text-xl font-semibold">Top 10 Match Winners</h2>
           <ul className="divide-y border rounded bg-card">

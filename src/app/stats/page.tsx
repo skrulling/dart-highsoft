@@ -186,6 +186,13 @@ export default function StatsPage() {
     };
   }, [matches, legs, turns, throws]);
 
+  // Top players by average score (desc)
+  const topAvgPlayers = useMemo(() => {
+    return [...summary]
+      .sort((a, b) => b.avg_per_turn - a.avg_per_turn)
+      .slice(0, 8);
+  }, [summary]);
+
   // Player-specific data
   const selectedPlayerData = useMemo(() => {
     if (!selectedPlayer) return null;
@@ -375,6 +382,93 @@ export default function StatsPage() {
     return {
       categories: buckets.map(([bucket]) => `${bucket}-${parseInt(bucket) + 19}`),
       data: buckets.map(([,count]) => count)
+    };
+  }, [selectedPlayerData]);
+
+  // Treble/Double rate by number (1–20)
+  const trebleDoubleByNumberData = useMemo(() => {
+    if (!selectedPlayer) return { categories: [], doubleRates: [], trebleRates: [] };
+
+    // Prefer aggregated table if available
+    const segmentRows = playerSegments.filter(ps => ps.player_id === selectedPlayer);
+
+    const numbers = Array.from({ length: 20 }, (_, i) => i + 1);
+    const categories: string[] = [];
+    const doubleRates: number[] = [];
+    const trebleRates: number[] = [];
+
+    const addRates = (n: number, singles: number, doubles: number, trebles: number) => {
+      const total = singles + doubles + trebles;
+      if (total <= 0) return; // Skip numbers without attempts
+      categories.push(String(n));
+      doubleRates.push(Math.round((doubles / total) * 100));
+      trebleRates.push(Math.round((trebles / total) * 100));
+    };
+
+    if (segmentRows.length > 0) {
+      for (const n of numbers) {
+        const singles = segmentRows
+          .filter(r => r.segment === String(n) || r.segment === `S${n}`)
+          .reduce((s, r) => s + r.total_hits, 0);
+        const doubles = segmentRows
+          .filter(r => r.segment === `D${n}`)
+          .reduce((s, r) => s + r.total_hits, 0);
+        const trebles = segmentRows
+          .filter(r => r.segment === `T${n}`)
+          .reduce((s, r) => s + r.total_hits, 0);
+        addRates(n, singles, doubles, trebles);
+      }
+      return { categories, doubleRates, trebleRates };
+    }
+
+    // Fallback: compute from raw throws
+    if (!selectedPlayerData?.throws.length) return { categories: [], doubleRates: [], trebleRates: [] };
+    for (const n of numbers) {
+      const singles = selectedPlayerData.throws.filter(th => th.segment === String(n) || th.segment === `S${n}`).length;
+      const doubles = selectedPlayerData.throws.filter(th => th.segment === `D${n}`).length;
+      const trebles = selectedPlayerData.throws.filter(th => th.segment === `T${n}`).length;
+      addRates(n, singles, doubles, trebles);
+    }
+    return { categories, doubleRates, trebleRates };
+  }, [selectedPlayer, playerSegments, selectedPlayerData]);
+
+  // Ton bands over time (daily counts of 60–79, 80–99, 100–139, 140–179, 180)
+  const tonBandsOverTimeData = useMemo(() => {
+    if (!selectedPlayerData) return { categories: [], series: [] };
+
+    const validTurns = selectedPlayerData.turns.filter(t => !t.busted);
+    if (!validTurns.length) return { categories: [], series: [] };
+
+    // Group by day YYYY-MM-DD
+    const dayMap = new Map<string, { b60: number; b80: number; b100: number; b140: number; b180: number }>();
+    for (const t of validTurns) {
+      const day = new Date(t.created_at).toISOString().slice(0, 10);
+      if (!dayMap.has(day)) dayMap.set(day, { b60: 0, b80: 0, b100: 0, b140: 0, b180: 0 });
+      const bucket = dayMap.get(day)!;
+      const score = t.total_scored;
+      if (score >= 180) bucket.b180 += 1;
+      else if (score >= 140) bucket.b140 += 1;
+      else if (score >= 100) bucket.b100 += 1;
+      else if (score >= 80) bucket.b80 += 1;
+      else if (score >= 60) bucket.b60 += 1;
+    }
+
+    const categories = Array.from(dayMap.keys()).sort();
+    const b60 = categories.map(d => dayMap.get(d)!.b60);
+    const b80 = categories.map(d => dayMap.get(d)!.b80);
+    const b100 = categories.map(d => dayMap.get(d)!.b100);
+    const b140 = categories.map(d => dayMap.get(d)!.b140);
+    const b180 = categories.map(d => dayMap.get(d)!.b180);
+
+    return {
+      categories,
+      series: [
+        { name: '60–79', data: b60, color: '#93c5fd' },
+        { name: '80–99', data: b80, color: '#60a5fa' },
+        { name: '100–139', data: b100, color: '#3b82f6' },
+        { name: '140–179', data: b140, color: '#2563eb' },
+        { name: '180', data: b180, color: '#1d4ed8' },
+      ]
     };
   }, [selectedPlayerData]);
 
@@ -990,6 +1084,59 @@ export default function StatsPage() {
                   return null;
                 })()}
 
+                {/* Treble/Double Rate by Number */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Treble/Double Rate by Number</CardTitle>
+                    <CardDescription>Success rates across 1–20 (excluding bull)</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <HighchartsReact
+                      highcharts={Highcharts}
+                      options={{
+                        title: { text: null },
+                        chart: { type: 'bar', height: 500 },
+                        xAxis: {
+                          categories: trebleDoubleByNumberData.categories,
+                          title: { text: 'Number' },
+                        },
+                        yAxis: {
+                          title: { text: 'Hit Rate (%)' },
+                          min: 0,
+                          max: 100,
+                        },
+                        series: [
+                          {
+                            type: 'bar',
+                            name: 'Double %',
+                            data: trebleDoubleByNumberData.doubleRates,
+                            color: '#3b82f6',
+                          },
+                          {
+                            type: 'bar',
+                            name: 'Treble %',
+                            data: trebleDoubleByNumberData.trebleRates,
+                            color: '#10b981',
+                          },
+                        ],
+                        legend: { enabled: true },
+                        tooltip: {
+                          shared: true,
+                          valueSuffix: '%',
+                        },
+                        plotOptions: {
+                          bar: {
+                            borderRadius: 2,
+                            dataLabels: {
+                              enabled: false,
+                            },
+                          },
+                        },
+                      }}
+                    />
+                  </CardContent>
+                </Card>
+
                 <Card>
                   <CardHeader>
                     <CardTitle>Target Comparison Chart</CardTitle>
@@ -1104,6 +1251,47 @@ export default function StatsPage() {
                     />
                   </CardContent>
                 </Card>
+
+                {/* Ton Bands Over Time */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Ton Bands Over Time</CardTitle>
+                    <CardDescription>Daily distribution of high-scoring turns</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <HighchartsReact
+                      highcharts={Highcharts}
+                      options={{
+                        title: { text: null },
+                        chart: { type: 'column', height: 380 },
+                        xAxis: {
+                          categories: tonBandsOverTimeData.categories,
+                          type: 'category',
+                          title: { text: 'Date' },
+                          labels: {
+                            step: Math.ceil((tonBandsOverTimeData.categories.length || 1) / 8),
+                          },
+                        },
+                        yAxis: {
+                          min: 0,
+                          title: { text: 'Turns' },
+                        },
+                        legend: { enabled: true },
+                        tooltip: {
+                          shared: true,
+                        },
+                        plotOptions: {
+                          column: {
+                            stacking: 'normal',
+                            borderRadius: 2,
+                          },
+                        },
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        series: tonBandsOverTimeData.series as any,
+                      }}
+                    />
+                  </CardContent>
+                </Card>
               </TabsContent>
             </Tabs>
           )}
@@ -1160,7 +1348,7 @@ export default function StatsPage() {
                     title: { text: null },
                     chart: { type: 'bar', height: 300 },
                     xAxis: { 
-                      categories: summary.slice(0, 8).map(d => d.display_name),
+                      categories: topAvgPlayers.map(d => d.display_name),
                       title: { text: 'Player' }
                     },
                     yAxis: { 
@@ -1169,7 +1357,7 @@ export default function StatsPage() {
                     },
                     series: [{
                       name: 'Avg Score',
-                      data: summary.slice(0, 8).map(d => Number(d.avg_per_turn.toFixed?.(2) ?? d.avg_per_turn)),
+                      data: topAvgPlayers.map(d => Number(d.avg_per_turn.toFixed?.(2) ?? d.avg_per_turn)),
                       color: '#10b981',
                       dataLabels: {
                         enabled: true,

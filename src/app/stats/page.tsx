@@ -378,26 +378,60 @@ export default function StatsPage() {
     };
   }, [selectedPlayerData]);
 
-  // Average score over time
+  // Average score over time (one point per played day, cumulative)
   const avgScoreOverTime = useMemo(() => {
     if (!selectedPlayerData) return [];
-    
-    const sortedTurns = selectedPlayerData.turns
+
+    const validTurns = selectedPlayerData.turns
       .filter(t => !t.busted)
       .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-    
-    let cumulativeScore = 0;
-    let count = 0;
-    
-    return sortedTurns.map(turn => {
-      cumulativeScore += turn.total_scored;
-      count++;
-      return [
-        new Date(turn.created_at).getTime(),
-        Math.round((cumulativeScore / count) * 100) / 100
-      ];
-    });
+
+    // Group by day (UTC)
+    const byDay = new Map<string, { sum: number; count: number }>();
+    for (const t of validTurns) {
+      const day = new Date(t.created_at).toISOString().slice(0, 10);
+      const entry = byDay.get(day) || { sum: 0, count: 0 };
+      entry.sum += t.total_scored;
+      entry.count += 1;
+      byDay.set(day, entry);
+    }
+
+    // Build cumulative average per day
+    const days = Array.from(byDay.keys()).sort();
+    let cumSum = 0;
+    let cumCount = 0;
+    const result: [number, number][] = [];
+    for (const day of days) {
+      const { sum, count } = byDay.get(day)!;
+      cumSum += sum;
+      cumCount += count;
+      const avg = Math.round((cumSum / cumCount) * 100) / 100;
+      // Use midnight UTC timestamp for the category mapping step
+      const ts = new Date(`${day}T00:00:00.000Z`).getTime();
+      result.push([ts, avg]);
+    }
+    return result;
   }, [selectedPlayerData]);
+
+  // Bounds for y-axis (padding ±2 around min/max)
+  const avgScoreYBounds = useMemo(() => {
+    if (!avgScoreOverTime.length) return { min: 0, max: 0 };
+    const ys = avgScoreOverTime.map(([, y]) => (typeof y === 'number' ? y : Number(y)));
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    return {
+      min: Math.floor((minY - 2) * 10) / 10,
+      max: Math.ceil((maxY + 2) * 10) / 10,
+    };
+  }, [avgScoreOverTime]);
+
+  // Categories and series data for compressed x-axis (only played days/turns)
+  const avgScoreCategories = useMemo(() => {
+    return avgScoreOverTime.map(([ts]) => new Date(Number(ts)).toISOString().slice(0, 10));
+  }, [avgScoreOverTime]);
+  const avgScoreSeriesData = useMemo(() => {
+    return avgScoreOverTime.map(([, y]) => y as number);
+  }, [avgScoreOverTime]);
 
   if (loading) {
     return (
@@ -1017,18 +1051,26 @@ export default function StatsPage() {
                       options={{
                         title: { text: null },
                         chart: { height: 400 },
-                        xAxis: { 
-                          type: 'datetime',
-                          title: { text: 'Date' }
+                        xAxis: {
+                          type: 'category',
+                          categories: avgScoreCategories,
+                          title: { text: 'Date' },
+                          tickInterval: undefined,
+                          tickmarkPlacement: 'on',
+                          labels: {
+                            // Only show every Nth label to reduce clutter
+                            step: Math.ceil(avgScoreCategories.length / 8) || 1,
+                          },
                         },
                         yAxis: { 
                           title: { text: 'Cumulative Average Score' },
-                          min: 0
+                          min: avgScoreYBounds.min,
+                          max: avgScoreYBounds.max,
                         },
                         series: [{
                           type: 'spline',
                           name: 'Average Score',
-                          data: avgScoreOverTime,
+                          data: avgScoreSeriesData,
                           color: '#3b82f6',
                           lineWidth: 3,
                           marker: {
@@ -1038,8 +1080,13 @@ export default function StatsPage() {
                         }],
                         legend: { enabled: false },
                         tooltip: {
-                          xDateFormat: '%Y-%m-%d %H:%M',
-                          pointFormat: '<b>{point.y:.2f}</b> average score'
+                          shared: false,
+                          pointFormatter: function () {
+                            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                            const point = this as any;
+                            return `<span style="color:${point.color}">●</span> <b>${point.y?.toFixed?.(2) ?? point.y}</b> average score`;
+                          },
+                          headerFormat: '<span style="font-size: 10px">{point.category}</span><br/>',
                         },
                         plotOptions: {
                           spline: {

@@ -86,7 +86,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   const [celebration, setCelebration] = useState<{
     score: number;
     playerName: string;
-    level: 'info' | 'good' | 'excellent' | 'bust';
+    level: 'info' | 'good' | 'excellent' | 'godlike' | 'max' | 'bust';
     throws: { segment: string; scored: number; dart_index: number }[];
   } | null>(null);
   const celebratedTurns = useRef<Set<string>>(new Set());
@@ -356,6 +356,22 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                           throws: sortedThrows
                         });
                         setTimeout(() => setCelebration(null), 3000); // 3 seconds for bust
+                      } else if (turn.total_scored === 180) {
+                        setCelebration({
+                          score: turn.total_scored,
+                          playerName,
+                          level: 'max',
+                          throws: sortedThrows
+                        });
+                        setTimeout(() => setCelebration(null), 6000); // 6 seconds for 180
+                      } else if (turn.total_scored >= 120) {
+                        setCelebration({
+                          score: turn.total_scored,
+                          playerName,
+                          level: 'godlike',
+                          throws: sortedThrows
+                        });
+                        setTimeout(() => setCelebration(null), 5500); // 5.5 seconds for godlike
                       } else if (turn.total_scored >= 70) {
                         setCelebration({
                           score: turn.total_scored,
@@ -1481,6 +1497,10 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                 className={`font-extrabold ${
                   celebration?.level === 'bust'
                     ? 'text-5xl md:text-6xl text-red-600 dark:text-red-400'
+                    : celebration?.level === 'max'
+                    ? 'text-6xl md:text-7xl bg-gradient-to-r from-emerald-400 via-amber-400 to-rose-500 bg-clip-text text-transparent drop-shadow'
+                    : celebration?.level === 'godlike'
+                    ? 'text-5xl md:text-6xl bg-gradient-to-r from-fuchsia-500 via-purple-500 to-indigo-500 bg-clip-text text-transparent'
                     : celebration?.level === 'excellent'
                     ? 'text-5xl md:text-6xl bg-gradient-to-r from-yellow-400 via-red-500 to-pink-500 bg-clip-text text-transparent'
                     : celebration?.level === 'good'
@@ -1488,12 +1508,20 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                     : 'text-4xl md:text-5xl text-foreground'
                 }`}
               >
-                {celebration?.level === 'bust' ? 'BUST' : celebration?.score}
+                {celebration?.level === 'bust'
+                  ? 'BUST'
+                  : celebration?.level === 'max'
+                  ? '180!'
+                  : celebration?.score}
               </div>
               <div
                 className={`font-bold text-xl md:text-2xl ${
                   celebration?.level === 'bust'
                     ? 'text-red-600 dark:text-red-400'
+                    : celebration?.level === 'max'
+                    ? 'text-emerald-600 dark:text-emerald-400'
+                    : celebration?.level === 'godlike'
+                    ? 'text-fuchsia-600 dark:text-fuchsia-400'
                     : celebration?.level === 'excellent'
                     ? 'text-yellow-600 dark:text-yellow-400'
                     : celebration?.level === 'good'
@@ -1508,15 +1536,23 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                   className={`text-lg md:text-xl font-semibold ${
                     celebration?.level === 'bust'
                       ? 'text-red-600 dark:text-red-400'
+                      : celebration?.level === 'max'
+                      ? 'text-emerald-600 dark:text-emerald-400'
+                      : celebration?.level === 'godlike'
+                      ? 'text-fuchsia-600 dark:text-fuchsia-400'
                       : celebration?.level === 'excellent'
                       ? 'text-red-500 dark:text-red-400'
                       : 'text-green-600 dark:text-green-400'
                   }`}
                 >
-                  {celebration?.level === 'bust' 
+                  {celebration?.level === 'bust'
                     ? '💥 BUST! 💥'
-                    : celebration?.level === 'excellent' 
-                    ? '🔥 EXCELLENT! 🔥' 
+                    : celebration?.level === 'max'
+                    ? '🎯 180! 🎯'
+                    : celebration?.level === 'godlike'
+                    ? '🌟 GODLIKE 🌟'
+                    : celebration?.level === 'excellent'
+                    ? '🔥 EXCELLENT! 🔥'
                     : '⚡ GREAT ROUND! ⚡'}
                 </div>
               )}

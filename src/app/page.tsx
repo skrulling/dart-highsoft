@@ -11,6 +11,7 @@ import { getMultiEloLeaderboard, type MultiEloLeaderboardEntry } from '@/utils/e
 export default function Home() {
   const router = useRouter();
   const [leaders, setLeaders] = useState<{ player_id: string; display_name: string; wins: number; avg_per_turn: number }[]>([]);
+  const [avgLeaders, setAvgLeaders] = useState<{ player_id: string; display_name: string; wins: number; avg_per_turn: number }[]>([]);
   const [eloLeaders, setEloLeaders] = useState<EloLeaderboardEntry[]>([]);
   const [eloMultiLeaders, setEloMultiLeaders] = useState<MultiEloLeaderboardEntry[]>([]);
 
@@ -18,7 +19,7 @@ export default function Home() {
     (async () => {
       try {
         const supabase = await getSupabaseClient();
-        const [{ data }, eloData, eloMultiData] = await Promise.all([
+        const [{ data: winnersData }, eloData, eloMultiData, { data: avgData }] = await Promise.all([
           supabase
             .from('player_summary')
             .select('*')
@@ -26,13 +27,21 @@ export default function Home() {
             .order('wins', { ascending: false })
             .limit(10),
           getEloLeaderboard(10),
-          getMultiEloLeaderboard(10)
+          getMultiEloLeaderboard(10),
+          supabase
+            .from('player_summary')
+            .select('*')
+            .not('display_name', 'ilike', '%test%')
+            .order('avg_per_turn', { ascending: false })
+            .limit(10)
         ]);
-        setLeaders(((data as unknown) as { player_id: string; display_name: string; wins: number; avg_per_turn: number }[]) ?? []);
+        setLeaders(((winnersData as unknown) as { player_id: string; display_name: string; wins: number; avg_per_turn: number }[]) ?? []);
+        setAvgLeaders(((avgData as unknown) as { player_id: string; display_name: string; wins: number; avg_per_turn: number }[]) ?? []);
         setEloLeaders(eloData);
         setEloMultiLeaders(eloMultiData);
       } catch {
         setLeaders([]);
+        setAvgLeaders([]);
         setEloLeaders([]);
         setEloMultiLeaders([]);
       }
@@ -116,6 +125,27 @@ export default function Home() {
             ))}
             {leaders.length === 0 && (
               <li className="px-3 py-4 text-sm text-muted-foreground">No matches recorded yet.</li>
+            )}
+          </ul>
+        </section>
+
+        <section className="space-y-3">
+          <h2 className="text-xl font-semibold">Top 10 by Average Score</h2>
+          <ul className="divide-y border rounded bg-card">
+            {avgLeaders.map((row, idx) => (
+              <li key={row.player_id} className="flex items-center justify-between px-3 py-2">
+                <div className="flex items-center gap-3">
+                  <span className="w-8 text-lg text-center">{medal(idx)}</span>
+                  <span>{row.display_name}</span>
+                </div>
+                <div className="flex items-center gap-6">
+                  <div className="font-mono tabular-nums text-lg font-bold">{row.avg_per_turn.toFixed(2)}</div>
+                  <div className="text-sm text-muted-foreground">{row.wins} wins</div>
+                </div>
+              </li>
+            ))}
+            {avgLeaders.length === 0 && (
+              <li className="px-3 py-4 text-sm text-muted-foreground">No average scores to display yet.</li>
             )}
           </ul>
         </section>

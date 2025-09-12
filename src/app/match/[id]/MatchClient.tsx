@@ -128,6 +128,37 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   const realtime = useRealtime(matchId);
   const realtimeEnabled = true; // For now, always enabled
 
+  // Robust state synchronization function to ensure consistency
+  const syncThrowCounts = useCallback(async (currentLeg: LegRecord) => {
+    try {
+      const supabase = await getSupabaseClient();
+      const { data: allCurrentLegThrows } = await supabase
+        .from('throws')
+        .select(`
+          turn_id,
+          turns:turn_id!inner(id, player_id, turn_number, leg_id)
+        `)
+        .eq('turns.leg_id', currentLeg.id)
+        .order('turn_number', { foreignTable: 'turns' });
+
+      if (allCurrentLegThrows) {
+        const throwCountsByTurn: Record<string, number> = {};
+        for (const throwData of allCurrentLegThrows as unknown as { turn_id: string; turns: { id: string; player_id: string; turn_number: number; leg_id: string; } }[]) {
+          const turnId = throwData.turns.id;
+          throwCountsByTurn[turnId] = (throwCountsByTurn[turnId] || 0) + 1;
+        }
+        
+        // Update throw counts with functional update to avoid stale state
+        setTurnThrowCounts(prev => {
+          // Only update if there are actual changes to prevent unnecessary re-renders
+          return JSON.stringify(prev) !== JSON.stringify(throwCountsByTurn) ? throwCountsByTurn : prev;
+        });
+      }
+    } catch (error) {
+      console.error('Error syncing throw counts:', error);
+    }
+  }, []);
+
   const loadAll = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -156,8 +187,12 @@ export default function MatchClient({ matchId }: { matchId: string }) {
           .eq('leg_id', currentLeg.id)
           .order('turn_number');
         setTurns(((tns ?? []) as TurnRecord[]).sort((a, b) => a.turn_number - b.turn_number));
+        
+        // Sync throw counts for robust state management
+        await syncThrowCounts(currentLeg);
       } else {
         setTurns([]);
+        setTurnThrowCounts({});
       }
 
       // Load turns for all legs to compute per-leg averages
@@ -183,7 +218,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     } finally {
       setLoading(false);
     }
-  }, [matchId]);
+  }, [matchId, syncThrowCounts]);
 
   // Separate loading function for spectator mode that doesn't show loading screen
   const loadAllSpectator = useCallback(async () => {
@@ -237,40 +272,24 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         setTurnsByLeg({});
       }
 
-      // Count throws per turn to determine current player correctly
-      const { data: allCurrentLegThrows } = await supabase
-          .from('throws')
-          .select(`
-            turn_id,
-            turns!inner (
-              id,
-              player_id,
-              turn_number,
-              leg_id
-            )
-          `)
-          .eq('turns.leg_id', currentLeg.id)
-          .order('turn_number', { foreignTable: 'turns' });
-
-        if (allCurrentLegThrows) {
-          const throwCountsByTurn: Record<string, number> = {};
-          for (const throwData of allCurrentLegThrows as unknown as { turn_id: string; turns: { id: string; player_id: string; turn_number: number; leg_id: string; } }[]) {
-            const turnId = throwData.turns.id;
-            throwCountsByTurn[turnId] = (throwCountsByTurn[turnId] || 0) + 1;
-          }
-          setTurnThrowCounts(throwCountsByTurn);
-        }
+      // Use robust sync mechanism for spectator mode too  
+      if (currentLeg) {
+        await syncThrowCounts(currentLeg);
+      } else {
+        setTurnThrowCounts({});
+      }
     } catch (e) {
       console.error('Spectator mode refresh error:', e);
       // Don't set error state in spectator mode to avoid disrupting the view
     } finally {
       setSpectatorLoading(false);
     }
-  }, [matchId]);
+  }, [matchId, syncThrowCounts]);
 
   useEffect(() => {
     void loadAll();
   }, [loadAll]);
+
 
   // Set up real-time event listeners
   useEffect(() => {
@@ -427,7 +446,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       }
     };
     
-    // Handle real-time updates for normal match UI (non-spectator)
+    // Handle real-time updates for normal match UI (non-spectator) with robust sync
     const handleMatchUIUpdate = async (event: CustomEvent) => {
       if (isSpectatorMode) return; // Only for normal match UI
       
@@ -487,7 +506,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                 return JSON.stringify(prev) !== JSON.stringify(newTurns) ? newTurns : prev;
               });
               
-              // Update throw counts
+              // Robust throw count synchronization
               const throwCounts: Record<string, number> = {};
               for (const turn of updatedTurns) {
                 const throws = (turn as TurnWithThrows).throws || [];
@@ -495,12 +514,30 @@ export default function MatchClient({ matchId }: { matchId: string }) {
               }
               
               setTurnThrowCounts(prev => {
-                return JSON.stringify(prev) !== JSON.stringify(throwCounts) ? throwCounts : prev;
+                const hasChanges = JSON.stringify(prev) !== JSON.stringify(throwCounts);
+                if (hasChanges) {
+                  console.log('🔄 Syncing throw counts from realtime update:', throwCounts);
+                }
+                return hasChanges ? throwCounts : prev;
               });
+              
+              // Additional sync check: if we detect inconsistent state, trigger a reconciliation
+              const lastTurn = updatedTurns[updatedTurns.length - 1];
+              if (lastTurn && !lastTurn.busted) {
+                const actualThrows = (lastTurn as TurnWithThrows).throws?.length || 0;
+                const cachedThrows = throwCounts[lastTurn.id] || 0;
+                
+                // If there's a mismatch, sync with database
+                if (actualThrows !== cachedThrows) {
+                  console.log('⚠️ Detected state inconsistency, triggering reconciliation');
+                  await syncThrowCounts(currentLeg);
+                }
+              }
             }
           }
         }
-      } catch {
+      } catch (error) {
+        console.error('Error in handleMatchUIUpdate:', error);
         // Fallback to full reload
         void loadAll();
       }
@@ -590,6 +627,22 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     return newCurrentLeg;
   }, [legs]);
 
+  // Periodic state reconciliation to ensure all clients stay in sync
+  useEffect(() => {
+    if (!currentLeg || isSpectatorMode || !realtime.isConnected) return;
+    
+    const reconcileInterval = setInterval(async () => {
+      try {
+        await syncThrowCounts(currentLeg);
+        console.log('🔄 Periodic state reconciliation completed');
+      } catch (error) {
+        console.error('Error during periodic reconciliation:', error);
+      }
+    }, 10000); // Reconcile every 10 seconds
+    
+    return () => clearInterval(reconcileInterval);
+  }, [currentLeg, isSpectatorMode, realtime.isConnected, syncThrowCounts]);
+
   const orderPlayers = useMemo(() => {
     if (!match || players.length === 0 || !currentLeg) return [] as Player[];
     const startIdx = players.findIndex((p) => p.id === currentLeg.starting_player_id);
@@ -629,6 +682,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     return !firstRoundComplete;
   }, [currentLeg, players, turns, matchWinnerId]);
 
+  // Robust current player determination that queries fresh throw counts
   const currentPlayer = useMemo(() => {
     if (!orderPlayers.length || !currentLeg) return null as Player | null;
     
@@ -637,13 +691,22 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       return orderPlayers.find((p) => p.id === localTurn.playerId) ?? orderPlayers[0];
     }
     
-    // Check if the last turn is incomplete (has fewer than 3 throws and not busted)
+    // For robust player switching, we need to determine whose turn it is based on the actual turn state
+    // rather than relying on potentially stale turnThrowCounts
     if (turns.length > 0) {
       const lastTurn = turns[turns.length - 1];
+      
+      // If the last turn is busted, it's automatically complete and next player's turn
+      if (lastTurn.busted) {
+        const idx = turns.length % orderPlayers.length;
+        return orderPlayers[idx];
+      }
+      
+      // Use turnThrowCounts, but with fallback to database query result
       const throwCount = turnThrowCounts[lastTurn.id] || 0;
       
-      // If the last turn has fewer than 3 throws (and wasn't busted), that player is still playing
-      if (throwCount < 3 && !lastTurn.busted) {
+      // If the last turn has fewer than 3 throws, that player is still playing
+      if (throwCount < 3) {
         return orderPlayers.find(p => p.id === lastTurn.player_id) || orderPlayers[0];
       }
     }

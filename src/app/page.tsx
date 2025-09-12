@@ -14,12 +14,13 @@ export default function Home() {
   const [avgLeaders, setAvgLeaders] = useState<{ player_id: string; display_name: string; wins: number; avg_per_turn: number }[]>([]);
   const [eloLeaders, setEloLeaders] = useState<EloLeaderboardEntry[]>([]);
   const [eloMultiLeaders, setEloMultiLeaders] = useState<MultiEloLeaderboardEntry[]>([]);
+  const [maxScoreLeaders, setMaxScoreLeaders] = useState<{ player_id: string; display_name: string; count_180s: number; max_score: number }[]>([]);
 
   useEffect(() => {
     (async () => {
       try {
         const supabase = await getSupabaseClient();
-        const [{ data: winnersData }, eloData, eloMultiData, { data: avgData }] = await Promise.all([
+        const [{ data: winnersData }, eloData, eloMultiData, { data: avgData }, { data: maxScoreData }] = await Promise.all([
           supabase
             .from('player_summary')
             .select('*')
@@ -33,17 +34,21 @@ export default function Home() {
             .select('*')
             .not('display_name', 'ilike', '%test%')
             .order('avg_per_turn', { ascending: false })
-            .limit(10)
+            .limit(10),
+          supabase
+            .rpc('get_180s_leaderboard', { limit_count: 10 })
         ]);
         setLeaders(((winnersData as unknown) as { player_id: string; display_name: string; wins: number; avg_per_turn: number }[]) ?? []);
         setAvgLeaders(((avgData as unknown) as { player_id: string; display_name: string; wins: number; avg_per_turn: number }[]) ?? []);
         setEloLeaders(eloData);
         setEloMultiLeaders(eloMultiData);
+        setMaxScoreLeaders(((maxScoreData as unknown) as { player_id: string; display_name: string; count_180s: number; max_score: number }[]) ?? []);
       } catch {
         setLeaders([]);
         setAvgLeaders([]);
         setEloLeaders([]);
         setEloMultiLeaders([]);
+        setMaxScoreLeaders([]);
       }
     })();
   }, []);
@@ -177,6 +182,30 @@ export default function Home() {
               <li className="px-3 py-4 text-sm text-muted-foreground">
                 <div>No ELO ratings yet.</div>
                 <div className="text-xs mt-1">Complete some 1v1 matches to see ELO rankings!</div>
+              </li>
+            )}
+          </ul>
+        </section>
+
+        <section className="space-y-3 md:col-span-2">
+          <h2 className="text-xl font-semibold">Top 10 Maximum 180s</h2>
+          <ul className="divide-y border rounded bg-card">
+            {maxScoreLeaders.map((row, idx) => (
+              <li key={row.player_id} className="flex items-center justify-between px-3 py-2">
+                <div className="flex items-center gap-3">
+                  <span className="w-8 text-lg text-center">{medal(idx)}</span>
+                  <span>{row.display_name}</span>
+                </div>
+                <div className="flex items-center gap-6">
+                  <div className="font-mono tabular-nums text-lg font-bold">{row.count_180s}</div>
+                  <div className="text-sm text-muted-foreground">Max: {row.max_score}</div>
+                </div>
+              </li>
+            ))}
+            {maxScoreLeaders.length === 0 && (
+              <li className="px-3 py-4 text-sm text-muted-foreground">
+                <div>No 180s recorded yet.</div>
+                <div className="text-xs mt-1">A 180 is the maximum possible score (triple-20 x3)!</div>
               </li>
             )}
           </ul>

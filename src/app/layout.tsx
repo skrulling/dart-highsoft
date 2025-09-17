@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import Link from "next/link";
-import { Home, Gamepad2, BarChart3 } from "lucide-react";
+import { Home, Gamepad2, BarChart3, Trophy } from "lucide-react";
 import { Analytics } from '@vercel/analytics/react';
 
 const geistSans = Geist({
@@ -59,6 +59,10 @@ export default function RootLayout({
                 <Gamepad2 className="size-4" />
                 Games
               </Link>
+              <Link href="/leaderboards" className="flex items-center gap-2">
+                <Trophy className="size-4" />
+                Leaderboards
+              </Link>
               <Link href="/stats" className="flex items-center gap-2">
                 <BarChart3 className="size-4" />
                 Statistics
@@ -67,7 +71,7 @@ export default function RootLayout({
           </nav>
           <main className="px-3 py-2 md:p-6 max-w-6xl mx-auto">{children}</main>
           <nav className="md:hidden fixed bottom-0 left-0 right-0 border-t bg-card">
-            <div className="grid grid-cols-3">
+            <div className="grid grid-cols-4">
               <Link href="/" className="flex flex-col items-center justify-center py-2 gap-1">
                 <Home className="size-5" />
                 <span className="text-xs">Home</span>
@@ -75,6 +79,10 @@ export default function RootLayout({
               <Link href="/games" className="flex flex-col items-center justify-center py-2 gap-1">
                 <Gamepad2 className="size-5" />
                 <span className="text-xs">Games</span>
+              </Link>
+              <Link href="/leaderboards" className="flex flex-col items-center justify-center py-2 gap-1">
+                <Trophy className="size-5" />
+                <span className="text-xs">Boards</span>
               </Link>
               <Link href="/stats" className="flex flex-col items-center justify-center py-2 gap-1">
                 <BarChart3 className="size-5" />

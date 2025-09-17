@@ -16,6 +16,42 @@ type TopRoundScore = {
   match_id: string;
 };
 
+type TopRoundScorePayload = {
+  id: string;
+  player_id: string;
+  total_scored: number;
+  created_at: string;
+  leg_id: string;
+  legs:
+    | {
+        id: string;
+        match_id: string;
+        matches: {
+          id: string;
+          ended_early: boolean;
+        };
+      }
+    | {
+        id: string;
+        match_id: string;
+        matches: {
+          id: string;
+          ended_early: boolean;
+        };
+      }[]
+    | null;
+  players:
+    | {
+        id: string;
+        display_name: string;
+      }
+    | {
+        id: string;
+        display_name: string;
+      }[]
+    | null;
+};
+
 export default function LeaderboardsPage() {
   const [leaders, setLeaders] = useState<{ player_id: string; display_name: string; wins: number; avg_per_turn: number }[]>([]);
   const [avgLeaders, setAvgLeaders] = useState<{ player_id: string; display_name: string; wins: number; avg_per_turn: number }[]>([]);
@@ -77,15 +113,30 @@ export default function LeaderboardsPage() {
         setEloMultiLeaders(eloMultiData);
 
         // Transform top scores data
-        const transformedTopScores = topScoresData?.map((turn) => ({
-          id: turn.id,
-          player_id: turn.player_id,
-          display_name: (turn.players as any).display_name,
-          total_scored: turn.total_scored,
-          created_at: turn.created_at,
-          leg_id: turn.leg_id,
-          match_id: (turn.legs as any).match_id
-        })) ?? [];
+        const mapTopRoundScore = (row: TopRoundScorePayload): TopRoundScore | null => {
+          const playerRelation = Array.isArray(row.players) ? row.players[0] : row.players;
+          const legRelation = Array.isArray(row.legs) ? row.legs[0] : row.legs;
+
+          if (!playerRelation || !legRelation) {
+            return null;
+          }
+
+          return {
+            id: row.id,
+            player_id: row.player_id,
+            display_name: playerRelation.display_name,
+            total_scored: row.total_scored,
+            created_at: row.created_at,
+            leg_id: row.leg_id,
+            match_id: legRelation.match_id
+          };
+        };
+
+        const rawTopScores = (topScoresData ?? []) as unknown[];
+
+        const transformedTopScores = rawTopScores
+          .map((row) => mapTopRoundScore(row as TopRoundScorePayload))
+          .filter((row): row is TopRoundScore => row !== null);
 
         setTopRoundScores(transformedTopScores);
       } catch (error) {

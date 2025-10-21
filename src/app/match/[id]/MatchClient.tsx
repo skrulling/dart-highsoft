@@ -534,11 +534,21 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       void loadAll();
     };
 
+    // Handle match_players changes - reload to update player list and order
+    const handleMatchPlayersChange = () => {
+      if (isSpectatorMode) {
+        void loadAllSpectator();
+      } else {
+        void loadAll();
+      }
+    };
+
     // Add event listeners
     window.addEventListener('supabase-throws-change', handleThrowChange as unknown as EventListener);
     window.addEventListener('supabase-turns-change', handleTurnChange as unknown as EventListener);
     window.addEventListener('supabase-legs-change', handleLegChange as unknown as EventListener);
     window.addEventListener('supabase-matches-change', handleMatchChange as unknown as EventListener);
+    window.addEventListener('supabase-match-players-change', handleMatchPlayersChange as unknown as EventListener);
 
     // Update presence to indicate we're viewing this match
     realtime.updatePresence(isSpectatorMode);
@@ -549,6 +559,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       window.removeEventListener('supabase-turns-change', handleTurnChange as unknown as EventListener);
       window.removeEventListener('supabase-legs-change', handleLegChange as unknown as EventListener);
       window.removeEventListener('supabase-matches-change', handleMatchChange as unknown as EventListener);
+      window.removeEventListener('supabase-match-players-change', handleMatchPlayersChange as unknown as EventListener);
     };
 
   // eslint-disable-next-line react-hooks/exhaustive-deps

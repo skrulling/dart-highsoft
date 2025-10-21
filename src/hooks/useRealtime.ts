@@ -71,6 +71,18 @@ export function useRealtime(matchId: string) {
           (payload) => {
             window.dispatchEvent(new CustomEvent('supabase-matches-change', { detail: payload }));
           }
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'match_players',
+            filter: `match_id=eq.${matchId}`,
+          },
+          (payload) => {
+            window.dispatchEvent(new CustomEvent('supabase-match-players-change', { detail: payload }));
+          }
         );
 
       // Subscribe to the channel

@@ -1400,8 +1400,29 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       return;
     }
 
+    // Step 4: Update current leg's starting_player_id to maintain correct order
+    // After swap, determine who should be first (if swapping position 0 and 1)
+    if (currentLeg) {
+      let newStartingPlayerId = currentLeg.starting_player_id;
+
+      // If we're moving someone to position 0, they should be the starting player
+      if (index === 1) {
+        newStartingPlayerId = player.id;
+      }
+
+      const { error: legError } = await supabase
+        .from('legs')
+        .update({ starting_player_id: newStartingPlayerId })
+        .eq('id', currentLeg.id);
+
+      if (legError) {
+        alert(`Failed to update leg starting player: ${legError.message}`);
+        return;
+      }
+    }
+
     await loadAll();
-  }, [players, matchId, canReorderPlayers, loadAll]);
+  }, [players, matchId, canReorderPlayers, currentLeg, loadAll]);
 
   // Move player down in play order
   const movePlayerDown = useCallback(async (index: number) => {
@@ -1450,8 +1471,29 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       return;
     }
 
+    // Step 4: Update current leg's starting_player_id to maintain correct order
+    // After swap, determine who should be first (if swapping position 0 and 1)
+    if (currentLeg) {
+      let newStartingPlayerId = currentLeg.starting_player_id;
+
+      // If we're moving the first player down, the next player becomes first
+      if (index === 0) {
+        newStartingPlayerId = nextPlayer.id;
+      }
+
+      const { error: legError } = await supabase
+        .from('legs')
+        .update({ starting_player_id: newStartingPlayerId })
+        .eq('id', currentLeg.id);
+
+      if (legError) {
+        alert(`Failed to update leg starting player: ${legError.message}`);
+        return;
+      }
+    }
+
     await loadAll();
-  }, [players, matchId, canReorderPlayers, loadAll]);
+  }, [players, matchId, canReorderPlayers, currentLeg, loadAll]);
 
   // Update a specific throw with a new segment
   const updateSelectedThrow = useCallback(

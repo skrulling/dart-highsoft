@@ -1984,8 +1984,9 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         </div>
       </div>
       {/* Scoring input at top (mobile keypad or desktop board) */}
-      <div className="w-full">
-        {/* Mobile: player indicator + keypad at top */}
+      <div className="w-full space-y-6 md:space-y-0 md:grid md:grid-cols-[minmax(280px,340px)_1fr] md:gap-6 md:items-start">
+        <div className="space-y-3 md:col-start-2 md:row-start-1">
+          {/* Mobile: player indicator + keypad at top */}
           <div className="md:hidden space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -1997,59 +1998,60 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                 )}
               </div>
               <div className="flex gap-2">
-              {(() => {
-                // Show throws from current player (could be local or remote)
-                if (currentPlayer && localTurn.playerId === currentPlayer.id) {
-                  // Local turn - show local darts
-                  return (
-                    <>
-                      {localTurn.darts.map((d, idx) => (
-                        <Badge key={idx} variant="secondary">{d.label}</Badge>
-                      ))}
-                      {Array.from({ length: 3 - localTurn.darts.length }).map((_, idx) => (
-                        <Badge key={`m${idx}`} variant="outline">–</Badge>
-                      ))}
-                    </>
-                  );
-                } else if (currentPlayer) {
-                  // Remote turn - show remote throws
-                  const playerTurns = turns.filter(turn => turn.player_id === currentPlayer.id);
-                  const lastTurn = playerTurns.length > 0 ? playerTurns[playerTurns.length - 1] : null;
-                  if (lastTurn && !lastTurn.busted) {
-                    const throwCount = turnThrowCounts[lastTurn.id] || 0;
-                    if (throwCount > 0 && throwCount < 3) {
-                      const currentThrows = (lastTurn as TurnWithThrows).throws || [];
-                      currentThrows.sort((a, b) => a.dart_index - b.dart_index);
-                      return (
-                        <>
-                          {currentThrows.map((thr, idx) => (
-                            <Badge key={idx} variant="default" className="bg-blue-500">{thr.scored}</Badge>
-                          ))}
-                          {Array.from({ length: 3 - currentThrows.length }).map((_, idx) => (
-                            <Badge key={`r${idx}`} variant="outline">–</Badge>
-                          ))}
-                        </>
-                      );
+                {(() => {
+                  // Show throws from current player (could be local or remote)
+                  if (currentPlayer && localTurn.playerId === currentPlayer.id) {
+                    // Local turn - show local darts
+                    return (
+                      <>
+                        {localTurn.darts.map((d, idx) => (
+                          <Badge key={idx} variant="secondary">{d.label}</Badge>
+                        ))}
+                        {Array.from({ length: 3 - localTurn.darts.length }).map((_, idx) => (
+                          <Badge key={`m${idx}`} variant="outline">–</Badge>
+                        ))}
+                      </>
+                    );
+                  } else if (currentPlayer) {
+                    // Remote turn - show remote throws
+                    const playerTurns = turns.filter(turn => turn.player_id === currentPlayer.id);
+                    const lastTurn = playerTurns.length > 0 ? playerTurns[playerTurns.length - 1] : null;
+                    if (lastTurn && !lastTurn.busted) {
+                      const throwCount = turnThrowCounts[lastTurn.id] || 0;
+                      if (throwCount > 0 && throwCount < 3) {
+                        const currentThrows = (lastTurn as TurnWithThrows).throws || [];
+                        currentThrows.sort((a, b) => a.dart_index - b.dart_index);
+                        return (
+                          <>
+                            {currentThrows.map((thr, idx) => (
+                              <Badge key={idx} variant="default" className="bg-blue-500">{thr.scored}</Badge>
+                            ))}
+                            {Array.from({ length: 3 - currentThrows.length }).map((_, idx) => (
+                              <Badge key={`r${idx}`} variant="outline">–</Badge>
+                            ))}
+                          </>
+                        );
+                      }
                     }
+                    // No active turn - show empty darts
+                    return (
+                      <>
+                        {Array.from({ length: 3 }).map((_, idx) => (
+                          <Badge key={`e${idx}`} variant="outline">–</Badge>
+                        ))}
+                      </>
+                    );
                   }
-                  // No active turn - show empty darts
-                  return (
-                    <>
-                      {Array.from({ length: 3 }).map((_, idx) => (
-                        <Badge key={`e${idx}`} variant="outline">–</Badge>
-                      ))}
-                    </>
-                  );
-                }
-                return null;
-              })()}
+                  return null;
+                })()}
+              </div>
             </div>
           </div>
           {/* Checkout suggestions */}
           <div className="text-xs text-muted-foreground">
             {(() => {
               const rem = currentPlayer ? getScoreForPlayer(currentPlayer.id) : 0;
-              
+
               // Calculate darts left - could be from local or remote turn
               let dartsLeft = 3;
               if (currentPlayer && localTurn.playerId === currentPlayer.id) {
@@ -2064,7 +2066,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                   }
                 }
               }
-              
+
               const paths = computeCheckoutSuggestions(rem, dartsLeft, finishRule);
               return (
                 <div className="flex flex-wrap items-center gap-2 min-h-6">
@@ -2081,62 +2083,63 @@ export default function MatchClient({ matchId }: { matchId: string }) {
               );
             })()}
           </div>
-          <div className={`${matchWinnerId ? 'pointer-events-none opacity-50' : ''}`}>
+          <div className={`${matchWinnerId ? 'pointer-events-none opacity-50' : ''} md:hidden`}>
             <MobileKeypad onHit={(seg) => handleBoardClick(0, 0, seg as unknown as ReturnType<typeof computeHit>)} />
           </div>
-        </div>
-        {/* Desktop: current player header */}
-        <div className="hidden md:flex items-center justify-center mt-2">
-          <div className="flex items-center gap-3">
-            <div className="text-lg font-medium">{currentPlayer?.display_name ?? '—'}</div>
-            {currentPlayer && (
-              <span className="rounded-full border border-yellow-400/60 bg-yellow-50 px-3 py-1 text-sm font-mono text-yellow-700 shadow-sm dark:border-yellow-700/60 dark:bg-yellow-900/30 dark:text-yellow-200">
-                {getScoreForPlayer(currentPlayer.id)} pts
-              </span>
-            )}
+          {/* Desktop: current player header */}
+          <div className="hidden md:flex items-center justify-center mt-2">
+            <div className="flex items-center gap-3">
+              <div className="text-lg font-medium">{currentPlayer?.display_name ?? '—'}</div>
+              {currentPlayer && (
+                <span className="rounded-full border border-yellow-400/60 bg-yellow-50 px-3 py-1 text-sm font-mono text-yellow-700 shadow-sm dark:border-yellow-700/60 dark:bg-yellow-900/30 dark:text-yellow-200">
+                  {getScoreForPlayer(currentPlayer.id)} pts
+                </span>
+              )}
+            </div>
           </div>
-        </div>
-        {/* Desktop: board */}
-        <div className={`hidden md:flex justify-center ${matchWinnerId ? 'pointer-events-none opacity-50' : ''}`}>
-          <Dartboard onHit={handleBoardClick} />
-        </div>
-        <div className="flex flex-wrap items-center gap-2 sm:gap-3 mt-2">
-          <Button variant="outline" size="sm" onClick={undoLastThrow} disabled={!!matchWinnerId} className="text-xs sm:text-sm">
-            Undo dart
-          </Button>
-          <Button variant="outline" size="sm" onClick={openEditModal} disabled={!currentLeg} className="text-xs sm:text-sm">
-            Edit throws
-          </Button>
-          <Button variant="outline" size="sm" onClick={openEditPlayersModal} disabled={!canEditPlayers} className="text-xs sm:text-sm">
-            Edit players
-          </Button>
-          <div className="text-sm text-gray-600 hidden md:block">Click the board to register throws</div>
-        </div>
-        {matchWinnerId && (
-          <Card className="mt-4 overflow-hidden border-2 border-green-500/80 shadow-md ring-2 ring-green-400/30 bg-gradient-to-br from-emerald-50 to-green-50 dark:from-emerald-900/20 dark:to-green-900/10">
-            <CardContent className="py-6">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <span className="text-3xl animate-bounce">🏆</span>
-                  <div>
-                    <div className="text-xs uppercase tracking-wide text-green-700 dark:text-green-300">Winner</div>
-                    <div className="text-2xl font-extrabold">
-                      {players.find((p) => p.id === matchWinnerId)?.display_name}
+          {/* Desktop: board */}
+          <div className={`hidden md:flex justify-center ${matchWinnerId ? 'pointer-events-none opacity-50' : ''}`}>
+            <Dartboard onHit={handleBoardClick} />
+          </div>
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3 mt-2 md:justify-center">
+            <Button variant="outline" size="sm" onClick={undoLastThrow} disabled={!!matchWinnerId} className="text-xs sm:text-sm">
+              Undo dart
+            </Button>
+            <Button variant="outline" size="sm" onClick={openEditModal} disabled={!currentLeg} className="text-xs sm:text-sm">
+              Edit throws
+            </Button>
+            <Button variant="outline" size="sm" onClick={openEditPlayersModal} disabled={!canEditPlayers} className="text-xs sm:text-sm">
+              Edit players
+            </Button>
+            <div className="text-sm text-muted-foreground hidden md:block">
+              Hover a segment to preview its score, then click to register the dart.
+            </div>
+          </div>
+          {matchWinnerId && (
+            <Card className="mt-4 overflow-hidden border-2 border-green-500/80 shadow-md ring-2 ring-green-400/30 bg-gradient-to-br from-emerald-50 to-green-50 dark:from-emerald-900/20 dark:to-green-900/10">
+              <CardContent className="py-6">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <span className="text-3xl animate-bounce">🏆</span>
+                    <div>
+                      <div className="text-xs uppercase tracking-wide text-green-700 dark:text-green-300">Winner</div>
+                      <div className="text-2xl font-extrabold">
+                        {players.find((p) => p.id === matchWinnerId)?.display_name}
+                      </div>
+                      <div className="text-sm text-green-700/80 dark:text-green-200/80">wins the match!</div>
                     </div>
-                    <div className="text-sm text-green-700/80 dark:text-green-200/80">wins the match!</div>
                   </div>
+                  <Button onClick={startRematch} disabled={rematchLoading}>
+                    {rematchLoading ? 'Starting…' : 'Rematch'}
+                  </Button>
                 </div>
-                <Button onClick={startRematch} disabled={rematchLoading}>
-                  {rematchLoading ? 'Starting…' : 'Rematch'}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-      </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
 
-      {/* Match info and summaries */}
-      <div className="space-y-4">
+        <div className="space-y-4 md:col-start-1 md:row-start-1">
+          {/* Match info and summaries */}
         {/* Edit throws modal */}
         {editOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -2432,43 +2435,43 @@ export default function MatchClient({ matchId }: { matchId: string }) {
             </div>
           </CardContent>
         </Card>
-        
-        {/* Action Buttons */}
-        <div className="flex flex-col sm:flex-row gap-2 pt-4">
-          {/* End Game Early Button - Show when match is ongoing */}
-          {!matchWinnerId && (
-            <Dialog open={endGameDialogOpen} onOpenChange={setEndGameDialogOpen}>
-              <DialogTrigger asChild>
-                <Button variant="destructive" className="flex-1 sm:max-w-xs">
-                  End Game Early
+      </div>
+      </div>
+      {/* Action Buttons */}
+      <div className="flex flex-col sm:flex-row gap-2 pt-4 md:pt-6 md:justify-center md:gap-4">
+        {/* End Game Early Button - Show when match is ongoing */}
+        {!matchWinnerId && (
+          <Dialog open={endGameDialogOpen} onOpenChange={setEndGameDialogOpen}>
+            <DialogTrigger asChild>
+              <Button variant="destructive" className="flex-1 sm:max-w-xs md:max-w-sm">
+                End Game Early
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>End Game Early?</DialogTitle>
+                <DialogDescription>
+                  Are you sure you want to end this game early? This action cannot be undone.
+                  <br /><br />
+                  <strong>Warning:</strong> This match and all its statistics will not count towards player records.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setEndGameDialogOpen(false)} disabled={endGameLoading}>
+                  Cancel
                 </Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>End Game Early?</DialogTitle>
-                  <DialogDescription>
-                    Are you sure you want to end this game early? This action cannot be undone.
-                    <br /><br />
-                    <strong>Warning:</strong> This match and all its statistics will not count towards player records.
-                  </DialogDescription>
-                </DialogHeader>
-                <DialogFooter>
-                  <Button variant="outline" onClick={() => setEndGameDialogOpen(false)} disabled={endGameLoading}>
-                    Cancel
-                  </Button>
-                  <Button variant="destructive" onClick={endGameEarly} disabled={endGameLoading}>
-                    {endGameLoading ? 'Ending...' : 'End Game'}
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
-          )}
+                <Button variant="destructive" onClick={endGameEarly} disabled={endGameLoading}>
+                  {endGameLoading ? 'Ending...' : 'End Game'}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        )}
 
-          {/* Spectator Mode Button */}
-          <Button variant="outline" onClick={toggleSpectatorMode} className="flex-1 sm:max-w-xs">
-            Enter Spectator Mode
-          </Button>
-        </div>
+        {/* Spectator Mode Button */}
+        <Button variant="outline" onClick={toggleSpectatorMode} className="flex-1 sm:max-w-xs md:max-w-sm">
+          Enter Spectator Mode
+        </Button>
       </div>
     </div>
   );

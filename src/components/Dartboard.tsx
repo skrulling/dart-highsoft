@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useCallback } from 'react';
 import { DOUBLE_INNER_RADIUS, DOUBLE_OUTER_RADIUS, OUTER_BULL_RADIUS, INNER_BULL_RADIUS, TRIPLE_INNER_RADIUS, TRIPLE_OUTER_RADIUS, computeHit } from '@/utils/dartboard';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 type DartboardProps = {
   onHit: (x: number, y: number, result: ReturnType<typeof computeHit>) => void;
@@ -11,6 +12,7 @@ export default function Dartboard({ onHit }: DartboardProps) {
   const viewBox = 500;
   const cx = viewBox / 2;
   const cy = viewBox / 2;
+  const [hoverLabel, setHoverLabel] = useState<string | null>(null);
 
   // Colors approximating a standard board
   const COLORS = {
@@ -84,58 +86,94 @@ export default function Dartboard({ onHit }: DartboardProps) {
     return items;
   }, [cx, cy]);
 
-  const handleClick = (event: React.MouseEvent<SVGElement>) => {
+  const extractPoint = useCallback((event: React.MouseEvent<SVGSVGElement>) => {
     const svgElement = event.currentTarget;
     const rect = svgElement.getBoundingClientRect();
     const x = ((event.clientX - rect.left) / rect.width) * viewBox;
     const y = ((event.clientY - rect.top) / rect.height) * viewBox;
+    return { x, y };
+  }, []);
+
+  const handleHover = useCallback((event: React.MouseEvent<SVGSVGElement>) => {
+    const { x, y } = extractPoint(event);
+    const result = computeHit(x, y, viewBox);
+    if (result.kind === 'Miss') {
+      setHoverLabel(null);
+      return;
+    }
+    setHoverLabel((prev) => (prev === result.label ? prev : result.label));
+  }, [extractPoint, viewBox]);
+
+  const handleMouseLeave = useCallback(() => {
+    setHoverLabel(null);
+  }, []);
+
+  const handleClick = useCallback((event: React.MouseEvent<SVGSVGElement>) => {
+    const { x, y } = extractPoint(event);
     const result = computeHit(x, y, viewBox);
     onHit(x, y, result);
-  };
+  }, [extractPoint, onHit, viewBox]);
+
+  const handleOpenChange = useCallback((nextOpen: boolean) => {
+    if (!nextOpen) {
+      setHoverLabel(null);
+    }
+  }, []);
 
   return (
-    <svg
-      role="img"
-      viewBox={`0 0 ${viewBox} ${viewBox}`}
-      className="w-full max-w-[500px] cursor-pointer select-none drop-shadow"
-      onClick={handleClick}
-    >
-      {/* Number ring background */}
-      <circle cx={cx} cy={cy} r={DOUBLE_OUTER_RADIUS + 26} fill={COLORS.numberRingBg} />
-      {/* Board background */}
-      <circle cx={cx} cy={cy} r={DOUBLE_OUTER_RADIUS} fill="#222" stroke="#111" strokeWidth={2} />
-      {segments.map((seg, i) => (
-        <path key={i} d={seg.d} fill={seg.fill} stroke="#111" strokeWidth={1} />
-      ))}
-      {/* Thin radial separators for each wedge */}
-      {Array.from({ length: 20 }).map((_, i) => {
-        const angle = (((i * 18 - 9) - 90) * Math.PI) / 180;
-        const x1 = cx + OUTER_BULL_RADIUS * Math.cos(angle);
-        const y1 = cy + OUTER_BULL_RADIUS * Math.sin(angle);
-        const x2 = cx + DOUBLE_OUTER_RADIUS * Math.cos(angle);
-        const y2 = cy + DOUBLE_OUTER_RADIUS * Math.sin(angle);
-        return <line key={`sep-${i}`} x1={x1} y1={y1} x2={x2} y2={y2} stroke={COLORS.separators} strokeWidth={0.75} />;
-      })}
-      {/* Bulls */}
-      <circle cx={cx} cy={cy} r={OUTER_BULL_RADIUS} fill={COLORS.outerBull} />
-      <circle cx={cx} cy={cy} r={INNER_BULL_RADIUS} fill={COLORS.innerBull} />
-      {/* Outer border */}
-      <circle cx={cx} cy={cy} r={DOUBLE_OUTER_RADIUS} fill="none" stroke="#000" strokeWidth={4} />
-      {/* Numbers */}
-      {numberPositions.map((pos, i) => (
-        <text
-          key={i}
-          x={pos.x}
-          y={pos.y}
-          fill="#FFF"
-          fontSize={18}
-          fontWeight={700}
-          textAnchor="middle"
-          dominantBaseline="middle"
-        >
-          {pos.label}
-        </text>
-      ))}
-    </svg>
+    <TooltipProvider delayDuration={100}>
+      <Tooltip open={hoverLabel !== null} onOpenChange={handleOpenChange}>
+        <TooltipTrigger asChild>
+          <svg
+            role="img"
+            viewBox={`0 0 ${viewBox} ${viewBox}`}
+            className="w-full max-w-[360px] sm:max-w-[480px] md:max-w-[720px] lg:max-w-[840px] xl:max-w-[960px] 2xl:max-w-[1100px] cursor-pointer select-none drop-shadow overflow-visible"
+            onClick={handleClick}
+            onMouseMove={handleHover}
+            onMouseLeave={handleMouseLeave}
+          >
+            {/* Number ring background */}
+            <circle cx={cx} cy={cy} r={DOUBLE_OUTER_RADIUS + 26} fill={COLORS.numberRingBg} />
+            {/* Board background */}
+            <circle cx={cx} cy={cy} r={DOUBLE_OUTER_RADIUS} fill="#222" stroke="#111" strokeWidth={2} />
+            {segments.map((seg, i) => (
+              <path key={i} d={seg.d} fill={seg.fill} stroke="#111" strokeWidth={1} />
+            ))}
+            {/* Thin radial separators for each wedge */}
+            {Array.from({ length: 20 }).map((_, i) => {
+              const angle = (((i * 18 - 9) - 90) * Math.PI) / 180;
+              const x1 = cx + OUTER_BULL_RADIUS * Math.cos(angle);
+              const y1 = cy + OUTER_BULL_RADIUS * Math.sin(angle);
+              const x2 = cx + DOUBLE_OUTER_RADIUS * Math.cos(angle);
+              const y2 = cy + DOUBLE_OUTER_RADIUS * Math.sin(angle);
+              return <line key={`sep-${i}`} x1={x1} y1={y1} x2={x2} y2={y2} stroke={COLORS.separators} strokeWidth={0.75} />;
+            })}
+            {/* Bulls */}
+            <circle cx={cx} cy={cy} r={OUTER_BULL_RADIUS} fill={COLORS.outerBull} />
+            <circle cx={cx} cy={cy} r={INNER_BULL_RADIUS} fill={COLORS.innerBull} />
+            {/* Outer border */}
+            <circle cx={cx} cy={cy} r={DOUBLE_OUTER_RADIUS} fill="none" stroke="#000" strokeWidth={4} />
+            {/* Numbers */}
+            {numberPositions.map((pos, i) => (
+              <text
+                key={i}
+                x={pos.x}
+                y={pos.y}
+                fill="#FFF"
+                fontSize={18}
+                fontWeight={700}
+                textAnchor="middle"
+                dominantBaseline="middle"
+              >
+                {pos.label}
+              </text>
+            ))}
+          </svg>
+        </TooltipTrigger>
+        <TooltipContent side="top" align="center" className="font-medium tracking-wide">
+          {hoverLabel}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }

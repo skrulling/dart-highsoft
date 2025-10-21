@@ -78,10 +78,15 @@ export function useRealtime(matchId: string) {
             event: '*',
             schema: 'public',
             table: 'match_players',
-            filter: `match_id=eq.${matchId}`,
           },
           (payload) => {
-            window.dispatchEvent(new CustomEvent('supabase-match-players-change', { detail: payload }));
+            console.log('🔄 Match players change detected:', payload.eventType, payload);
+            // Filter on client side to handle DELETE events properly
+            // For DELETE events, payload.new is null and we need payload.old
+            const record = payload.new || payload.old;
+            if (record && (record as any).match_id === matchId) {
+              window.dispatchEvent(new CustomEvent('supabase-match-players-change', { detail: payload }));
+            }
           }
         );
 

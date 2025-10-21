@@ -535,7 +535,8 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     };
 
     // Handle match_players changes - reload to update player list and order
-    const handleMatchPlayersChange = () => {
+    const handleMatchPlayersChange = (event: CustomEvent) => {
+      console.log('👥 Handling match players change event:', event.detail);
       if (isSpectatorMode) {
         void loadAllSpectator();
       } else {

@@ -24,7 +24,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useRealtime } from '@/hooks/useRealtime';
 import { updateMatchEloRatings, shouldMatchBeRated } from '@/utils/eloRating';
 import { updateMatchEloRatingsMultiplayer, shouldMatchBeRatedMultiplayer, type MultiplayerResult } from '@/utils/eloRatingMultiplayer';
-import { Home } from 'lucide-react';
+import { Home, ChevronUp, ChevronDown } from 'lucide-react';
 
 type Player = { id: string; display_name: string };
 
@@ -614,20 +614,25 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   // Check if first round is completed (all players have had at least one turn)
   const canEditPlayers = useMemo(() => {
     if (!currentLeg || !players.length || matchWinnerId) return false;
-    
+
     // If no turns yet, players can be edited
     if (turns.length === 0) return true;
-    
+
     // Check if first round is completed (all players have had at least one turn)
     const playerTurnCounts = new Map<string, number>();
     for (const turn of turns) {
       playerTurnCounts.set(turn.player_id, (playerTurnCounts.get(turn.player_id) || 0) + 1);
     }
-    
+
     // First round is completed if all players have at least 1 turn
     const firstRoundComplete = players.every(p => (playerTurnCounts.get(p.id) || 0) >= 1);
     return !firstRoundComplete;
   }, [currentLeg, players, turns, matchWinnerId]);
+
+  // Check if game hasn't started yet (no turns/throws registered)
+  const canReorderPlayers = useMemo(() => {
+    return turns.length === 0 && !matchWinnerId;
+  }, [turns, matchWinnerId]);
 
   const currentPlayer = useMemo(() => {
     if (!orderPlayers.length || !currentLeg) return null as Player | null;
@@ -1347,6 +1352,78 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       alert('An unexpected error occurred while removing the player.');
     }
   }, [matchId, players.length, loadAll]);
+
+  // Move player up in play order
+  const movePlayerUp = useCallback(async (index: number) => {
+    if (index === 0 || !canReorderPlayers) return; // Can't move first player up
+
+    const supabase = await getSupabaseClient();
+
+    // Swap play orders
+    const player = players[index];
+    const prevPlayer = players[index - 1];
+
+    // Update both players' play_order
+    const { error: error1 } = await supabase
+      .from('match_players')
+      .update({ play_order: index - 1 })
+      .eq('match_id', matchId)
+      .eq('player_id', player.id);
+
+    if (error1) {
+      alert(`Failed to reorder player: ${error1.message}`);
+      return;
+    }
+
+    const { error: error2 } = await supabase
+      .from('match_players')
+      .update({ play_order: index })
+      .eq('match_id', matchId)
+      .eq('player_id', prevPlayer.id);
+
+    if (error2) {
+      alert(`Failed to reorder player: ${error2.message}`);
+      return;
+    }
+
+    await loadAll();
+  }, [players, matchId, canReorderPlayers, loadAll]);
+
+  // Move player down in play order
+  const movePlayerDown = useCallback(async (index: number) => {
+    if (index === players.length - 1 || !canReorderPlayers) return; // Can't move last player down
+
+    const supabase = await getSupabaseClient();
+
+    // Swap play orders
+    const player = players[index];
+    const nextPlayer = players[index + 1];
+
+    // Update both players' play_order
+    const { error: error1 } = await supabase
+      .from('match_players')
+      .update({ play_order: index + 1 })
+      .eq('match_id', matchId)
+      .eq('player_id', player.id);
+
+    if (error1) {
+      alert(`Failed to reorder player: ${error1.message}`);
+      return;
+    }
+
+    const { error: error2 } = await supabase
+      .from('match_players')
+      .update({ play_order: index })
+      .eq('match_id', matchId)
+      .eq('player_id', nextPlayer.id);
+
+    if (error2) {
+      alert(`Failed to reorder player: ${error2.message}`);
+      return;
+    }
+
+    await loadAll();
+  }, [players, matchId, canReorderPlayers, loadAll]);
 
   // Update a specific throw with a new segment
   const updateSelectedThrow = useCallback(
@@ -2227,16 +2304,42 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                 
                 {/* Current players */}
                 <div>
-                  <div className="font-medium mb-2">Current Players ({players.length})</div>
+                  <div className="font-medium mb-2">
+                    Current Players ({players.length})
+                    {canReorderPlayers && <span className="ml-2 text-xs text-muted-foreground">(reorder enabled)</span>}
+                  </div>
                   <div className="space-y-2 max-h-48 overflow-auto border rounded p-2">
                     {players.map((player, index) => (
                       <div key={player.id} className="flex items-center gap-2 py-2 px-3 bg-accent/30 rounded">
+                        {/* Reorder buttons - only visible when no turns exist */}
+                        {canReorderPlayers && (
+                          <div className="flex flex-col gap-0.5 shrink-0">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => movePlayerUp(index)}
+                              disabled={index === 0}
+                              className="h-5 w-6 p-0"
+                            >
+                              <ChevronUp className="h-3 w-3" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => movePlayerDown(index)}
+                              disabled={index === players.length - 1}
+                              className="h-5 w-6 p-0"
+                            >
+                              <ChevronDown className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        )}
                         <div className="flex items-center gap-2 flex-1 min-w-0">
                           <span className="text-sm text-muted-foreground">#{index + 1}</span>
                           <span className="truncate">{player.display_name}</span>
                         </div>
-                        <Button 
-                          variant="outline" 
+                        <Button
+                          variant="outline"
                           size="sm"
                           onClick={() => removePlayerFromMatch(player.id)}
                           disabled={players.length <= 2}

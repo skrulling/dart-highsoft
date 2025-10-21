@@ -1359,14 +1359,15 @@ export default function MatchClient({ matchId }: { matchId: string }) {
 
     const supabase = await getSupabaseClient();
 
-    // Swap play orders
+    // Swap play orders using a temporary placeholder to avoid unique constraint violation
     const player = players[index];
     const prevPlayer = players[index - 1];
+    const tempOrder = 9999; // Temporary placeholder
 
-    // Update both players' play_order
+    // Step 1: Move player to temporary position
     const { error: error1 } = await supabase
       .from('match_players')
-      .update({ play_order: index - 1 })
+      .update({ play_order: tempOrder })
       .eq('match_id', matchId)
       .eq('player_id', player.id);
 
@@ -1375,6 +1376,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       return;
     }
 
+    // Step 2: Move prevPlayer to player's original position
     const { error: error2 } = await supabase
       .from('match_players')
       .update({ play_order: index })
@@ -1383,6 +1385,18 @@ export default function MatchClient({ matchId }: { matchId: string }) {
 
     if (error2) {
       alert(`Failed to reorder player: ${error2.message}`);
+      return;
+    }
+
+    // Step 3: Move player to final position
+    const { error: error3 } = await supabase
+      .from('match_players')
+      .update({ play_order: index - 1 })
+      .eq('match_id', matchId)
+      .eq('player_id', player.id);
+
+    if (error3) {
+      alert(`Failed to reorder player: ${error3.message}`);
       return;
     }
 
@@ -1395,14 +1409,15 @@ export default function MatchClient({ matchId }: { matchId: string }) {
 
     const supabase = await getSupabaseClient();
 
-    // Swap play orders
+    // Swap play orders using a temporary placeholder to avoid unique constraint violation
     const player = players[index];
     const nextPlayer = players[index + 1];
+    const tempOrder = 9999; // Temporary placeholder
 
-    // Update both players' play_order
+    // Step 1: Move player to temporary position
     const { error: error1 } = await supabase
       .from('match_players')
-      .update({ play_order: index + 1 })
+      .update({ play_order: tempOrder })
       .eq('match_id', matchId)
       .eq('player_id', player.id);
 
@@ -1411,6 +1426,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       return;
     }
 
+    // Step 2: Move nextPlayer to player's original position
     const { error: error2 } = await supabase
       .from('match_players')
       .update({ play_order: index })
@@ -1419,6 +1435,18 @@ export default function MatchClient({ matchId }: { matchId: string }) {
 
     if (error2) {
       alert(`Failed to reorder player: ${error2.message}`);
+      return;
+    }
+
+    // Step 3: Move player to final position
+    const { error: error3 } = await supabase
+      .from('match_players')
+      .update({ play_order: index + 1 })
+      .eq('match_id', matchId)
+      .eq('player_id', player.id);
+
+    if (error3) {
+      alert(`Failed to reorder player: ${error3.message}`);
       return;
     }
 

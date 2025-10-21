@@ -84,7 +84,7 @@ export function useRealtime(matchId: string) {
             // Filter on client side to handle DELETE events properly
             // For DELETE events, payload.new is null and we need payload.old
             const record = payload.new || payload.old;
-            if (record && (record as any).match_id === matchId) {
+            if (record && typeof record === 'object' && 'match_id' in record && record.match_id === matchId) {
               window.dispatchEvent(new CustomEvent('supabase-match-players-change', { detail: payload }));
             }
           }

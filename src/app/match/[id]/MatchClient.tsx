@@ -24,7 +24,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useRealtime } from '@/hooks/useRealtime';
 import { updateMatchEloRatings, shouldMatchBeRated } from '@/utils/eloRating';
 import { updateMatchEloRatingsMultiplayer, shouldMatchBeRatedMultiplayer, type MultiplayerResult } from '@/utils/eloRatingMultiplayer';
-import { Home } from 'lucide-react';
+import { Home, ChevronUp, ChevronDown } from 'lucide-react';
 
 type Player = { id: string; display_name: string };
 
@@ -534,11 +534,22 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       void loadAll();
     };
 
+    // Handle match_players changes - reload to update player list and order
+    const handleMatchPlayersChange = (event: CustomEvent) => {
+      console.log('👥 Handling match players change event:', event.detail);
+      if (isSpectatorMode) {
+        void loadAllSpectator();
+      } else {
+        void loadAll();
+      }
+    };
+
     // Add event listeners
     window.addEventListener('supabase-throws-change', handleThrowChange as unknown as EventListener);
     window.addEventListener('supabase-turns-change', handleTurnChange as unknown as EventListener);
     window.addEventListener('supabase-legs-change', handleLegChange as unknown as EventListener);
     window.addEventListener('supabase-matches-change', handleMatchChange as unknown as EventListener);
+    window.addEventListener('supabase-match-players-change', handleMatchPlayersChange as unknown as EventListener);
 
     // Update presence to indicate we're viewing this match
     realtime.updatePresence(isSpectatorMode);
@@ -549,6 +560,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       window.removeEventListener('supabase-turns-change', handleTurnChange as unknown as EventListener);
       window.removeEventListener('supabase-legs-change', handleLegChange as unknown as EventListener);
       window.removeEventListener('supabase-matches-change', handleMatchChange as unknown as EventListener);
+      window.removeEventListener('supabase-match-players-change', handleMatchPlayersChange as unknown as EventListener);
     };
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -614,20 +626,25 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   // Check if first round is completed (all players have had at least one turn)
   const canEditPlayers = useMemo(() => {
     if (!currentLeg || !players.length || matchWinnerId) return false;
-    
+
     // If no turns yet, players can be edited
     if (turns.length === 0) return true;
-    
+
     // Check if first round is completed (all players have had at least one turn)
     const playerTurnCounts = new Map<string, number>();
     for (const turn of turns) {
       playerTurnCounts.set(turn.player_id, (playerTurnCounts.get(turn.player_id) || 0) + 1);
     }
-    
+
     // First round is completed if all players have at least 1 turn
     const firstRoundComplete = players.every(p => (playerTurnCounts.get(p.id) || 0) >= 1);
     return !firstRoundComplete;
   }, [currentLeg, players, turns, matchWinnerId]);
+
+  // Check if game hasn't started yet (no turns/throws registered)
+  const canReorderPlayers = useMemo(() => {
+    return turns.length === 0 && !matchWinnerId;
+  }, [turns, matchWinnerId]);
 
   const currentPlayer = useMemo(() => {
     if (!orderPlayers.length || !currentLeg) return null as Player | null;
@@ -1347,6 +1364,148 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       alert('An unexpected error occurred while removing the player.');
     }
   }, [matchId, players.length, loadAll]);
+
+  // Move player up in play order
+  const movePlayerUp = useCallback(async (index: number) => {
+    if (index === 0 || !canReorderPlayers) return; // Can't move first player up
+
+    const supabase = await getSupabaseClient();
+
+    // Swap play orders using a temporary placeholder to avoid unique constraint violation
+    const player = players[index];
+    const prevPlayer = players[index - 1];
+    const tempOrder = 9999; // Temporary placeholder
+
+    // Step 1: Move player to temporary position
+    const { error: error1 } = await supabase
+      .from('match_players')
+      .update({ play_order: tempOrder })
+      .eq('match_id', matchId)
+      .eq('player_id', player.id);
+
+    if (error1) {
+      alert(`Failed to reorder player: ${error1.message}`);
+      return;
+    }
+
+    // Step 2: Move prevPlayer to player's original position
+    const { error: error2 } = await supabase
+      .from('match_players')
+      .update({ play_order: index })
+      .eq('match_id', matchId)
+      .eq('player_id', prevPlayer.id);
+
+    if (error2) {
+      alert(`Failed to reorder player: ${error2.message}`);
+      return;
+    }
+
+    // Step 3: Move player to final position
+    const { error: error3 } = await supabase
+      .from('match_players')
+      .update({ play_order: index - 1 })
+      .eq('match_id', matchId)
+      .eq('player_id', player.id);
+
+    if (error3) {
+      alert(`Failed to reorder player: ${error3.message}`);
+      return;
+    }
+
+    // Step 4: Update current leg's starting_player_id to maintain correct order
+    // After swap, determine who should be first (if swapping position 0 and 1)
+    if (currentLeg) {
+      let newStartingPlayerId = currentLeg.starting_player_id;
+
+      // If we're moving someone to position 0, they should be the starting player
+      if (index === 1) {
+        newStartingPlayerId = player.id;
+      }
+
+      const { error: legError } = await supabase
+        .from('legs')
+        .update({ starting_player_id: newStartingPlayerId })
+        .eq('id', currentLeg.id);
+
+      if (legError) {
+        alert(`Failed to update leg starting player: ${legError.message}`);
+        return;
+      }
+    }
+
+    await loadAll();
+  }, [players, matchId, canReorderPlayers, currentLeg, loadAll]);
+
+  // Move player down in play order
+  const movePlayerDown = useCallback(async (index: number) => {
+    if (index === players.length - 1 || !canReorderPlayers) return; // Can't move last player down
+
+    const supabase = await getSupabaseClient();
+
+    // Swap play orders using a temporary placeholder to avoid unique constraint violation
+    const player = players[index];
+    const nextPlayer = players[index + 1];
+    const tempOrder = 9999; // Temporary placeholder
+
+    // Step 1: Move player to temporary position
+    const { error: error1 } = await supabase
+      .from('match_players')
+      .update({ play_order: tempOrder })
+      .eq('match_id', matchId)
+      .eq('player_id', player.id);
+
+    if (error1) {
+      alert(`Failed to reorder player: ${error1.message}`);
+      return;
+    }
+
+    // Step 2: Move nextPlayer to player's original position
+    const { error: error2 } = await supabase
+      .from('match_players')
+      .update({ play_order: index })
+      .eq('match_id', matchId)
+      .eq('player_id', nextPlayer.id);
+
+    if (error2) {
+      alert(`Failed to reorder player: ${error2.message}`);
+      return;
+    }
+
+    // Step 3: Move player to final position
+    const { error: error3 } = await supabase
+      .from('match_players')
+      .update({ play_order: index + 1 })
+      .eq('match_id', matchId)
+      .eq('player_id', player.id);
+
+    if (error3) {
+      alert(`Failed to reorder player: ${error3.message}`);
+      return;
+    }
+
+    // Step 4: Update current leg's starting_player_id to maintain correct order
+    // After swap, determine who should be first (if swapping position 0 and 1)
+    if (currentLeg) {
+      let newStartingPlayerId = currentLeg.starting_player_id;
+
+      // If we're moving the first player down, the next player becomes first
+      if (index === 0) {
+        newStartingPlayerId = nextPlayer.id;
+      }
+
+      const { error: legError } = await supabase
+        .from('legs')
+        .update({ starting_player_id: newStartingPlayerId })
+        .eq('id', currentLeg.id);
+
+      if (legError) {
+        alert(`Failed to update leg starting player: ${legError.message}`);
+        return;
+      }
+    }
+
+    await loadAll();
+  }, [players, matchId, canReorderPlayers, currentLeg, loadAll]);
 
   // Update a specific throw with a new segment
   const updateSelectedThrow = useCallback(
@@ -2230,16 +2389,42 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                 
                 {/* Current players */}
                 <div>
-                  <div className="font-medium mb-2">Current Players ({players.length})</div>
+                  <div className="font-medium mb-2">
+                    Current Players ({players.length})
+                    {canReorderPlayers && <span className="ml-2 text-xs text-muted-foreground">(reorder enabled)</span>}
+                  </div>
                   <div className="space-y-2 max-h-48 overflow-auto border rounded p-2">
                     {players.map((player, index) => (
                       <div key={player.id} className="flex items-center gap-2 py-2 px-3 bg-accent/30 rounded">
+                        {/* Reorder buttons - only visible when no turns exist */}
+                        {canReorderPlayers && (
+                          <div className="flex flex-col gap-0.5 shrink-0">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => movePlayerUp(index)}
+                              disabled={index === 0}
+                              className="h-5 w-6 p-0"
+                            >
+                              <ChevronUp className="h-3 w-3" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => movePlayerDown(index)}
+                              disabled={index === players.length - 1}
+                              className="h-5 w-6 p-0"
+                            >
+                              <ChevronDown className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        )}
                         <div className="flex items-center gap-2 flex-1 min-w-0">
                           <span className="text-sm text-muted-foreground">#{index + 1}</span>
                           <span className="truncate">{player.display_name}</span>
                         </div>
-                        <Button 
-                          variant="outline" 
+                        <Button
+                          variant="outline"
                           size="sm"
                           onClick={() => removePlayerFromMatch(player.id)}
                           disabled={players.length <= 2}

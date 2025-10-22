@@ -1,20 +1,12 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import Link from "next/link";
 import { Home, Gamepad2, BarChart3, Trophy } from "lucide-react";
 import { Analytics } from "@vercel/analytics/react";
 import { MatchSpectatorHotkey } from "@/components/MatchSpectatorHotkey";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+// Use system fonts as fallback when Google Fonts cannot be loaded during build
+const fontVariables = 'font-sans';
 
 export const metadata: Metadata = {
   title: "Dart Highsoft - Dart Scoring App",
@@ -46,7 +38,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="h-full" suppressHydrationWarning>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen h-full bg-background text-foreground`}
+        className={`${fontVariables} antialiased min-h-screen h-full bg-background text-foreground`}
       >
         <div className="min-h-screen pb-16 md:pb-0">
           <nav className="hidden md:flex items-center justify-between px-6 py-3 border-b bg-card">

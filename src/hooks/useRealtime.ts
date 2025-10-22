@@ -71,6 +71,23 @@ export function useRealtime(matchId: string) {
           (payload) => {
             window.dispatchEvent(new CustomEvent('supabase-matches-change', { detail: payload }));
           }
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'match_players',
+          },
+          (payload) => {
+            console.log('🔄 Match players change detected:', payload.eventType, payload);
+            // Filter on client side to handle DELETE events properly
+            // For DELETE events, payload.new is null and we need payload.old
+            const record = payload.new || payload.old;
+            if (record && typeof record === 'object' && 'match_id' in record && record.match_id === matchId) {
+              window.dispatchEvent(new CustomEvent('supabase-match-players-change', { detail: payload }));
+            }
+          }
         );
 
       // Subscribe to the channel

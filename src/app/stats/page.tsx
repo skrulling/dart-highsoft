@@ -473,60 +473,240 @@ export default function StatsPage() {
     };
   }, [selectedPlayerData]);
 
-  // Average score over time (one point per played day, cumulative)
-  const avgScoreOverTime = useMemo(() => {
-    if (!selectedPlayerData) return [];
+  // Average score trends (daily and cumulative averages per played day)
+  const avgScoreTrend = useMemo(() => {
+    if (!selectedPlayerData) return { categories: [] as string[], cumulative: [] as number[], daily: [] as number[], rolling: [] as number[] };
 
     const validTurns = selectedPlayerData.turns
       .filter(t => !t.busted)
       .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
 
-    // Group by day (UTC)
     const byDay = new Map<string, { sum: number; count: number }>();
-    for (const t of validTurns) {
-      const day = new Date(t.created_at).toISOString().slice(0, 10);
-      const entry = byDay.get(day) || { sum: 0, count: 0 };
-      entry.sum += t.total_scored;
+    for (const turn of validTurns) {
+      const day = new Date(turn.created_at).toISOString().slice(0, 10);
+      const entry = byDay.get(day) ?? { sum: 0, count: 0 };
+      entry.sum += turn.total_scored;
       entry.count += 1;
       byDay.set(day, entry);
     }
 
-    // Build cumulative average per day
     const days = Array.from(byDay.keys()).sort();
+    const cumulative: number[] = [];
+    const daily: number[] = [];
+
     let cumSum = 0;
     let cumCount = 0;
-    const result: [number, number][] = [];
     for (const day of days) {
       const { sum, count } = byDay.get(day)!;
       cumSum += sum;
       cumCount += count;
-      const avg = Math.round((cumSum / cumCount) * 100) / 100;
-      // Use midnight UTC timestamp for the category mapping step
-      const ts = new Date(`${day}T00:00:00.000Z`).getTime();
-      result.push([ts, avg]);
+      const cumulativeAvg = Math.round((cumSum / cumCount) * 100) / 100;
+      const dailyAvg = Math.round((sum / count) * 100) / 100;
+      cumulative.push(cumulativeAvg);
+      daily.push(dailyAvg);
     }
-    return result;
+
+    const rolling: number[] = [];
+    for (let i = 0; i < daily.length; i++) {
+      const start = Math.max(0, i - 6);
+      const window = daily.slice(start, i + 1);
+      const windowAvg = window.reduce((acc, val) => acc + val, 0) / window.length;
+      rolling.push(Math.round(windowAvg * 100) / 100);
+    }
+
+    return { categories: days, cumulative, daily, rolling };
+  }, [selectedPlayerData]);
+
+  const firstNineTrend = useMemo(() => {
+    if (!selectedPlayerData) return { categories: [] as string[], daily: [] as number[], rolling: [] as number[] };
+
+    const throwsByTurn = new Map<string, number>();
+    for (const thr of selectedPlayerData.throws) {
+      if (!thr.turn_id) continue;
+      throwsByTurn.set(thr.turn_id, (throwsByTurn.get(thr.turn_id) ?? 0) + 1);
+    }
+
+    const turnsByLeg = new Map<string, (typeof selectedPlayerData.turns)[number][]>();
+    for (const turn of selectedPlayerData.turns) {
+      if (!turnsByLeg.has(turn.leg_id)) turnsByLeg.set(turn.leg_id, []);
+      turnsByLeg.get(turn.leg_id)!.push(turn);
+    }
+
+    const dayMap = new Map<string, { sum: number; count: number }>();
+    for (const legTurns of turnsByLeg.values()) {
+      const sorted = [...legTurns].sort((a, b) => a.turn_number - b.turn_number);
+      const firstVisits = sorted.slice(0, 3);
+      if (!firstVisits.length) continue;
+
+      let totalPoints = 0;
+      let totalDarts = 0;
+      let day: string | null = null;
+
+      for (const turn of firstVisits) {
+        const throwsInTurn = throwsByTurn.get(turn.id) ?? 3;
+        totalDarts += throwsInTurn;
+        totalPoints += turn.busted ? 0 : turn.total_scored;
+        if (!day) {
+          const ts = (turn as { created_at?: string }).created_at;
+          if (ts) day = new Date(ts).toISOString().slice(0, 10);
+        }
+      }
+
+      if (!day || totalDarts === 0) continue;
+      const firstNineAvg = Math.round(((totalPoints / totalDarts) * 3) * 100) / 100;
+      const entry = dayMap.get(day) ?? { sum: 0, count: 0 };
+      entry.sum += firstNineAvg;
+      entry.count += 1;
+      dayMap.set(day, entry);
+    }
+
+    const entries = Array.from(dayMap.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+    const categories = entries.map(([day]) => day);
+    const daily = entries.map(([, stats]) => Math.round((stats.sum / stats.count) * 100) / 100);
+
+    const rolling: number[] = [];
+    for (let i = 0; i < daily.length; i++) {
+      const start = Math.max(0, i - 6);
+      const window = daily.slice(start, i + 1);
+      const windowAvg = window.reduce((acc, val) => acc + val, 0) / window.length;
+      rolling.push(Math.round(windowAvg * 100) / 100);
+    }
+
+    return { categories, daily, rolling };
+  }, [selectedPlayerData]);
+
+  const accuracy20Trend = useMemo(() => {
+    if (!selectedPlayerData) {
+      return {
+        categories: [] as string[],
+        hitPct: [] as number[],
+        missLeftPct: [] as number[],
+        missRightPct: [] as number[],
+        rollingHitPct: [] as number[],
+      };
+    }
+
+    const turnById = new Map<string, (typeof selectedPlayerData.turns)[number]>();
+    for (const turn of selectedPlayerData.turns) {
+      turnById.set(turn.id, turn);
+    }
+
+    const dayStats = new Map<string, { hits: number; missLeft: number; missRight: number }>();
+    for (const thr of selectedPlayerData.throws) {
+      const segment = thr.segment;
+      if (!segment) continue;
+
+      let bucket: 'hit' | 'left' | 'right' | null = null;
+      if (segment === '20' || segment === 'S20' || segment === 'D20' || segment === 'T20') bucket = 'hit';
+      else if (segment === '5' || segment === 'S5') bucket = 'left';
+      else if (segment === '1' || segment === 'S1') bucket = 'right';
+      else continue;
+
+      const createdAt =
+        (thr as { created_at?: string }).created_at ??
+        turnById.get(thr.turn_id)?.created_at;
+      if (!createdAt) continue;
+      const day = new Date(createdAt).toISOString().slice(0, 10);
+
+      const entry = dayStats.get(day) ?? { hits: 0, missLeft: 0, missRight: 0 };
+      if (bucket === 'hit') entry.hits += 1;
+      if (bucket === 'left') entry.missLeft += 1;
+      if (bucket === 'right') entry.missRight += 1;
+      dayStats.set(day, entry);
+    }
+
+    const entries = Array.from(dayStats.entries())
+      .filter(([, stats]) => stats.hits + stats.missLeft + stats.missRight > 0)
+      .sort((a, b) => a[0].localeCompare(b[0]));
+
+    const categories = entries.map(([day]) => day);
+    const hitPct: number[] = [];
+    const missLeftPct: number[] = [];
+    const missRightPct: number[] = [];
+
+    for (const [, stats] of entries) {
+      const total = stats.hits + stats.missLeft + stats.missRight;
+      const toPct = (value: number) => Math.round((value / total) * 1000) / 10;
+      hitPct.push(toPct(stats.hits));
+      missLeftPct.push(toPct(stats.missLeft));
+      missRightPct.push(toPct(stats.missRight));
+    }
+
+    const rollingHitPct: number[] = [];
+    for (let i = 0; i < hitPct.length; i++) {
+      const start = Math.max(0, i - 6);
+      const window = hitPct.slice(start, i + 1);
+      const average = window.reduce((acc, val) => acc + val, 0) / window.length;
+      rollingHitPct.push(Math.round(average * 10) / 10);
+    }
+
+    return { categories, hitPct, missLeftPct, missRightPct, rollingHitPct };
   }, [selectedPlayerData]);
 
   // Bounds for y-axis (padding ±2 around min/max)
+  const {
+    categories: avgScoreCategories,
+    cumulative: avgScoreSeriesData,
+    daily: avgDailyScoreSeriesData,
+    rolling: avgRollingScoreSeriesData = [],
+  } = avgScoreTrend;
+
   const avgScoreYBounds = useMemo(() => {
-    if (!avgScoreOverTime.length) return { min: 0, max: 0 };
-    const ys = avgScoreOverTime.map(([, y]) => (typeof y === 'number' ? y : Number(y)));
+    const values = [
+      ...avgScoreSeriesData,
+      ...avgDailyScoreSeriesData,
+      ...avgRollingScoreSeriesData,
+    ].filter((v) => typeof v === 'number');
+    if (!values.length) return { min: 0, max: 0 };
+    const ys = values.map(Number);
     const minY = Math.min(...ys);
     const maxY = Math.max(...ys);
     return {
       min: Math.floor((minY - 2) * 10) / 10,
       max: Math.ceil((maxY + 2) * 10) / 10,
     };
-  }, [avgScoreOverTime]);
+  }, [avgScoreSeriesData, avgDailyScoreSeriesData, avgRollingScoreSeriesData]);
 
-  // Categories and series data for compressed x-axis (only played days/turns)
-  const avgScoreCategories = useMemo(() => {
-    return avgScoreOverTime.map(([ts]) => new Date(Number(ts)).toISOString().slice(0, 10));
-  }, [avgScoreOverTime]);
-  const avgScoreSeriesData = useMemo(() => {
-    return avgScoreOverTime.map(([, y]) => y as number);
-  }, [avgScoreOverTime]);
+  const {
+    categories: firstNineCategories,
+    daily: firstNineDailySeries,
+    rolling: firstNineRollingSeries,
+  } = firstNineTrend;
+
+  const firstNineYBounds = useMemo(() => {
+    const values = [...firstNineDailySeries, ...firstNineRollingSeries];
+    if (!values.length) return { min: 0, max: 0 };
+    const minY = Math.min(...values);
+    const maxY = Math.max(...values);
+    return {
+      min: Math.floor((minY - 2) * 10) / 10,
+      max: Math.ceil((maxY + 2) * 10) / 10,
+    };
+  }, [firstNineDailySeries, firstNineRollingSeries]);
+
+  const {
+    categories: accuracy20Categories,
+    hitPct: accuracy20HitPct,
+    missLeftPct: accuracy20MissLeftPct,
+    missRightPct: accuracy20MissRightPct,
+    rollingHitPct: accuracy20RollingHitPct,
+  } = accuracy20Trend;
+
+  const accuracy20YBounds = useMemo(() => {
+    const values = [
+      ...accuracy20HitPct,
+      ...accuracy20MissLeftPct,
+      ...accuracy20MissRightPct,
+      ...accuracy20RollingHitPct,
+    ];
+    if (!values.length) return { min: 0, max: 100 };
+    const minY = Math.min(...values, 0);
+    const maxY = Math.max(...values, 100);
+    return {
+      min: Math.floor((minY - 5) / 5) * 5,
+      max: Math.ceil((maxY + 5) / 5) * 5,
+    };
+  }, [accuracy20HitPct, accuracy20MissLeftPct, accuracy20MissRightPct, accuracy20RollingHitPct]);
 
   if (loading) {
     return (
@@ -1214,30 +1394,52 @@ export default function StatsPage() {
                           },
                         },
                         yAxis: { 
-                          title: { text: 'Cumulative Average Score' },
+                          title: { text: 'Average Score' },
                           min: avgScoreYBounds.min,
                           max: avgScoreYBounds.max,
                         },
-                        series: [{
-                          type: 'spline',
-                          name: 'Average Score',
-                          data: avgScoreSeriesData,
-                          color: '#3b82f6',
-                          lineWidth: 3,
-                          marker: {
-                            radius: 4,
-                            symbol: 'circle'
-                          }
-                        }],
-                        legend: { enabled: false },
-                        tooltip: {
-                          shared: false,
-                          pointFormatter: function () {
-                            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                            const point = this as any;
-                            return `<span style="color:${point.color}">●</span> <b>${point.y?.toFixed?.(2) ?? point.y}</b> average score`;
+                        series: [
+                          {
+                            type: 'spline',
+                            name: 'Cumulative Average',
+                            data: avgScoreSeriesData,
+                            color: '#3b82f6',
+                            lineWidth: 3,
+                            marker: {
+                              radius: 4,
+                              symbol: 'circle'
+                            }
                           },
-                          headerFormat: '<span style="font-size: 10px">{point.category}</span><br/>',
+                          {
+                            type: 'spline',
+                            name: '7-day Rolling Average',
+                            data: avgRollingScoreSeriesData,
+                            color: '#8b5cf6',
+                            dashStyle: 'Dot',
+                            lineWidth: 2,
+                            marker: {
+                              radius: 3,
+                              symbol: 'circle'
+                            }
+                          },
+                          {
+                            type: 'spline',
+                            name: 'Daily Average',
+                            data: avgDailyScoreSeriesData,
+                            color: '#f97316',
+                            dashStyle: 'ShortDash',
+                            lineWidth: 2,
+                            marker: {
+                              radius: 3,
+                              symbol: 'circle'
+                            }
+                          }
+                        ],
+                        legend: { enabled: true },
+                        tooltip: {
+                          shared: true,
+                          valueDecimals: 2,
+                          headerFormat: '<span style="font-size: 10px">{point.key}</span><br/>'
                         },
                         plotOptions: {
                           spline: {
@@ -1251,6 +1453,135 @@ export default function StatsPage() {
                             }
                           }
                         }
+                      }}
+                    />
+                  </CardContent>
+                </Card>
+
+                {/* First Nine Performance */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>First Nine Average</CardTitle>
+                    <CardDescription>Opening three visits (first 9 darts) per day</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <HighchartsReact
+                      highcharts={Highcharts}
+                      options={{
+                        title: { text: null },
+                        chart: { height: 360 },
+                        xAxis: {
+                          type: 'category',
+                          categories: firstNineCategories,
+                          title: { text: 'Date' },
+                          tickmarkPlacement: 'on',
+                          labels: {
+                            step: Math.ceil((firstNineCategories.length || 1) / 8),
+                          },
+                        },
+                        yAxis: {
+                          title: { text: 'First 9 Average (per 3 darts)' },
+                          min: firstNineYBounds.min,
+                          max: firstNineYBounds.max,
+                        },
+                        series: [
+                          {
+                            type: 'spline',
+                            name: '7-day Rolling Average',
+                            data: firstNineRollingSeries,
+                            color: '#10b981',
+                            lineWidth: 3,
+                            marker: { radius: 4, symbol: 'circle' },
+                          },
+                          {
+                            type: 'spline',
+                            name: 'Daily Average',
+                            data: firstNineDailySeries,
+                            color: '#0ea5e9',
+                            dashStyle: 'ShortDash',
+                            lineWidth: 2,
+                            marker: { radius: 3, symbol: 'circle' },
+                          },
+                        ],
+                        legend: { enabled: true },
+                        tooltip: {
+                          shared: true,
+                          valueDecimals: 2,
+                          headerFormat: '<span style="font-size: 10px">{point.key}</span><br/>',
+                        },
+                      }}
+                    />
+                  </CardContent>
+                </Card>
+
+                {/* 20 Bed Accuracy */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>20 Bed Accuracy</CardTitle>
+                    <CardDescription>Hit rate vs. misses into 1 or 5 when aiming at 20</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <HighchartsReact
+                      highcharts={Highcharts}
+                      options={{
+                        title: { text: null },
+                        chart: { height: 360 },
+                        xAxis: {
+                          type: 'category',
+                          categories: accuracy20Categories,
+                          title: { text: 'Date' },
+                          tickmarkPlacement: 'on',
+                          labels: {
+                            step: Math.ceil((accuracy20Categories.length || 1) / 8),
+                          },
+                        },
+                        yAxis: {
+                          title: { text: 'Percentage (%)' },
+                          min: accuracy20YBounds.min,
+                          max: accuracy20YBounds.max,
+                        },
+                        series: [
+                          {
+                            type: 'spline',
+                            name: '20 Hit %',
+                            data: accuracy20HitPct,
+                            color: '#f97316',
+                            lineWidth: 3,
+                            marker: { radius: 4, symbol: 'circle' },
+                          },
+                          {
+                            type: 'spline',
+                            name: 'Rolling Hit % (7d)',
+                            data: accuracy20RollingHitPct,
+                            color: '#fb923c',
+                            dashStyle: 'Dot',
+                            lineWidth: 2,
+                            marker: { radius: 3, symbol: 'circle' },
+                          },
+                          {
+                            type: 'spline',
+                            name: 'Miss Left (5) %',
+                            data: accuracy20MissLeftPct,
+                            color: '#64748b',
+                            dashStyle: 'ShortDash',
+                            marker: { radius: 3, symbol: 'circle' },
+                          },
+                          {
+                            type: 'spline',
+                            name: 'Miss Right (1) %',
+                            data: accuracy20MissRightPct,
+                            color: '#0f172a',
+                            dashStyle: 'ShortDashDot',
+                            marker: { radius: 3, symbol: 'circle' },
+                          },
+                        ],
+                        legend: { enabled: true },
+                        tooltip: {
+                          shared: true,
+                          valueSuffix: '%',
+                          valueDecimals: 1,
+                          headerFormat: '<span style="font-size: 10px">{point.key}</span><br/>',
+                        },
                       }}
                     />
                   </CardContent>

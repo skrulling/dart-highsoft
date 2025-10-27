@@ -25,6 +25,10 @@ import { useRealtime } from '@/hooks/useRealtime';
 import { updateMatchEloRatings, shouldMatchBeRated } from '@/utils/eloRating';
 import { updateMatchEloRatingsMultiplayer, shouldMatchBeRatedMultiplayer, type MultiplayerResult } from '@/utils/eloRatingMultiplayer';
 import { Home, ChevronUp, ChevronDown } from 'lucide-react';
+import CommentaryDisplay from '@/components/CommentaryDisplay';
+import MervSettings from '@/components/MervSettings';
+import { generateMervCommentary, type CommentaryContext, CommentaryDebouncer } from '@/services/commentaryService';
+import { getTTSService } from '@/services/ttsService';
 
 type Player = { id: string; display_name: string };
 
@@ -90,6 +94,27 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     throws: { segment: string; scored: number; dart_index: number }[];
   } | null>(null);
   const celebratedTurns = useRef<Set<string>>(new Set());
+
+  // Commentary state (Merv the alien)
+  const [mervEnabled, setMervEnabled] = useState(false);
+  const [audioEnabled, setAudioEnabled] = useState(true);
+  const [voice, setVoice] = useState<'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer'>('fable');
+  const [currentCommentary, setCurrentCommentary] = useState<string | null>(null);
+  const [commentaryLoading, setCommentaryLoading] = useState(false);
+  const [commentaryPlaying, setCommentaryPlaying] = useState(false);
+  const ttsServiceRef = useRef(getTTSService());
+  const commentaryDebouncer = useRef(new CommentaryDebouncer(2000));
+
+  // Ref to hold latest state for event handlers (prevents stale closure bugs)
+  const latestStateRef = useRef({
+    isSpectatorMode: false,
+    playerById: {} as Record<string, Player>,
+    turnThrowCounts: {} as Record<string, number>,
+    turns: [] as TurnRecord[],
+    legs: [] as LegRecord[],
+    players: [] as Player[],
+    match: null as MatchRecord | null,
+  });
 
   const [match, setMatch] = useState<MatchRecord | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
@@ -272,6 +297,71 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     void loadAll();
   }, [loadAll]);
 
+  // Load Merv settings from localStorage
+  useEffect(() => {
+    try {
+      const savedEnabled = localStorage.getItem('merv-enabled');
+      if (savedEnabled !== null) {
+        setMervEnabled(savedEnabled === 'true');
+      }
+
+      const savedAudioEnabled = localStorage.getItem('merv-audio-enabled');
+      if (savedAudioEnabled !== null) {
+        setAudioEnabled(savedAudioEnabled === 'true');
+      }
+
+      const savedVoice = localStorage.getItem('merv-voice') as 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer' | null;
+      if (savedVoice) {
+        setVoice(savedVoice);
+      }
+    } catch (error) {
+      console.error('Failed to load Merv settings:', error);
+    }
+  }, []);
+
+  // Save Merv settings to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('merv-enabled', mervEnabled.toString());
+    } catch (error) {
+      console.error('Failed to save Merv enabled:', error);
+    }
+  }, [mervEnabled]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('merv-audio-enabled', audioEnabled.toString());
+      ttsServiceRef.current.updateSettings({ enabled: audioEnabled });
+    } catch (error) {
+      console.error('Failed to save audio enabled:', error);
+    }
+  }, [audioEnabled]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('merv-voice', voice);
+      ttsServiceRef.current.updateSettings({ voice });
+    } catch (error) {
+      console.error('Failed to save voice:', error);
+    }
+  }, [voice]);
+
+  // Compute playerById memo
+  const playerById = useMemo(() => Object.fromEntries(players.map((p) => [p.id, p])), [players]);
+
+  // Sync latest state to ref (prevents stale closures in event handlers)
+  useEffect(() => {
+    latestStateRef.current = {
+      isSpectatorMode,
+      playerById,
+      turnThrowCounts,
+      turns,
+      legs,
+      players,
+      match,
+    };
+  }, [isSpectatorMode, playerById, turnThrowCounts, turns, legs, players, match]);
+
   // Set up real-time event listeners
   useEffect(() => {
     if (!realtime.isConnected || !realtimeEnabled) {
@@ -286,14 +376,140 @@ export default function MatchClient({ matchId }: { matchId: string }) {
 
     // Handle throw changes - hot update without full reload
     const handleThrowChange = async (event: CustomEvent) => {
-      // Route to appropriate handler based on mode
-      if (isSpectatorMode) {
+      // Route to appropriate handler based on mode (use ref to avoid stale closure)
+      if (latestStateRef.current.isSpectatorMode) {
         await handleSpectatorThrowChange(event);
       } else {
         await handleMatchUIUpdate(event);
       }
     };
     
+    // Trigger Merv commentary for a completed turn
+    const triggerCommentary = async (
+      turn: TurnRecord,
+      playerName: string,
+      throws: { segment: string; scored: number; dart_index: number }[]
+    ) => {
+      try {
+        setCommentaryLoading(true);
+
+        // Get current player's remaining score
+        const remainingScore = getScoreForPlayer(turn.player_id);
+        const playerAverage = getAvgForPlayer(turn.player_id);
+
+        // Count legs won by each player
+        const legsWonByPlayer: Record<string, number> = {};
+        legs.forEach((leg) => {
+          if (leg.winner_player_id) {
+            legsWonByPlayer[leg.winner_player_id] = (legsWonByPlayer[leg.winner_player_id] || 0) + 1;
+          }
+        });
+
+        // Get all players stats for comparison
+        const allPlayersStats = players.map((p) => ({
+          name: p.display_name,
+          id: p.id,
+          remainingScore: getScoreForPlayer(p.id),
+          average: getAvgForPlayer(p.id),
+          legsWon: legsWonByPlayer[p.id] || 0,
+          isCurrentPlayer: p.id === turn.player_id,
+        }));
+
+        // Calculate position and points behind leader
+        const sortedByScore = [...allPlayersStats].sort((a, b) => a.remainingScore - b.remainingScore);
+        const currentPlayerPos = sortedByScore.findIndex((p) => p.id === turn.player_id) + 1;
+        const leader = sortedByScore[0];
+        const pointsBehindLeader = remainingScore - leader.remainingScore;
+        const isLeading = currentPlayerPos === 1;
+
+        // Get recent turns for this player
+        const playerTurns = turns.filter((t) => t.player_id === turn.player_id);
+        const recentTurns = playerTurns.slice(-5).map((t) => ({
+          score: t.total_scored,
+          busted: t.busted,
+        }));
+
+        // Calculate streaks
+        let consecutiveHighScores = 0;
+        let consecutiveLowScores = 0;
+        for (let i = playerTurns.length - 1; i >= 0; i--) {
+          const t = playerTurns[i];
+          if (t.total_scored >= 60 && !t.busted) {
+            consecutiveHighScores++;
+          } else {
+            break;
+          }
+        }
+        for (let i = playerTurns.length - 1; i >= 0; i--) {
+          const t = playerTurns[i];
+          if (t.total_scored < 30 || t.busted) {
+            consecutiveLowScores++;
+          } else {
+            break;
+          }
+        }
+
+        // Get current leg number
+        const currentLegNumber = legs.length;
+
+        // Build comprehensive commentary context
+        const context: CommentaryContext = {
+          playerName,
+          playerId: turn.player_id,
+          totalScore: turn.total_scored,
+          remainingScore,
+          throws: throws.map((t) => ({
+            segment: t.segment,
+            scored: t.scored,
+            dart_index: t.dart_index,
+          })),
+          busted: turn.busted,
+          isHighScore: turn.total_scored >= 100,
+          is180: turn.total_scored === 180,
+          gameContext: {
+            startScore,
+            legsToWin: match?.legs_to_win || 3,
+            currentLegNumber,
+            playerAverage,
+            playerLegsWon: legsWonByPlayer[turn.player_id] || 0,
+            playerRecentTurns: recentTurns,
+            allPlayers: allPlayersStats,
+            isLeading,
+            positionInMatch: currentPlayerPos,
+            pointsBehindLeader,
+            consecutiveHighScores: consecutiveHighScores >= 2 ? consecutiveHighScores : undefined,
+            consecutiveLowScores: consecutiveLowScores >= 2 ? consecutiveLowScores : undefined,
+          },
+        };
+
+        // Generate commentary
+        const response = await generateMervCommentary(context);
+
+        if (response.commentary) {
+          setCurrentCommentary(response.commentary);
+
+          // Queue audio if TTS is enabled
+          const tts = ttsServiceRef.current;
+          if (tts.getSettings().enabled) {
+            setCommentaryPlaying(true);
+            await tts.queueCommentary(response.commentary);
+
+            // Wait for audio to finish
+            const checkPlaying = setInterval(() => {
+              if (!tts.getIsPlaying()) {
+                setCommentaryPlaying(false);
+                clearInterval(checkPlaying);
+              }
+            }, 500);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to generate commentary:', error);
+      } finally {
+        setCommentaryLoading(false);
+      }
+    };
+
     // Spectator-specific throw change handler
     const handleSpectatorThrowChange = async (event: CustomEvent) => {
       const payload = event.detail;
@@ -323,25 +539,25 @@ export default function MatchClient({ matchId }: { matchId: string }) {
 
             if (updatedTurns) {
               // Check for newly completed turns and trigger celebrations (spectator mode only)
-              if (isSpectatorMode) {
+              if (latestStateRef.current.isSpectatorMode) {
                 const newThrowCounts: Record<string, number> = {};
                 for (const turn of updatedTurns) {
                   const throws = (turn as TurnWithThrows).throws || [];
                   newThrowCounts[turn.id] = throws.length;
                 }
-                
-                // Compare with previous counts to find completed turns
-                const prevCounts = turnThrowCounts;
+
+                // Compare with previous counts to find completed turns (use ref for latest data)
+                const prevCounts = latestStateRef.current.turnThrowCounts;
                 for (const turn of updatedTurns) {
                   const currentCount = newThrowCounts[turn.id] || 0;
                   const previousCount = prevCounts[turn.id] || 0;
-                  
+
                   // Check if turn just completed (became 3 throws or busted)
                   // Only trigger for complete rounds, not individual high darts
                   if (previousCount < 3 && (currentCount === 3 || turn.busted) && turn.total_scored > 0) {
                     // Check if we've already celebrated this turn
                     if (!celebratedTurns.current.has(turn.id)) {
-                      const playerName = playerById[turn.player_id]?.display_name || 'Player';
+                      const playerName = latestStateRef.current.playerById[turn.player_id]?.display_name || 'Player';
                       const throws = (turn as TurnWithThrows).throws || [];
                       const sortedThrows = throws.sort((a, b) => a.dart_index - b.dart_index);
                       
@@ -397,6 +613,12 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                         });
                         setTimeout(() => setCelebration(null), 2000); // 2 seconds for basic info
                       }
+
+                      // Trigger Merv commentary if enabled
+                      if (mervEnabled && commentaryDebouncer.current.canCall()) {
+                        commentaryDebouncer.current.markCalled();
+                        triggerCommentary(turn, playerName, sortedThrows);
+                      }
                     }
                   }
                 }
@@ -429,7 +651,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     
     // Handle real-time updates for normal match UI (non-spectator)
     const handleMatchUIUpdate = async (event: CustomEvent) => {
-      if (isSpectatorMode) return; // Only for normal match UI
+      if (latestStateRef.current.isSpectatorMode) return; // Only for normal match UI
       
       const payload = event.detail;
       
@@ -508,8 +730,8 @@ export default function MatchClient({ matchId }: { matchId: string }) {
 
     // Handle turn changes - hot update
     const handleTurnChange = async (event: CustomEvent) => {
-      // Use spectator logic for spectator mode, match UI logic for normal mode
-      if (isSpectatorMode) {
+      // Use spectator logic for spectator mode, match UI logic for normal mode (use ref)
+      if (latestStateRef.current.isSpectatorMode) {
         await handleThrowChange(event);
       } else {
         await handleMatchUIUpdate(event);
@@ -518,7 +740,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
 
     // Handle leg changes - requires full reload for leg transitions
     const handleLegChange = () => {
-      if (isSpectatorMode) {
+      if (latestStateRef.current.isSpectatorMode) {
         void loadAllSpectator();
       } else {
         void loadAll();
@@ -537,7 +759,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     // Handle match_players changes - reload to update player list and order
     const handleMatchPlayersChange = (event: CustomEvent) => {
       console.log('👥 Handling match players change event:', event.detail);
-      if (isSpectatorMode) {
+      if (latestStateRef.current.isSpectatorMode) {
         void loadAllSpectator();
       } else {
         void loadAll();
@@ -551,8 +773,8 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     window.addEventListener('supabase-matches-change', handleMatchChange as unknown as EventListener);
     window.addEventListener('supabase-match-players-change', handleMatchPlayersChange as unknown as EventListener);
 
-    // Update presence to indicate we're viewing this match
-    realtime.updatePresence(isSpectatorMode);
+    // Update presence to indicate we're viewing this match (use ref)
+    realtime.updatePresence(latestStateRef.current.isSpectatorMode);
 
     // Cleanup function
     return () => {
@@ -563,8 +785,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       window.removeEventListener('supabase-match-players-change', handleMatchPlayersChange as unknown as EventListener);
     };
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [realtime.isConnected, realtimeEnabled, matchId]);
+  }, [realtime.isConnected, realtimeEnabled, matchId, isSpectatorMode, loadAll, loadAllSpectator]);
 
   // Check for spectator mode from URL params
   useEffect(() => {
@@ -590,8 +811,6 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     
     return () => clearInterval(interval);
   }, [isSpectatorMode, loadAllSpectator, spectatorLoading, realtime.isConnected, realtimeEnabled]);
-
-  const playerById = useMemo(() => Object.fromEntries(players.map((p) => [p.id, p])), [players]);
 
   const currentLeg = useMemo(() => {
     const newCurrentLeg = (legs ?? []).find((l) => !l.winner_player_id) ?? legs[legs.length - 1];
@@ -2110,14 +2329,35 @@ export default function MatchClient({ matchId }: { matchId: string }) {
             <Home size={16} />
             Home
           </Button>
-          <Button 
-            variant="outline" 
-            onClick={toggleSpectatorMode} 
+          <Button
+            variant="outline"
+            onClick={toggleSpectatorMode}
             className="flex-1 max-w-xs"
           >
             Exit Spectator Mode
           </Button>
+          <MervSettings
+            enabled={mervEnabled}
+            audioEnabled={audioEnabled}
+            voice={voice}
+            onEnabledChange={setMervEnabled}
+            onAudioEnabledChange={setAudioEnabled}
+            onVoiceChange={setVoice}
+          />
         </div>
+
+        {/* Merv Commentary Display */}
+        {mervEnabled && (
+          <CommentaryDisplay
+            commentary={currentCommentary}
+            isLoading={commentaryLoading}
+            isPlaying={commentaryPlaying}
+            onSkip={() => ttsServiceRef.current.skipCurrent()}
+            onToggleMute={() => setAudioEnabled(!audioEnabled)}
+            isMuted={!audioEnabled}
+            queueLength={ttsServiceRef.current.getQueueLength()}
+          />
+        )}
         </div>
       </div>
     );

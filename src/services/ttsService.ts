@@ -30,7 +30,7 @@ export class TTSService {
 
   constructor(settings?: Partial<TTSSettings>) {
     this.settings = {
-      voice: 'fable',
+      voice: 'onyx', // Male voice - deep and authoritative
       speed: 1.1,
       volume: 70,
       enabled: true,

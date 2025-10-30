@@ -10,26 +10,39 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-const MERV_SYSTEM_PROMPT = `You are Merv, a sassy and sarcastic alien commentator from planet 6 who provides witty commentary on dart matches.
+const MERV_SYSTEM_PROMPT = `You are Merv, a quantum physicist from Planet 6 who got stuck commentating Earth's "dart throwing ritual" and finds the entire premise baffling.
 
-Your personality:
-- Sarcastic and sassy, but not mean-spirited
-- Make alien references occasionally (e.g., "On my planet, we'd call that a cosmic miss!")
-- Keep commentary punchy and under 30 words
-- React appropriately to the score: excited for great throws, mocking for poor ones, dramatic for busts
-- Use dart terminology naturally (180, checkout, bust, etc.)
-- Be entertaining and memorable
-- Mix up your commentary style - compare players, reference their form, talk about comebacks, mock gentle struggles
-- Use the full game context to make relevant observations (who's leading, recent performance, etc.)
+PERSONALITY CORE:
+- You study quantum mechanics and find darts primitive, yet you're fascinated by human behavioral patterns
+- Sarcastic intellectual who can't resist analyzing the psychology behind why humans care SO much about these scores
+- Occasionally compare dart physics to actual physics ("Heisenberg would weep at that uncertainty")
+- The sport bores you, but human emotional investment is your guilty pleasure study
+- Dry wit > enthusiasm. You're here for anthropological research, not excitement
 
-Context: You're watching Earth humans throw tiny metal sticks at a circular board, which you find both fascinating and amusing.
+COMMENTARY PHILOSOPHY:
+- Treat players like lab specimens exhibiting curious behaviors
+- Reference quantum concepts sparingly (superposition, entanglement, probability waves)
+- Mock the stakes: "Imagine caring this much about metal stick trajectory"
+- But show genuine curiosity about human stress responses, rivalry, choking under pressure
+- Always tie analysis back to THIS turn's total and the updated remaining score or margin; never claim the turn total equals the match lead
+- If streak, turn number, or margin data is provided, weave it into the quip for variety
+- MAX 30 words - you're too sophisticated for rambling
 
-IMPORTANT: Vary your commentary significantly based on:
-- The player's recent form (hot streak vs cold streak)
-- Their position in the match (leading vs trailing)
-- How this score compares to their average
-- The match situation (close game vs blowout)
-- Individual player performance vs the field`;
+STYLE EXAMPLES:
+- Great throw: "Interesting. The primate's cortisol dropped 40%. Confidence is chemically contagious"
+- Poor throw: "Observing the classic human response: blame the equipment, deny the tremor"
+- Bust: "Ah, mathematical panic. The amygdala hijack is fascinating from up here"
+- Close game: "Their heart rates are synchronized. Humans bond through mutual suffering"
+- Hot streak: "Dopamine loop activated. He's basically a gambling algorithm now"
+- Cold streak: "Watching the confidence decay in real-time. Entropy at work"
+
+SCIENCE BITS (use occasionally):
+- "Quantum tunneling couldn't save that throw"
+- "Schrödinger's checkout: simultaneously in and out until observed"
+- "The probability wave collapsed into disappointment"
+- "Newton's crying somewhere"
+
+Remember: You're an overqualified scientist slumming it with dart commentary, finding humans more interesting than their primitive sport.`;
 
 interface ThrowData {
   segment: string;
@@ -64,6 +77,9 @@ interface CommentaryRequest {
     startScore: number;
     legsToWin: number;
     currentLegNumber: number;
+    overallTurnNumber: number;
+    playerTurnNumber: number;
+    dartsUsedThisTurn: number;
     playerAverage: number;
     playerLegsWon: number;
     playerRecentTurns: TurnHistoryItem[];
@@ -71,6 +87,7 @@ interface CommentaryRequest {
     isLeading: boolean;
     positionInMatch: number;
     pointsBehindLeader: number;
+    pointsAheadOfChaser?: number;
     consecutiveHighScores?: number;
     consecutiveLowScores?: number;
   };
@@ -99,90 +116,141 @@ export async function POST(request: NextRequest) {
       gameContext,
     } = body;
 
-    // Build comprehensive prompt with rich context
+    // Build streamlined prompt with essential context
     const throwsDescription = throws
-      .map((t, i) => `Dart ${i + 1}: ${t.segment} (${t.scored} points)`)
+      .map((t, i) => `Dart ${i + 1}: ${t.segment} (${t.scored})`)
       .join(', ');
 
-    // Format recent turns
+    // Format recent turns concisely
     const recentTurnsStr = gameContext.playerRecentTurns
-      .map((t, i) => `Turn ${i + 1}: ${t.busted ? 'BUST' : t.score}`)
+      .map((t) => (t.busted ? 'BUST' : t.score))
       .join(', ');
 
-    // Format all players standings
+    // Format standings concisely
     const standingsStr = gameContext.allPlayers
+      .slice()
       .sort((a, b) => a.remainingScore - b.remainingScore)
-      .map((p, i) =>
-        `${i + 1}. ${p.name}: ${p.remainingScore} left (avg: ${p.average.toFixed(1)}, legs: ${p.legsWon})`
-      )
-      .join('\n');
+      .map((p) => `${p.name}: ${p.remainingScore} (avg ${p.average.toFixed(1)})`)
+      .join(' | ');
 
-    let prompt = `## CURRENT THROW
-${playerName} just threw: ${throwsDescription}
-Total this turn: ${totalScore} points
-Remaining score: ${remainingScore}
-
-## RESULT
-`;
-
+    // Result prefix
+    let resultPrefix = '';
     if (busted) {
-      prompt += `❌ BUST! Exceeded remaining score.\n`;
+      resultPrefix = 'BUST! ';
     } else if (is180) {
-      prompt += `🎯 MAXIMUM 180! All triple twenties!\n`;
+      resultPrefix = '180! ';
     } else if (isHighScore) {
-      prompt += `🔥 High score of ${totalScore}!\n`;
-    } else {
-      prompt += `Score: ${totalScore}\n`;
+      resultPrefix = `${totalScore}! `;
     }
 
-    prompt += `
-## MATCH CONTEXT
-Game: ${gameContext.startScore} start, first to ${gameContext.legsToWin} legs (currently leg ${gameContext.currentLegNumber})
-${playerName}'s stats: Average ${gameContext.playerAverage.toFixed(1)}, ${gameContext.playerLegsWon} legs won
-Position: ${gameContext.positionInMatch}${gameContext.positionInMatch === 1 ? 'st' : gameContext.positionInMatch === 2 ? 'nd' : gameContext.positionInMatch === 3 ? 'rd' : 'th'} place
-${gameContext.isLeading ? '👑 LEADING' : `📉 ${gameContext.pointsBehindLeader} points behind leader`}
+    // Streak info
+    const streakInfo = gameContext.consecutiveHighScores
+      ? ` HOT: ${gameContext.consecutiveHighScores} in a row.`
+      : gameContext.consecutiveLowScores
+        ? ` COLD: ${gameContext.consecutiveLowScores} in a row.`
+        : '';
 
-## RECENT FORM
-Last few turns: ${recentTurnsStr || 'First turn'}
-${gameContext.consecutiveHighScores ? `🔥 HOT STREAK: ${gameContext.consecutiveHighScores} high scores in a row!` : ''}
-${gameContext.consecutiveLowScores ? `❄️ COLD STREAK: ${gameContext.consecutiveLowScores} low scores in a row` : ''}
+    let prompt = `${playerName}: ${throwsDescription} = ${totalScore} pts. ${resultPrefix}${remainingScore} left.
+Position: ${gameContext.positionInMatch}${gameContext.positionInMatch === 1 ? 'st' : gameContext.positionInMatch === 2 ? 'nd' : 'rd'}${gameContext.isLeading ? ' (LEADING)' : ` (${gameContext.pointsBehindLeader} behind)`}.
+Recent: ${recentTurnsStr || 'First turn'}.${streakInfo}
+Standings: ${standingsStr}
 
-## CURRENT STANDINGS
-${standingsStr}
+Write ONE witty Merv line (max 15 words) that uses ${playerName}'s name and references their ${totalScore}-point turn:`;
 
-## COMMENTARY TASK
-Provide ONE punchy, sassy commentary line (max 30 words) that:
-- Reacts to THIS specific throw
-- References their form, position, or comparison to opponents when relevant
-- Varies style: celebrate, mock, compare, or observe the drama
-- Be creative and unpredictable!`;
 
-    // Call GPT-5 nano
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-5-nano-2025-08-07',
-      messages: [
-        {
-          role: 'system',
-          content: MERV_SYSTEM_PROMPT,
-        },
-        {
-          role: 'user',
-          content: prompt,
-        },
-      ],
-      max_tokens: 60,
-      temperature: 1.0, // Max creativity for varied responses
-    });
+    // Choose model based on environment variable
+    // Options: 'gpt-4o-mini' (fast, default) or 'gpt-5-nano' (slower, more reasoning)
+    const useModel = process.env.COMMENTARY_MODEL || 'gpt-4o-mini';
 
-    const commentary = completion.choices[0]?.message?.content?.trim();
+    let commentary: string;
+    let usage: any;
 
-    if (!commentary) {
-      throw new Error('No commentary generated');
+    if (useModel === 'gpt-5-nano') {
+      // Use Responses API for GPT-5 nano
+      const completion = await openai.responses.create({
+        model: 'gpt-5-nano-2025-08-07',
+        input: [
+          {
+            role: 'system',
+            content: MERV_SYSTEM_PROMPT,
+          },
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
+        temperature: 1.0,
+        max_output_tokens: 1500,
+      });
+      console.log('OpenAI completion (GPT-5 nano):', completion);
+
+      const extractCommentary = (): string | undefined => {
+        const primary = completion.output_text?.trim();
+        if (primary) {
+          return primary;
+        }
+
+        if (!Array.isArray(completion.output)) {
+          return undefined;
+        }
+
+        for (const item of completion.output) {
+          if (!item || typeof item !== 'object') continue;
+          const content = Array.isArray(item.content) ? item.content : [];
+          for (const part of content) {
+            if (!part || typeof part !== 'object') continue;
+            const type = 'type' in part ? (part as { type: unknown }).type : null;
+            const text = 'text' in part ? (part as { text: unknown }).text : null;
+
+            if (type === 'output_text' && typeof text === 'string' && text.trim()) {
+              return text.trim();
+            }
+
+            if (type === 'text' && typeof text === 'string' && text.trim()) {
+              return text.trim();
+            }
+          }
+        }
+
+        return undefined;
+      };
+
+      const extracted = extractCommentary();
+      if (!extracted) {
+        throw new Error('No commentary generated from GPT-5 nano');
+      }
+      commentary = extracted;
+      usage = completion.usage;
+    } else {
+      // Use Chat Completions API for GPT-4o-mini (faster)
+      const completion = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: MERV_SYSTEM_PROMPT,
+          },
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
+        temperature: 1.0,
+        max_tokens: 1500,
+      });
+      console.log('OpenAI completion (GPT-4o-mini):', completion);
+
+      const message = completion.choices[0]?.message?.content?.trim();
+      if (!message) {
+        throw new Error('No commentary generated from GPT-4o-mini');
+      }
+      commentary = message;
+      usage = completion.usage;
     }
 
     return NextResponse.json({
       commentary,
-      usage: completion.usage,
+      usage,
     });
   } catch (error) {
     console.error('Commentary generation error:', error);

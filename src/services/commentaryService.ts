@@ -40,6 +40,9 @@ export interface CommentaryContext {
     startScore: number;
     legsToWin: number;
     currentLegNumber: number;
+    overallTurnNumber: number;
+    playerTurnNumber: number;
+    dartsUsedThisTurn: number;
 
     // Current player stats
     playerAverage: number;
@@ -53,6 +56,7 @@ export interface CommentaryContext {
     isLeading: boolean;
     positionInMatch: number; // 1st, 2nd, 3rd place
     pointsBehindLeader: number;
+    pointsAheadOfChaser?: number;
 
     // Streak info
     consecutiveHighScores?: number; // If they've been on a hot streak
@@ -84,7 +88,9 @@ export async function generateMervCommentary(
       throw new Error(`API error: ${response.status}`);
     }
 
+    console.log('Getting commentary');
     const data = await response.json();
+    console.log(data);
     return { commentary: data.commentary };
   } catch (error) {
     console.error('Failed to generate commentary:', error);
@@ -101,10 +107,17 @@ export async function generateMervCommentary(
  * Provides fallback commentary when API fails
  */
 function getFallbackCommentary(context: CommentaryContext): string {
-  const { busted, is180, isHighScore, totalScore, playerName, gameContext } = context;
+  const { busted, is180, isHighScore, totalScore, playerName, gameContext, remainingScore } = context;
+  const {
+    isLeading,
+    pointsBehindLeader,
+    pointsAheadOfChaser,
+    playerTurnNumber,
+    currentLegNumber,
+  } = gameContext;
 
   if (busted) {
-    return `${playerName} busted! Even on planet 6, we know when to stop throwing.`;
+    return `${playerName} busts on leg ${currentLegNumber}. Reset the lab instruments and start again.`;
   }
 
   if (is180) {
@@ -112,24 +125,25 @@ function getFallbackCommentary(context: CommentaryContext): string {
   }
 
   if (isHighScore) {
-    if (gameContext.isLeading) {
-      return `${totalScore} from the leader ${playerName}! Showing off now?`;
+    if (isLeading) {
+      return `${totalScore} in turn ${playerTurnNumber}. ${playerName} keeps the lead with ${remainingScore} left.`;
     }
-    return `${totalScore} points! ${playerName} trying to catch up!`;
+    return `${totalScore} scored on turn ${playerTurnNumber}. ${playerName} trims it to ${pointsBehindLeader} behind with ${remainingScore} remaining.`;
   }
 
   if (totalScore < 20) {
     if (gameContext.consecutiveLowScores && gameContext.consecutiveLowScores >= 3) {
-      return `${totalScore}? ${playerName}'s having a cosmic meltdown!`;
+      return `${totalScore}? ${playerName}'s in a cosmic slump—${gameContext.consecutiveLowScores} low turns now.`;
     }
-    return `${totalScore} points? My grandma throws better, and she's a blob of gas.`;
+    return `${totalScore} points leaves ${remainingScore}. Even my gas-cloud grandma clears more.`;
   }
 
-  if (gameContext.isLeading) {
-    return `${playerName} leads with ${totalScore}. Cruise control activated!`;
+  if (isLeading) {
+    const buffer = pointsAheadOfChaser ?? 0;
+    return `${playerName} posts ${totalScore} on leg ${currentLegNumber}, still ${buffer} ahead with ${remainingScore} to clean up.`;
   }
 
-  return `${playerName} scored ${totalScore}. ${gameContext.pointsBehindLeader} behind the leader.`;
+  return `${playerName} adds ${totalScore}. Gap is ${pointsBehindLeader} with ${remainingScore} remaining.`;
 }
 
 /**

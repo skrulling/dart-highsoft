@@ -30,12 +30,12 @@ interface MervSettingsProps {
 }
 
 const VOICE_OPTIONS: { value: VoiceOption; label: string; description: string }[] = [
-  { value: 'alloy', label: 'Alloy', description: 'Neutral and balanced' },
-  { value: 'echo', label: 'Echo', description: 'Clear and articulate' },
-  { value: 'fable', label: 'Fable', description: 'Warm and expressive' },
-  { value: 'onyx', label: 'Onyx', description: 'Deep and authoritative' },
-  { value: 'nova', label: 'Nova', description: 'Friendly and energetic' },
-  { value: 'shimmer', label: 'Shimmer', description: 'Soft and soothing' },
+  { value: 'alloy', label: 'Alloy', description: 'Neutral (androgynous)' },
+  { value: 'echo', label: 'Echo', description: 'Male - clear and articulate' },
+  { value: 'fable', label: 'Fable', description: 'Female - warm and expressive' },
+  { value: 'onyx', label: 'Onyx', description: 'Male - deep and authoritative' },
+  { value: 'nova', label: 'Nova', description: 'Female - friendly and energetic' },
+  { value: 'shimmer', label: 'Shimmer', description: 'Female - soft and soothing' },
 ];
 
 export default function MervSettings({

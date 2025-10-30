@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body: TTSRequest = await request.json();
-    const { text, voice = 'fable', speed = 1.1 } = body;
+    const { text, voice = 'onyx', speed = 1.1 } = body;
 
     if (!text || text.trim().length === 0) {
       return NextResponse.json(

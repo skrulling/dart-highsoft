@@ -98,7 +98,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   // Commentary state (Merv the alien)
   const [mervEnabled, setMervEnabled] = useState(false);
   const [audioEnabled, setAudioEnabled] = useState(true);
-  const [voice, setVoice] = useState<'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer'>('fable');
+  const [voice, setVoice] = useState<'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer'>('onyx'); // Match TTSService default - male voice
   const [currentCommentary, setCurrentCommentary] = useState<string | null>(null);
   const [commentaryLoading, setCommentaryLoading] = useState(false);
   const [commentaryPlaying, setCommentaryPlaying] = useState(false);
@@ -297,7 +297,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     void loadAll();
   }, [loadAll]);
 
-  // Load Merv settings from localStorage
+  // Load Merv settings from localStorage and TTSService
   useEffect(() => {
     try {
       const savedEnabled = localStorage.getItem('merv-enabled');
@@ -310,10 +310,9 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         setAudioEnabled(savedAudioEnabled === 'true');
       }
 
-      const savedVoice = localStorage.getItem('merv-voice') as 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer' | null;
-      if (savedVoice) {
-        setVoice(savedVoice);
-      }
+      // Load voice from TTSService (single source of truth)
+      const ttsSettings = ttsServiceRef.current.getSettings();
+      setVoice(ttsSettings.voice);
     } catch (error) {
       console.error('Failed to load Merv settings:', error);
     }
@@ -339,7 +338,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
 
   useEffect(() => {
     try {
-      localStorage.setItem('merv-voice', voice);
+      // Update TTSService with new voice (TTSService handles localStorage)
       ttsServiceRef.current.updateSettings({ voice });
     } catch (error) {
       console.error('Failed to save voice:', error);
@@ -385,56 +384,120 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     };
     
     // Trigger Merv commentary for a completed turn
+    type CommentarySnapshot = {
+      turns: TurnWithThrows[];
+      legs: LegRecord[];
+      players: Player[];
+      match: MatchRecord | null;
+    };
+
     const triggerCommentary = async (
-      turn: TurnRecord,
+      turn: TurnWithThrows,
       playerName: string,
-      throws: { segment: string; scored: number; dart_index: number }[]
+      throws: { segment: string; scored: number; dart_index: number }[],
+      snapshot: CommentarySnapshot
     ) => {
       try {
         setCommentaryLoading(true);
 
-        // Get current player's remaining score
-        const remainingScore = getScoreForPlayer(turn.player_id);
-        const playerAverage = getAvgForPlayer(turn.player_id);
+        const { turns: turnsSnapshot, legs: legsSnapshot, players: playersSnapshot, match: matchSnapshot } = snapshot;
 
-        // Count legs won by each player
-        const legsWonByPlayer: Record<string, number> = {};
-        legs.forEach((leg) => {
-          if (leg.winner_player_id) {
-            legsWonByPlayer[leg.winner_player_id] = (legsWonByPlayer[leg.winner_player_id] || 0) + 1;
+        const startScoreValue = matchSnapshot?.start_score ? parseInt(matchSnapshot.start_score, 10) : 501;
+        const legsToWinValue = matchSnapshot?.legs_to_win ?? 3;
+
+        const computeTurnTotal = (targetTurn: TurnWithThrows): number => {
+          if (typeof targetTurn.total_scored === 'number') {
+            return targetTurn.total_scored;
           }
-        });
+          const dartSum = targetTurn.throws?.reduce((sum, thr) => sum + thr.scored, 0) ?? 0;
+          return dartSum;
+        };
 
-        // Get all players stats for comparison
-        const allPlayersStats = players.map((p) => ({
+        const computeRemainingScore = (playerId: string): number => {
+          const playerTurns = turnsSnapshot
+            .filter((t) => t.player_id === playerId)
+            .sort((a, b) => a.turn_number - b.turn_number);
+
+          let scored = 0;
+          for (const playerTurn of playerTurns) {
+            if (playerTurn.busted) {
+              continue;
+            }
+
+            if (typeof playerTurn.total_scored === 'number') {
+              scored += playerTurn.total_scored;
+            } else if (playerTurn.throws && playerTurn.throws.length > 0) {
+              const partial = playerTurn.throws.reduce((sum, thr) => sum + thr.scored, 0);
+              scored += partial;
+            }
+          }
+
+          return Math.max(startScoreValue - scored, 0);
+        };
+
+        const computeAverage = (playerId: string): number => {
+          const completedTurns = turnsSnapshot.filter(
+            (t) => t.player_id === playerId && !t.busted && typeof t.total_scored === 'number'
+          );
+
+          if (completedTurns.length === 0) {
+            return 0;
+          }
+
+          const total = completedTurns.reduce((sum, t) => sum + (t.total_scored ?? 0), 0);
+          return total / completedTurns.length;
+        };
+
+        const remainingScore = computeRemainingScore(turn.player_id);
+        const playerAverage = computeAverage(turn.player_id);
+
+        const legsWonByPlayer = legsSnapshot.reduce<Record<string, number>>((acc, leg) => {
+          if (leg.winner_player_id) {
+            acc[leg.winner_player_id] = (acc[leg.winner_player_id] || 0) + 1;
+          }
+          return acc;
+        }, {});
+
+        const allPlayersStats = playersSnapshot.map((p) => ({
           name: p.display_name,
           id: p.id,
-          remainingScore: getScoreForPlayer(p.id),
-          average: getAvgForPlayer(p.id),
+          remainingScore: computeRemainingScore(p.id),
+          average: computeAverage(p.id),
           legsWon: legsWonByPlayer[p.id] || 0,
           isCurrentPlayer: p.id === turn.player_id,
         }));
 
-        // Calculate position and points behind leader
         const sortedByScore = [...allPlayersStats].sort((a, b) => a.remainingScore - b.remainingScore);
-        const currentPlayerPos = sortedByScore.findIndex((p) => p.id === turn.player_id) + 1;
+        const currentPlayerIndex = sortedByScore.findIndex((p) => p.id === turn.player_id);
+        const currentPlayerPos = currentPlayerIndex >= 0 ? currentPlayerIndex + 1 : Math.max(sortedByScore.length, 1);
         const leader = sortedByScore[0];
-        const pointsBehindLeader = remainingScore - leader.remainingScore;
-        const isLeading = currentPlayerPos === 1;
+        const isLeading = currentPlayerIndex === 0 || sortedByScore.length <= 1;
+        const nearestOpponent = isLeading ? sortedByScore[1] : leader;
+        const pointsBehindLeader =
+          !isLeading && nearestOpponent
+            ? Math.max(remainingScore - nearestOpponent.remainingScore, 0)
+            : 0;
+        const pointsAheadOfChaser =
+          isLeading && nearestOpponent
+            ? Math.max(nearestOpponent.remainingScore - remainingScore, 0)
+            : undefined;
 
-        // Get recent turns for this player
-        const playerTurns = turns.filter((t) => t.player_id === turn.player_id);
+        const playerTurns = turnsSnapshot
+          .filter((t) => t.player_id === turn.player_id)
+          .sort((a, b) => a.turn_number - b.turn_number);
         const recentTurns = playerTurns.slice(-5).map((t) => ({
-          score: t.total_scored,
+          score: computeTurnTotal(t),
           busted: t.busted,
         }));
 
-        // Calculate streaks
         let consecutiveHighScores = 0;
         let consecutiveLowScores = 0;
         for (let i = playerTurns.length - 1; i >= 0; i--) {
           const t = playerTurns[i];
-          if (t.total_scored >= 60 && !t.busted) {
+          if (t.busted) {
+            break;
+          }
+          if (computeTurnTotal(t) >= 60) {
             consecutiveHighScores++;
           } else {
             break;
@@ -442,21 +505,26 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         }
         for (let i = playerTurns.length - 1; i >= 0; i--) {
           const t = playerTurns[i];
-          if (t.total_scored < 30 || t.busted) {
-            consecutiveLowScores++;
-          } else {
+          if (t.busted || computeTurnTotal(t) >= 30) {
             break;
           }
+          consecutiveLowScores++;
         }
 
-        // Get current leg number
-        const currentLegNumber = legs.length;
+        const highStreak = consecutiveHighScores >= 2 ? consecutiveHighScores : undefined;
+        const lowStreak = consecutiveLowScores >= 2 ? consecutiveLowScores : undefined;
 
-        // Build comprehensive commentary context
+        const currentLeg = legsSnapshot.find((leg) => leg.id === turn.leg_id);
+        const currentLegNumber = currentLeg?.leg_number ?? legsSnapshot.length;
+        const playerTurnNumber = playerTurns.length;
+        const overallTurnNumber = turn.turn_number;
+        const dartsUsedThisTurn = throws.length;
+        const turnTotal = computeTurnTotal(turn);
+
         const context: CommentaryContext = {
           playerName,
           playerId: turn.player_id,
-          totalScore: turn.total_scored,
+          totalScore: turnTotal,
           remainingScore,
           throws: throws.map((t) => ({
             segment: t.segment,
@@ -464,12 +532,15 @@ export default function MatchClient({ matchId }: { matchId: string }) {
             dart_index: t.dart_index,
           })),
           busted: turn.busted,
-          isHighScore: turn.total_scored >= 100,
-          is180: turn.total_scored === 180,
+          isHighScore: turnTotal >= 100,
+          is180: turnTotal === 180,
           gameContext: {
-            startScore,
-            legsToWin: match?.legs_to_win || 3,
+            startScore: startScoreValue,
+            legsToWin: legsToWinValue,
             currentLegNumber,
+            overallTurnNumber,
+            playerTurnNumber,
+            dartsUsedThisTurn,
             playerAverage,
             playerLegsWon: legsWonByPlayer[turn.player_id] || 0,
             playerRecentTurns: recentTurns,
@@ -477,24 +548,22 @@ export default function MatchClient({ matchId }: { matchId: string }) {
             isLeading,
             positionInMatch: currentPlayerPos,
             pointsBehindLeader,
-            consecutiveHighScores: consecutiveHighScores >= 2 ? consecutiveHighScores : undefined,
-            consecutiveLowScores: consecutiveLowScores >= 2 ? consecutiveLowScores : undefined,
+            pointsAheadOfChaser,
+            consecutiveHighScores: highStreak,
+            consecutiveLowScores: lowStreak,
           },
         };
 
-        // Generate commentary
         const response = await generateMervCommentary(context);
 
         if (response.commentary) {
           setCurrentCommentary(response.commentary);
 
-          // Queue audio if TTS is enabled
           const tts = ttsServiceRef.current;
           if (tts.getSettings().enabled) {
             setCommentaryPlaying(true);
             await tts.queueCommentary(response.commentary);
 
-            // Wait for audio to finish
             const checkPlaying = setInterval(() => {
               if (!tts.getIsPlaying()) {
                 setCommentaryPlaying(false);
@@ -558,7 +627,8 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                     // Check if we've already celebrated this turn
                     if (!celebratedTurns.current.has(turn.id)) {
                       const playerName = latestStateRef.current.playerById[turn.player_id]?.display_name || 'Player';
-                      const throws = (turn as TurnWithThrows).throws || [];
+                      const turnWithThrows = turn as TurnWithThrows;
+                      const throws = turnWithThrows.throws || [];
                       const sortedThrows = throws.sort((a, b) => a.dart_index - b.dart_index);
                       
                       // Show all round scores with different levels of celebration
@@ -617,7 +687,14 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                       // Trigger Merv commentary if enabled
                       if (mervEnabled && commentaryDebouncer.current.canCall()) {
                         commentaryDebouncer.current.markCalled();
-                        triggerCommentary(turn, playerName, sortedThrows);
+                        const legsSnapshot = (currentLegs as LegRecord[] | null) ?? latestStateRef.current.legs;
+                        const snapshot: CommentarySnapshot = {
+                          turns: updatedTurns as TurnWithThrows[],
+                          legs: legsSnapshot,
+                          players: latestStateRef.current.players,
+                          match: latestStateRef.current.match,
+                        };
+                        triggerCommentary(turnWithThrows, playerName, sortedThrows, snapshot);
                       }
                     }
                   }
@@ -785,7 +862,16 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       window.removeEventListener('supabase-match-players-change', handleMatchPlayersChange as unknown as EventListener);
     };
 
-  }, [realtime.isConnected, realtimeEnabled, matchId, isSpectatorMode, loadAll, loadAllSpectator]);
+  }, [
+    realtime,
+    realtime.isConnected,
+    realtimeEnabled,
+    matchId,
+    isSpectatorMode,
+    loadAll,
+    loadAllSpectator,
+    mervEnabled,
+  ]);
 
   // Check for spectator mode from URL params
   useEffect(() => {

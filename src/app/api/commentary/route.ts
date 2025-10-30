@@ -150,7 +150,7 @@ export async function POST(request: NextRequest) {
         ? ` COLD: ${gameContext.consecutiveLowScores} in a row.`
         : '';
 
-    let prompt = `${playerName}: ${throwsDescription} = ${totalScore} pts. ${resultPrefix}${remainingScore} left.
+    const prompt = `${playerName}: ${throwsDescription} = ${totalScore} pts. ${resultPrefix}${remainingScore} left.
 Position: ${gameContext.positionInMatch}${gameContext.positionInMatch === 1 ? 'st' : gameContext.positionInMatch === 2 ? 'nd' : 'rd'}${gameContext.isLeading ? ' (LEADING)' : ` (${gameContext.pointsBehindLeader} behind)`}.
 Recent: ${recentTurnsStr || 'First turn'}.${streakInfo}
 Standings: ${standingsStr}
@@ -163,7 +163,7 @@ Write ONE witty Merv line (max 15 words) that uses ${playerName}'s name and refe
     const useModel = process.env.COMMENTARY_MODEL || 'gpt-4o-mini';
 
     let commentary: string;
-    let usage: any;
+    let usage: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | undefined;
 
     if (useModel === 'gpt-5-nano') {
       // Use Responses API for GPT-5 nano
@@ -196,6 +196,8 @@ Write ONE witty Merv line (max 15 words) that uses ${playerName}'s name and refe
 
         for (const item of completion.output) {
           if (!item || typeof item !== 'object') continue;
+          // Check if item has content property
+          if (!('content' in item)) continue;
           const content = Array.isArray(item.content) ? item.content : [];
           for (const part of content) {
             if (!part || typeof part !== 'object') continue;

@@ -20,7 +20,7 @@ export default function NewMatchPage() {
   const [newName, setNewName] = useState('');
   const [startScore, setStartScore] = useState<StartScore>('501');
   const [finish, setFinish] = useState<FinishRule>('double_out');
-  const [legsToWin, setLegsToWin] = useState(2);
+  const [legsToWin, setLegsToWin] = useState(1);
 
   useEffect(() => {
     (async () => {

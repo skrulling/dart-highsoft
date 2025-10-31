@@ -1,7 +1,7 @@
 /**
  * Commentary Service
  * Generates witty and sarcastic commentary using OpenAI GPT-5 nano
- * for Merv, the alien commentator from planet 6
+ * for Chad, the Gen Z surf-bro commentator
  */
 
 export interface ThrowData {
@@ -72,7 +72,7 @@ export interface CommentaryResponse {
 /**
  * Generates commentary using GPT-5 nano via the API route
  */
-export async function generateMervCommentary(
+export async function generateChadCommentary(
   context: CommentaryContext
 ): Promise<CommentaryResponse> {
   try {
@@ -88,12 +88,12 @@ export async function generateMervCommentary(
       throw new Error(`API error: ${response.status}`);
     }
 
-    console.log('Getting commentary');
+    console.log('Getting Chad commentary');
     const data = await response.json();
     console.log(data);
     return { commentary: data.commentary };
   } catch (error) {
-    console.error('Failed to generate commentary:', error);
+    console.error('Failed to generate Chad commentary:', error);
 
     // Fallback to generic messages based on context
     return {
@@ -117,33 +117,33 @@ function getFallbackCommentary(context: CommentaryContext): string {
   } = gameContext;
 
   if (busted) {
-    return `${playerName} busts on leg ${currentLegNumber}. Reset the lab instruments and start again.`;
+      return `${playerName} busts on leg ${currentLegNumber}. Massive L, time to touch grass and reset.`;
   }
 
   if (is180) {
-    return `180! ${playerName} just made my antenna tingle with that one!`;
+    return `180! ${playerName} just went full main character energy, no cap.`;
   }
 
   if (isHighScore) {
     if (isLeading) {
-      return `${totalScore} in turn ${playerTurnNumber}. ${playerName} keeps the lead with ${remainingScore} left.`;
+      return `${totalScore} in turn ${playerTurnNumber}. ${playerName} keeps the lead, still ${remainingScore} on the board.`;
     }
-    return `${totalScore} scored on turn ${playerTurnNumber}. ${playerName} trims it to ${pointsBehindLeader} behind with ${remainingScore} remaining.`;
+    return `${totalScore} scored on turn ${playerTurnNumber}. ${playerName} trims it to ${pointsBehindLeader} back with ${remainingScore} left.`;
   }
 
   if (totalScore < 20) {
     if (gameContext.consecutiveLowScores && gameContext.consecutiveLowScores >= 3) {
-      return `${totalScore}? ${playerName}'s in a cosmic slump—${gameContext.consecutiveLowScores} low turns now.`;
+      return `${totalScore}? ${playerName}'s confidence just evaporated - ${gameContext.consecutiveLowScores} cold turns straight.`;
     }
-    return `${totalScore} points leaves ${remainingScore}. Even my gas-cloud grandma clears more.`;
+    return `${totalScore} points leaves ${remainingScore}. That turn was mid, but the vibes survive.`;
   }
 
   if (isLeading) {
     const buffer = pointsAheadOfChaser ?? 0;
-    return `${playerName} posts ${totalScore} on leg ${currentLegNumber}, still ${buffer} ahead with ${remainingScore} to clean up.`;
+    return `${playerName} posts ${totalScore} on leg ${currentLegNumber}, still ${buffer} up with ${remainingScore} to clear.`;
   }
 
-  return `${playerName} adds ${totalScore}. Gap is ${pointsBehindLeader} with ${remainingScore} remaining.`;
+  return `${playerName} adds ${totalScore}. Gap is ${pointsBehindLeader} with ${remainingScore} left - keep grinding.`;
 }
 
 /**

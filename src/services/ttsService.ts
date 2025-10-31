@@ -48,7 +48,7 @@ export class TTSService {
    */
   private loadSettings(): void {
     try {
-      const saved = localStorage.getItem('merv-tts-settings');
+      const saved = localStorage.getItem('chad-tts-settings');
       if (saved) {
         const parsed = JSON.parse(saved);
         this.settings = { ...this.settings, ...parsed };
@@ -63,7 +63,7 @@ export class TTSService {
    */
   private saveSettings(): void {
     try {
-      localStorage.setItem('merv-tts-settings', JSON.stringify(this.settings));
+      localStorage.setItem('chad-tts-settings', JSON.stringify(this.settings));
     } catch (error) {
       console.error('Failed to save TTS settings:', error);
     }

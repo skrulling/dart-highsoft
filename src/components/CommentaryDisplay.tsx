@@ -1,6 +1,6 @@
 /**
  * CommentaryDisplay Component
- * Displays Merv's sassy alien commentary with animations
+ * Displays Chad's surfer-bro commentary with animations
  */
 
 'use client';
@@ -59,16 +59,16 @@ export default function CommentaryDisplay({
           ${isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}
         `}
       >
-        {/* Alien Icon */}
+        {/* Chad Icon */}
         <div className="absolute -top-8 -left-8 text-5xl">
-          👽
+          🏄‍♂️
         </div>
 
         {/* Speaker Name */}
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
             <span className="text-xs font-bold text-green-400 uppercase tracking-wider">
-              Merv from Planet 6
+              Chad "DartBroGPT"
             </span>
             {isPlaying && (
               <div className="flex gap-1 items-center">
@@ -109,7 +109,7 @@ export default function CommentaryDisplay({
           {isLoading ? (
             <div className="flex items-center gap-2 text-green-300">
               <Loader2 className="w-4 h-4 animate-spin" />
-              <span className="italic">Merv is thinking...</span>
+              <span className="italic">Chad is thinking...</span>
             </div>
           ) : (
             <p className="font-medium">{commentary}</p>

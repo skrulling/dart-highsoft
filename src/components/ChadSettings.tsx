@@ -1,6 +1,6 @@
 /**
- * MervSettings Component
- * Settings panel for controlling Merv's commentary
+ * ChadSettings Component
+ * Settings panel for controlling Chad's commentary
  */
 
 'use client';
@@ -20,7 +20,7 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import type { VoiceOption } from '@/services/ttsService';
 
-interface MervSettingsProps {
+interface ChadSettingsProps {
   enabled: boolean;
   audioEnabled: boolean;
   voice: VoiceOption;
@@ -38,32 +38,32 @@ const VOICE_OPTIONS: { value: VoiceOption; label: string; description: string }[
   { value: 'shimmer', label: 'Shimmer', description: 'Female - soft and soothing' },
 ];
 
-export default function MervSettings({
+export default function ChadSettings({
   enabled,
   audioEnabled,
   voice,
   onEnabledChange,
   onAudioEnabledChange,
   onVoiceChange,
-}: MervSettingsProps) {
+}: ChadSettingsProps) {
   const currentVoice = VOICE_OPTIONS.find((v) => v.value === voice) || VOICE_OPTIONS[2];
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant="outline" size="sm" className="gap-2">
-          <span className="text-lg">👽</span>
-          <span>Merv</span>
+          <span className="text-lg">🏄‍♂️</span>
+          <span>Chad</span>
           <Settings className="w-4 h-4" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-80">
         <DropdownMenuLabel className="flex items-center gap-2">
-          <span className="text-2xl">👽</span>
+          <span className="text-2xl">🏄‍♂️</span>
           <div>
-            <div className="font-semibold">Merv Commentary</div>
+            <div className="font-semibold">Chad Commentary</div>
             <div className="text-xs text-muted-foreground font-normal">
-              Sassy alien from Planet 6
+              Deadpan dart bro with questionable surfer vibes
             </div>
           </div>
         </DropdownMenuLabel>
@@ -72,11 +72,11 @@ export default function MervSettings({
         {/* Enable/Disable Toggle */}
         <div className="px-2 py-3 space-y-3">
           <div className="flex items-center justify-between">
-            <Label htmlFor="merv-enabled" className="text-sm font-medium">
+            <Label htmlFor="chad-enabled" className="text-sm font-medium">
               Enable Commentary
             </Label>
             <Switch
-              id="merv-enabled"
+              id="chad-enabled"
               checked={enabled}
               onCheckedChange={onEnabledChange}
             />
@@ -85,11 +85,11 @@ export default function MervSettings({
           {enabled && (
             <>
               <div className="flex items-center justify-between">
-                <Label htmlFor="merv-audio" className="text-sm font-medium">
+                <Label htmlFor="chad-audio" className="text-sm font-medium">
                   Enable Audio
                 </Label>
                 <Switch
-                  id="merv-audio"
+                  id="chad-audio"
                   checked={audioEnabled}
                   onCheckedChange={onAudioEnabledChange}
                 />

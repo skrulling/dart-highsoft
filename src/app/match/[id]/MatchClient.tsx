@@ -26,8 +26,8 @@ import { updateMatchEloRatings, shouldMatchBeRated } from '@/utils/eloRating';
 import { updateMatchEloRatingsMultiplayer, shouldMatchBeRatedMultiplayer, type MultiplayerResult } from '@/utils/eloRatingMultiplayer';
 import { Home, ChevronUp, ChevronDown } from 'lucide-react';
 import CommentaryDisplay from '@/components/CommentaryDisplay';
-import MervSettings from '@/components/MervSettings';
-import { generateMervCommentary, type CommentaryContext, CommentaryDebouncer } from '@/services/commentaryService';
+import ChadSettings from '@/components/ChadSettings';
+import { generateChadCommentary, type CommentaryContext, CommentaryDebouncer } from '@/services/commentaryService';
 import { getTTSService } from '@/services/ttsService';
 
 type Player = { id: string; display_name: string };
@@ -95,8 +95,8 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   } | null>(null);
   const celebratedTurns = useRef<Set<string>>(new Set());
 
-  // Commentary state (Merv the alien)
-  const [mervEnabled, setMervEnabled] = useState(false);
+  // Commentary state (Chad the dart bro)
+  const [chadEnabled, setChadEnabled] = useState(false);
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [voice, setVoice] = useState<'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer'>('onyx'); // Match TTSService default - male voice
   const [currentCommentary, setCurrentCommentary] = useState<string | null>(null);
@@ -297,15 +297,15 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     void loadAll();
   }, [loadAll]);
 
-  // Load Merv settings from localStorage and TTSService
+  // Load Chad settings from localStorage and TTSService
   useEffect(() => {
     try {
-      const savedEnabled = localStorage.getItem('merv-enabled');
+      const savedEnabled = localStorage.getItem('chad-enabled');
       if (savedEnabled !== null) {
-        setMervEnabled(savedEnabled === 'true');
+        setChadEnabled(savedEnabled === 'true');
       }
 
-      const savedAudioEnabled = localStorage.getItem('merv-audio-enabled');
+      const savedAudioEnabled = localStorage.getItem('chad-audio-enabled');
       if (savedAudioEnabled !== null) {
         setAudioEnabled(savedAudioEnabled === 'true');
       }
@@ -314,22 +314,22 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       const ttsSettings = ttsServiceRef.current.getSettings();
       setVoice(ttsSettings.voice);
     } catch (error) {
-      console.error('Failed to load Merv settings:', error);
+      console.error('Failed to load Chad settings:', error);
     }
   }, []);
 
-  // Save Merv settings to localStorage
+  // Save Chad settings to localStorage
   useEffect(() => {
     try {
-      localStorage.setItem('merv-enabled', mervEnabled.toString());
+      localStorage.setItem('chad-enabled', chadEnabled.toString());
     } catch (error) {
-      console.error('Failed to save Merv enabled:', error);
+      console.error('Failed to save Chad enabled:', error);
     }
-  }, [mervEnabled]);
+  }, [chadEnabled]);
 
   useEffect(() => {
     try {
-      localStorage.setItem('merv-audio-enabled', audioEnabled.toString());
+      localStorage.setItem('chad-audio-enabled', audioEnabled.toString());
       ttsServiceRef.current.updateSettings({ enabled: audioEnabled });
     } catch (error) {
       console.error('Failed to save audio enabled:', error);
@@ -383,7 +383,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       }
     };
     
-    // Trigger Merv commentary for a completed turn
+    // Trigger Chad commentary for a completed turn
     type CommentarySnapshot = {
       turns: TurnWithThrows[];
       legs: LegRecord[];
@@ -554,7 +554,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
           },
         };
 
-        const response = await generateMervCommentary(context);
+        const response = await generateChadCommentary(context);
 
         if (response.commentary) {
           setCurrentCommentary(response.commentary);
@@ -684,8 +684,8 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                         setTimeout(() => setCelebration(null), 2000); // 2 seconds for basic info
                       }
 
-                      // Trigger Merv commentary if enabled
-                      if (mervEnabled && commentaryDebouncer.current.canCall()) {
+                      // Trigger Chad commentary if enabled
+                      if (chadEnabled && commentaryDebouncer.current.canCall()) {
                         commentaryDebouncer.current.markCalled();
                         const legsSnapshot = (currentLegs as LegRecord[] | null) ?? latestStateRef.current.legs;
                         const snapshot: CommentarySnapshot = {
@@ -870,7 +870,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     isSpectatorMode,
     loadAll,
     loadAllSpectator,
-    mervEnabled,
+    chadEnabled,
   ]);
 
   // Check for spectator mode from URL params
@@ -2422,18 +2422,18 @@ export default function MatchClient({ matchId }: { matchId: string }) {
           >
             Exit Spectator Mode
           </Button>
-          <MervSettings
-            enabled={mervEnabled}
+          <ChadSettings
+            enabled={chadEnabled}
             audioEnabled={audioEnabled}
             voice={voice}
-            onEnabledChange={setMervEnabled}
+            onEnabledChange={setChadEnabled}
             onAudioEnabledChange={setAudioEnabled}
             onVoiceChange={setVoice}
           />
         </div>
 
-        {/* Merv Commentary Display */}
-        {mervEnabled && (
+        {/* Chad Commentary Display */}
+        {chadEnabled && (
           <CommentaryDisplay
             commentary={currentCommentary}
             isLoading={commentaryLoading}

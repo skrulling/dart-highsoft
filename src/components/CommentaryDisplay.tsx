@@ -1,6 +1,6 @@
 /**
  * CommentaryDisplay Component
- * Displays Chad's surfer-bro commentary with animations
+ * Displays persona-driven commentary with animations
  */
 
 'use client';
@@ -16,6 +16,9 @@ interface CommentaryDisplayProps {
   onToggleMute: () => void;
   isMuted: boolean;
   queueLength?: number;
+  speakerName: string;
+  speakerAvatar: string;
+  thinkingLabel: string;
 }
 
 export default function CommentaryDisplay({
@@ -26,6 +29,9 @@ export default function CommentaryDisplay({
   onToggleMute,
   isMuted,
   queueLength = 0,
+  speakerName,
+  speakerAvatar,
+  thinkingLabel,
 }: CommentaryDisplayProps) {
   const [isVisible, setIsVisible] = useState(false);
 
@@ -59,16 +65,16 @@ export default function CommentaryDisplay({
           ${isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}
         `}
       >
-        {/* Chad Icon */}
+        {/* Persona Icon */}
         <div className="absolute -top-8 -left-8 text-5xl">
-          🏄‍♂️
+          {speakerAvatar}
         </div>
 
         {/* Speaker Name */}
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
             <span className="text-xs font-bold text-green-400 uppercase tracking-wider">
-              Chad &quot;DartBroGPT&quot;
+              {speakerName}
             </span>
             {isPlaying && (
               <div className="flex gap-1 items-center">
@@ -109,7 +115,7 @@ export default function CommentaryDisplay({
           {isLoading ? (
             <div className="flex items-center gap-2 text-green-300">
               <Loader2 className="w-4 h-4 animate-spin" />
-              <span className="italic">Chad is thinking...</span>
+              <span className="italic">{thinkingLabel}</span>
             </div>
           ) : (
             <p className="font-medium">{commentary}</p>

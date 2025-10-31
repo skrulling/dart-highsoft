@@ -26,8 +26,10 @@ import { updateMatchEloRatings, shouldMatchBeRated } from '@/utils/eloRating';
 import { updateMatchEloRatingsMultiplayer, shouldMatchBeRatedMultiplayer, type MultiplayerResult } from '@/utils/eloRatingMultiplayer';
 import { Home, ChevronUp, ChevronDown } from 'lucide-react';
 import CommentaryDisplay from '@/components/CommentaryDisplay';
-import ChadSettings from '@/components/ChadSettings';
-import { generateChadCommentary, type CommentaryContext, CommentaryDebouncer } from '@/services/commentaryService';
+import CommentarySettings from '@/components/CommentarySettings';
+import { resolvePersona } from '@/lib/commentary/personas';
+import type { CommentaryPersonaId } from '@/lib/commentary/types';
+import { generateCommentary, type CommentaryContext, CommentaryDebouncer } from '@/services/commentaryService';
 import { getTTSService } from '@/services/ttsService';
 
 type Player = { id: string; display_name: string };
@@ -95,19 +97,21 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   } | null>(null);
   const celebratedTurns = useRef<Set<string>>(new Set());
 
-  // Commentary state (Chad the dart bro)
-  const [chadEnabled, setChadEnabled] = useState(false);
+  // Commentary state (persona-driven)
+  const [commentaryEnabled, setCommentaryEnabled] = useState(false);
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [voice, setVoice] = useState<'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer'>('onyx'); // Match TTSService default - male voice
+  const [personaId, setPersonaId] = useState<CommentaryPersonaId>('chad');
   const [currentCommentary, setCurrentCommentary] = useState<string | null>(null);
   const [commentaryLoading, setCommentaryLoading] = useState(false);
   const [commentaryPlaying, setCommentaryPlaying] = useState(false);
   const ttsServiceRef = useRef(getTTSService());
   const commentaryDebouncer = useRef(new CommentaryDebouncer(2000));
+  const activePersona = useMemo(() => resolvePersona(personaId), [personaId]);
 
-  const handleChadEnabledChange = useCallback(
+  const handleCommentaryEnabledChange = useCallback(
     (enabled: boolean) => {
-      setChadEnabled(enabled);
+      setCommentaryEnabled(enabled);
       if (enabled && audioEnabled) {
         void ttsServiceRef.current.unlock();
       }
@@ -118,12 +122,16 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   const handleAudioEnabledChange = useCallback(
     (enabled: boolean) => {
       setAudioEnabled(enabled);
-      if (enabled && chadEnabled) {
+      if (enabled && commentaryEnabled) {
         void ttsServiceRef.current.unlock();
       }
     },
-    [chadEnabled]
+    [commentaryEnabled]
   );
+
+  const handlePersonaChange = useCallback((nextPersona: CommentaryPersonaId) => {
+    setPersonaId(nextPersona);
+  }, []);
 
   // Ref to hold latest state for event handlers (prevents stale closure bugs)
   const latestStateRef = useRef({
@@ -317,44 +325,62 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     void loadAll();
   }, [loadAll]);
 
-  // Load Chad settings from localStorage and TTSService
+  // Load commentary settings from localStorage and TTSService
   useEffect(() => {
     try {
-      const savedEnabled = localStorage.getItem('chad-enabled');
+      const savedEnabled =
+        localStorage.getItem('commentary-enabled') ?? localStorage.getItem('chad-enabled');
       if (savedEnabled !== null) {
-        setChadEnabled(savedEnabled === 'true');
+        setCommentaryEnabled(savedEnabled === 'true');
       }
 
-      const savedAudioEnabled = localStorage.getItem('chad-audio-enabled');
+      const savedAudioEnabled =
+        localStorage.getItem('commentary-audio-enabled') ?? localStorage.getItem('chad-audio-enabled');
       if (savedAudioEnabled !== null) {
         setAudioEnabled(savedAudioEnabled === 'true');
       }
 
-      // Load voice from TTSService (single source of truth)
+      const savedPersona = localStorage.getItem('commentary-persona');
+      if (savedPersona) {
+        setPersonaId(resolvePersona(savedPersona).id as CommentaryPersonaId);
+      }
+
       const ttsSettings = ttsServiceRef.current.getSettings();
       setVoice(ttsSettings.voice);
     } catch (error) {
-      console.error('Failed to load Chad settings:', error);
+      console.error('Failed to load commentary settings:', error);
     }
   }, []);
 
-  // Save Chad settings to localStorage
+  // Save commentary enabled state
   useEffect(() => {
     try {
-      localStorage.setItem('chad-enabled', chadEnabled.toString());
+      localStorage.setItem('commentary-enabled', commentaryEnabled.toString());
+      // legacy key support
+      localStorage.setItem('chad-enabled', commentaryEnabled.toString());
     } catch (error) {
-      console.error('Failed to save Chad enabled:', error);
+      console.error('Failed to save commentary enabled:', error);
     }
-  }, [chadEnabled]);
+  }, [commentaryEnabled]);
 
   useEffect(() => {
     try {
+      localStorage.setItem('commentary-audio-enabled', audioEnabled.toString());
+      // legacy key support
       localStorage.setItem('chad-audio-enabled', audioEnabled.toString());
       ttsServiceRef.current.updateSettings({ enabled: audioEnabled });
     } catch (error) {
       console.error('Failed to save audio enabled:', error);
     }
   }, [audioEnabled]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('commentary-persona', personaId);
+    } catch (error) {
+      console.error('Failed to save commentary persona:', error);
+    }
+  }, [personaId]);
 
   useEffect(() => {
     if (!audioEnabled) {
@@ -589,7 +615,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
           },
         };
 
-        const response = await generateChadCommentary(context);
+        const response = await generateCommentary(context, personaId);
 
         if (response.commentary) {
           setCurrentCommentary(response.commentary);
@@ -719,8 +745,8 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                         setTimeout(() => setCelebration(null), 2000); // 2 seconds for basic info
                       }
 
-                      // Trigger Chad commentary if enabled
-                      if (chadEnabled && commentaryDebouncer.current.canCall()) {
+                      // Trigger commentary if enabled
+                      if (commentaryEnabled && commentaryDebouncer.current.canCall()) {
                         commentaryDebouncer.current.markCalled();
                         const legsSnapshot = (currentLegs as LegRecord[] | null) ?? latestStateRef.current.legs;
                         const snapshot: CommentarySnapshot = {
@@ -905,7 +931,8 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     isSpectatorMode,
     loadAll,
     loadAllSpectator,
-    chadEnabled,
+    commentaryEnabled,
+    personaId,
   ]);
 
   // Check for spectator mode from URL params
@@ -2457,18 +2484,20 @@ export default function MatchClient({ matchId }: { matchId: string }) {
           >
             Exit Spectator Mode
           </Button>
-          <ChadSettings
-            enabled={chadEnabled}
+          <CommentarySettings
+            enabled={commentaryEnabled}
             audioEnabled={audioEnabled}
             voice={voice}
-            onEnabledChange={handleChadEnabledChange}
+            personaId={personaId}
+            onEnabledChange={handleCommentaryEnabledChange}
             onAudioEnabledChange={handleAudioEnabledChange}
             onVoiceChange={setVoice}
+            onPersonaChange={handlePersonaChange}
           />
         </div>
 
-        {/* Chad Commentary Display */}
-        {chadEnabled && (
+        {/* Commentary Display */}
+        {commentaryEnabled && (
           <CommentaryDisplay
             commentary={currentCommentary}
             isLoading={commentaryLoading}
@@ -2477,6 +2506,9 @@ export default function MatchClient({ matchId }: { matchId: string }) {
             onToggleMute={() => setAudioEnabled(!audioEnabled)}
             isMuted={!audioEnabled}
             queueLength={ttsServiceRef.current.getQueueLength()}
+            speakerName={activePersona.label}
+            speakerAvatar={activePersona.avatar}
+            thinkingLabel={activePersona.thinkingLabel}
           />
         )}
         </div>

@@ -1,6 +1,6 @@
 /**
- * ChadSettings Component
- * Settings panel for controlling Chad's commentary
+ * CommentarySettings Component
+ * Persona selector + audio controls for dart commentary
  */
 
 'use client';
@@ -19,14 +19,18 @@ import {
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import type { VoiceOption } from '@/services/ttsService';
+import { COMMENTARY_PERSONA_LIST, resolvePersona } from '@/lib/commentary/personas';
+import type { CommentaryPersonaId } from '@/lib/commentary/types';
 
-interface ChadSettingsProps {
+interface CommentarySettingsProps {
   enabled: boolean;
   audioEnabled: boolean;
   voice: VoiceOption;
+  personaId: CommentaryPersonaId;
   onEnabledChange: (enabled: boolean) => void;
   onAudioEnabledChange: (enabled: boolean) => void;
   onVoiceChange: (voice: VoiceOption) => void;
+  onPersonaChange: (persona: CommentaryPersonaId) => void;
 }
 
 const VOICE_OPTIONS: { value: VoiceOption; label: string; description: string }[] = [
@@ -38,32 +42,37 @@ const VOICE_OPTIONS: { value: VoiceOption; label: string; description: string }[
   { value: 'shimmer', label: 'Shimmer', description: 'Female - soft and soothing' },
 ];
 
-export default function ChadSettings({
+export default function CommentarySettings({
   enabled,
   audioEnabled,
   voice,
+  personaId,
   onEnabledChange,
   onAudioEnabledChange,
   onVoiceChange,
-}: ChadSettingsProps) {
+  onPersonaChange,
+}: CommentarySettingsProps) {
   const currentVoice = VOICE_OPTIONS.find((v) => v.value === voice) || VOICE_OPTIONS[2];
+  const activePersona = resolvePersona(personaId);
+  const personaOptions = COMMENTARY_PERSONA_LIST;
+  const buttonLabel = activePersona.label.split(' ')[0] ?? activePersona.label;
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant="outline" size="sm" className="gap-2">
-          <span className="text-lg">🏄‍♂️</span>
-          <span>Chad</span>
+          <span className="text-lg">{activePersona.avatar}</span>
+          <span>{buttonLabel}</span>
           <Settings className="w-4 h-4" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-80">
         <DropdownMenuLabel className="flex items-center gap-2">
-          <span className="text-2xl">🏄‍♂️</span>
+          <span className="text-2xl">{activePersona.avatar}</span>
           <div>
-            <div className="font-semibold">Chad Commentary</div>
+            <div className="font-semibold">{activePersona.label}</div>
             <div className="text-xs text-muted-foreground font-normal">
-              Deadpan dart bro with questionable surfer vibes
+              {activePersona.description}
             </div>
           </div>
         </DropdownMenuLabel>
@@ -72,11 +81,11 @@ export default function ChadSettings({
         {/* Enable/Disable Toggle */}
         <div className="px-2 py-3 space-y-3">
           <div className="flex items-center justify-between">
-            <Label htmlFor="chad-enabled" className="text-sm font-medium">
+            <Label htmlFor="commentary-enabled" className="text-sm font-medium">
               Enable Commentary
             </Label>
             <Switch
-              id="chad-enabled"
+              id="commentary-enabled"
               checked={enabled}
               onCheckedChange={onEnabledChange}
             />
@@ -85,11 +94,11 @@ export default function ChadSettings({
           {enabled && (
             <>
               <div className="flex items-center justify-between">
-                <Label htmlFor="chad-audio" className="text-sm font-medium">
+                <Label htmlFor="commentary-audio" className="text-sm font-medium">
                   Enable Audio
                 </Label>
                 <Switch
-                  id="chad-audio"
+                  id="commentary-audio"
                   checked={audioEnabled}
                   onCheckedChange={onAudioEnabledChange}
                 />
@@ -107,6 +116,28 @@ export default function ChadSettings({
             </>
           )}
         </div>
+
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+          Select Commentator
+        </DropdownMenuLabel>
+        {personaOptions.map((persona) => (
+          <DropdownMenuItem
+            key={persona.id}
+            onClick={() => onPersonaChange(persona.id)}
+            className={persona.id === personaId ? 'bg-accent' : ''}
+          >
+            <div className="flex gap-3">
+              <span className="text-2xl" aria-hidden>{persona.avatar}</span>
+              <div className="flex flex-col">
+                <div className="font-medium leading-tight">{persona.label}</div>
+                <div className="text-xs text-muted-foreground leading-tight">
+                  {persona.description}
+                </div>
+              </div>
+            </div>
+          </DropdownMenuItem>
+        ))}
 
         {enabled && (
           <>

@@ -51,6 +51,11 @@ export interface CommentaryPayload {
 
 export interface CommentaryUsageMeta {
   note?: string;
+  persona?: CommentaryPersonaId;
+  model?: string;
+  allowSlang?: boolean;
+  humorStyle?: string;
+  tokens?: unknown;
 }
 
 export interface CommentaryResult {
@@ -71,6 +76,9 @@ export interface CommentaryPersona {
   label: string;
   systemPrompt: string;
   style: CommentaryStyleConfig;
+  avatar: string;
+  description: string;
+  thinkingLabel: string;
 }
 
 export type CommentaryPersonaId = CommentaryPersona['id'];

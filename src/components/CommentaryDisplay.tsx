@@ -68,7 +68,7 @@ export default function CommentaryDisplay({
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
             <span className="text-xs font-bold text-green-400 uppercase tracking-wider">
-              Chad "DartBroGPT"
+              Chad &quot;DartBroGPT&quot;
             </span>
             {isPlaying && (
               <div className="flex gap-1 items-center">

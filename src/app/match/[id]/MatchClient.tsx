@@ -28,9 +28,34 @@ import { Home, ChevronUp, ChevronDown } from 'lucide-react';
 import CommentaryDisplay from '@/components/CommentaryDisplay';
 import CommentarySettings from '@/components/CommentarySettings';
 import { resolvePersona } from '@/lib/commentary/personas';
-import type { CommentaryPersonaId, PlayerStats } from '@/lib/commentary/types';
+import type { CommentaryPersonaId, PlayerStats, CommentaryExcitementLevel } from '@/lib/commentary/types';
 import { generateCommentary, generateMatchRecap, type CommentaryContext, CommentaryDebouncer } from '@/services/commentaryService';
 import { getTTSService } from '@/services/ttsService';
+
+function getExcitementLevel(
+  totalScore: number,
+  busted: boolean,
+  is180: boolean,
+  isHighScore: boolean
+): CommentaryExcitementLevel {
+  if (busted) {
+    return 'low';
+  }
+
+  if (is180 || totalScore >= 140) {
+    return 'high';
+  }
+
+  if (isHighScore || totalScore >= 80) {
+    return 'medium';
+  }
+
+  if (totalScore <= 30) {
+    return 'low';
+  }
+
+  return 'medium';
+}
 
 type Player = { id: string; display_name: string };
 
@@ -623,7 +648,17 @@ export default function MatchClient({ matchId }: { matchId: string }) {
           const tts = ttsServiceRef.current;
           if (tts.getSettings().enabled) {
             setCommentaryPlaying(true);
-            await tts.queueCommentary(response.commentary);
+            const excitement = getExcitementLevel(
+              turnTotal,
+              turn.busted,
+              turnTotal === 180,
+              turnTotal >= 100
+            );
+            await tts.queueCommentary({
+              text: response.commentary,
+              personaId,
+              excitement,
+            });
 
             const checkPlaying = setInterval(() => {
               if (!tts.getIsPlaying()) {
@@ -1375,7 +1410,11 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         const tts = ttsServiceRef.current;
         if (tts.getSettings().enabled) {
           setCommentaryPlaying(true);
-          await tts.queueCommentary(response.commentary);
+          await tts.queueCommentary({
+            text: response.commentary,
+            personaId: personaId,
+            excitement: 'high' // Match end is always exciting
+          });
 
           const checkPlaying = setInterval(() => {
             if (!tts.getIsPlaying()) {

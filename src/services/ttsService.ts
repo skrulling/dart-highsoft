@@ -3,6 +3,8 @@
  * Handles audio generation and playback using OpenAI TTS API
  */
 
+import type { CommentaryPersonaId, CommentaryExcitementLevel } from '@/lib/commentary/types';
+
 export type VoiceOption = 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer';
 
 export interface TTSSettings {
@@ -14,6 +16,8 @@ export interface TTSSettings {
 
 export interface AudioQueueItem {
   text: string;
+  personaId: CommentaryPersonaId;
+  excitement: CommentaryExcitementLevel;
   audioUrl?: string;
   timestamp: number;
 }
@@ -91,7 +95,7 @@ export class TTSService {
   /**
    * Generate speech audio from text via API
    */
-  async generateSpeech(text: string): Promise<string | undefined> {
+  async generateSpeech(item: AudioQueueItem): Promise<string | undefined> {
     try {
       // Add timestamp to prevent caching
       const timestamp = Date.now();
@@ -102,9 +106,11 @@ export class TTSService {
           'Cache-Control': 'no-cache, no-store, must-revalidate',
         },
         body: JSON.stringify({
-          text,
+          text: item.text,
           voice: this.settings.voice,
           speed: this.settings.speed,
+          personaId: item.personaId,
+          excitement: item.excitement,
           timestamp, // Force unique request
         }),
       });
@@ -127,7 +133,11 @@ export class TTSService {
   /**
    * Add commentary to the audio queue
    */
-  async queueCommentary(text: string): Promise<void> {
+  async queueCommentary(payload: {
+    text: string;
+    personaId: CommentaryPersonaId;
+    excitement: CommentaryExcitementLevel;
+  }): Promise<void> {
     if (!this.settings.enabled) {
       return;
     }
@@ -142,7 +152,9 @@ export class TTSService {
     }
 
     const item: AudioQueueItem = {
-      text,
+      text: payload.text,
+      personaId: payload.personaId,
+      excitement: payload.excitement,
       timestamp: Date.now(),
     };
 
@@ -172,7 +184,7 @@ export class TTSService {
 
       // Generate audio if not already generated
       if (!item.audioUrl) {
-        item.audioUrl = await this.generateSpeech(item.text);
+        item.audioUrl = await this.generateSpeech(item);
         if (!item.audioUrl) {
           // Failed to generate, remove from queue
           this.audioQueue.shift();

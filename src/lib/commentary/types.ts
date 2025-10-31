@@ -102,3 +102,4 @@ export interface CommentaryPersona {
 }
 
 export type CommentaryPersonaId = CommentaryPersona['id'];
+export type CommentaryExcitementLevel = 'low' | 'medium' | 'high';

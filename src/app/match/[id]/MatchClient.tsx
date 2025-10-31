@@ -1294,43 +1294,48 @@ export default function MatchClient({ matchId }: { matchId: string }) {
 
       const winnerLegsWon = legsWonByPlayer[winnerId] || 0;
 
-      // Compute player stats
+      // Compute player stats - optimized single-pass algorithm
       const startScoreValue = match?.start_score ? parseInt(match.start_score, 10) : 501;
 
-      const computeAverage = (playerId: string): number => {
-        const completedTurns = allTurns.filter(
-          (t) => t.player_id === playerId && !t.busted && typeof t.total_scored === 'number'
-        );
-        if (completedTurns.length === 0) return 0;
-        const total = completedTurns.reduce((sum, t) => sum + (t.total_scored ?? 0), 0);
-        return total / completedTurns.length;
-      };
+      // Single pass through all turns to compute stats for all players
+      const playerStatsMap = new Map<string, { totalScore: number; completedTurns: number; totalScored: number }>();
 
-      const computeRemainingScore = (playerId: string): number => {
-        const playerTurns = allTurns
-          .filter((t) => t.player_id === playerId)
-          .sort((a, b) => a.turn_number - b.turn_number);
+      // Initialize map for all players
+      allPlayers.forEach(p => {
+        playerStatsMap.set(p.id, { totalScore: 0, completedTurns: 0, totalScored: 0 });
+      });
 
-        let scored = 0;
-        for (const playerTurn of playerTurns) {
-          if (playerTurn.busted) continue;
-          if (typeof playerTurn.total_scored === 'number') {
-            scored += playerTurn.total_scored;
-          } else if (playerTurn.throws && playerTurn.throws.length > 0) {
-            scored += playerTurn.throws.reduce((sum, thr) => sum + thr.scored, 0);
+      // Single iteration through all turns
+      for (const turn of allTurns) {
+        const stats = playerStatsMap.get(turn.player_id);
+        if (!stats) continue;
+
+        if (!turn.busted) {
+          const scored = typeof turn.total_scored === 'number'
+            ? turn.total_scored
+            : (turn.throws?.reduce((sum, thr) => sum + thr.scored, 0) ?? 0);
+
+          stats.totalScored += scored;
+
+          // Only count for average if it's a valid completed turn with a score
+          if (typeof turn.total_scored === 'number') {
+            stats.totalScore += turn.total_scored;
+            stats.completedTurns++;
           }
         }
-        return Math.max(startScoreValue - scored, 0);
-      };
+      }
 
-      const allPlayersStats: PlayerStats[] = allPlayers.map((p) => ({
-        name: p.display_name,
-        id: p.id,
-        remainingScore: computeRemainingScore(p.id),
-        average: computeAverage(p.id),
-        legsWon: legsWonByPlayer[p.id] || 0,
-        isCurrentPlayer: false,
-      }));
+      const allPlayersStats: PlayerStats[] = allPlayers.map((p) => {
+        const stats = playerStatsMap.get(p.id) ?? { totalScore: 0, completedTurns: 0, totalScored: 0 };
+        return {
+          name: p.display_name,
+          id: p.id,
+          remainingScore: Math.max(startScoreValue - stats.totalScored, 0),
+          average: stats.completedTurns > 0 ? stats.totalScore / stats.completedTurns : 0,
+          legsWon: legsWonByPlayer[p.id] || 0,
+          isCurrentPlayer: false,
+        };
+      });
 
       // Get winning leg details
       const winningLeg = allLegs.find(leg => leg.winner_player_id === winnerId && leg.leg_number === allLegs.length);
@@ -1463,7 +1468,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         }
 
         // Trigger match recap commentary
-        if (commentaryEnabled) {
+        if (commentaryEnabled && allLegs && allLegs.length > 0) {
           try {
             // Fetch all turns for match recap
             const { data: allTurns } = await supabase
@@ -1475,8 +1480,8 @@ export default function MatchClient({ matchId }: { matchId: string }) {
               .in('leg_id', allLegs.map(l => l.id))
               .order('turn_number', { ascending: true });
 
-            if (allTurns) {
-              void triggerMatchRecap(winnerPid, allLegs as LegRecord[], players, allTurns as TurnWithThrows[]);
+            if (allTurns && allTurns.length > 0) {
+              void triggerMatchRecap(winnerPid, allLegs, players, allTurns);
             }
           } catch (error) {
             console.error('Failed to trigger match recap:', error);

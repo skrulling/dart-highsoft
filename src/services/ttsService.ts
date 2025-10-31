@@ -27,6 +27,8 @@ export class TTSService {
   private isPlaying: boolean = false;
   private settings: TTSSettings;
   private maxQueueSize: number = 3;
+  private unlocked: boolean = false;
+  private audioContext: AudioContext | null = null;
 
   constructor(settings?: Partial<TTSSettings>) {
     this.settings = {
@@ -148,6 +150,9 @@ export class TTSService {
 
     // Start processing queue if not already playing
     if (!this.isPlaying) {
+      if (!this.unlocked) {
+        void this.unlock();
+      }
       await this.processQueue();
     }
   }
@@ -209,9 +214,51 @@ export class TTSService {
       audio.play().catch((error) => {
         console.error('Failed to play audio:', error);
         this.currentAudio = null;
+        if (error && typeof error === 'object' && 'name' in error && (error as { name?: string }).name === 'NotAllowedError') {
+          this.unlocked = false;
+        }
         reject(error);
       });
     });
+  }
+
+  /**
+   * Attempt to unlock audio playback (required on Safari/iOS for autoplay)
+   */
+  async unlock(): Promise<void> {
+    if (typeof window === 'undefined' || this.unlocked) {
+      return;
+    }
+
+    try {
+      const AudioContextCtor: typeof AudioContext | undefined =
+        window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+
+      if (AudioContextCtor) {
+        if (!this.audioContext) {
+          this.audioContext = new AudioContextCtor();
+        }
+
+        if (this.audioContext.state === 'suspended') {
+          await this.audioContext.resume();
+        }
+
+        const buffer = this.audioContext.createBuffer(1, 1, 22050);
+        const source = this.audioContext.createBufferSource();
+        source.buffer = buffer;
+        source.connect(this.audioContext.destination);
+        source.start(0);
+      } else {
+        const silentAudio = new Audio('data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=');
+        silentAudio.volume = 0;
+        await silentAudio.play();
+      }
+
+      this.unlocked = true;
+    } catch (error) {
+      console.warn('Failed to unlock audio playback:', error);
+      this.unlocked = false;
+    }
   }
 
   /**

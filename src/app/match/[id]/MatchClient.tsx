@@ -105,6 +105,26 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   const ttsServiceRef = useRef(getTTSService());
   const commentaryDebouncer = useRef(new CommentaryDebouncer(2000));
 
+  const handleChadEnabledChange = useCallback(
+    (enabled: boolean) => {
+      setChadEnabled(enabled);
+      if (enabled && audioEnabled) {
+        void ttsServiceRef.current.unlock();
+      }
+    },
+    [audioEnabled]
+  );
+
+  const handleAudioEnabledChange = useCallback(
+    (enabled: boolean) => {
+      setAudioEnabled(enabled);
+      if (enabled && chadEnabled) {
+        void ttsServiceRef.current.unlock();
+      }
+    },
+    [chadEnabled]
+  );
+
   // Ref to hold latest state for event handlers (prevents stale closure bugs)
   const latestStateRef = useRef({
     isSpectatorMode: false,
@@ -334,6 +354,21 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     } catch (error) {
       console.error('Failed to save audio enabled:', error);
     }
+  }, [audioEnabled]);
+
+  useEffect(() => {
+    if (!audioEnabled) {
+      return;
+    }
+
+    const unlockOnFirstInteraction = () => {
+      void ttsServiceRef.current.unlock();
+    };
+
+    window.addEventListener('pointerdown', unlockOnFirstInteraction, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', unlockOnFirstInteraction);
+    };
   }, [audioEnabled]);
 
   useEffect(() => {
@@ -2426,8 +2461,8 @@ export default function MatchClient({ matchId }: { matchId: string }) {
             enabled={chadEnabled}
             audioEnabled={audioEnabled}
             voice={voice}
-            onEnabledChange={setChadEnabled}
-            onAudioEnabledChange={setAudioEnabled}
+            onEnabledChange={handleChadEnabledChange}
+            onAudioEnabledChange={handleAudioEnabledChange}
             onVoiceChange={setVoice}
           />
         </div>

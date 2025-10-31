@@ -4,70 +4,13 @@
  * for Chad, the Gen Z surf-bro commentator
  */
 
-export interface ThrowData {
-  segment: string; // e.g., "T20", "D16", "SB"
-  scored: number;
-  dart_index: number;
-}
+import type {
+  CommentaryPayload,
+  CommentaryResult,
+} from '@/lib/commentary/types';
 
-export interface PlayerStats {
-  name: string;
-  id: string;
-  remainingScore: number;
-  average: number;
-  legsWon: number;
-  isCurrentPlayer: boolean;
-}
-
-export interface TurnHistoryItem {
-  score: number;
-  busted: boolean;
-}
-
-export interface CommentaryContext {
-  playerName: string;
-  playerId: string;
-  totalScore: number;
-  remainingScore: number;
-  throws: ThrowData[];
-  busted: boolean;
-  isHighScore: boolean; // 100+ points
-  is180: boolean;
-
-  // Rich game context
-  gameContext: {
-    // Match info
-    startScore: number;
-    legsToWin: number;
-    currentLegNumber: number;
-    overallTurnNumber: number;
-    playerTurnNumber: number;
-    dartsUsedThisTurn: number;
-
-    // Current player stats
-    playerAverage: number;
-    playerLegsWon: number;
-    playerRecentTurns: TurnHistoryItem[]; // Last 3-5 turns
-
-    // All players comparison
-    allPlayers: PlayerStats[];
-
-    // Match state
-    isLeading: boolean;
-    positionInMatch: number; // 1st, 2nd, 3rd place
-    pointsBehindLeader: number;
-    pointsAheadOfChaser?: number;
-
-    // Streak info
-    consecutiveHighScores?: number; // If they've been on a hot streak
-    consecutiveLowScores?: number; // If they've been struggling
-  };
-}
-
-export interface CommentaryResponse {
-  commentary: string;
-  error?: string;
-}
+export type CommentaryContext = CommentaryPayload;
+export type CommentaryResponse = CommentaryResult;
 
 /**
  * Generates commentary using GPT-5 nano via the API route

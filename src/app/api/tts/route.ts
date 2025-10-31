@@ -66,12 +66,13 @@ export async function POST(request: NextRequest) {
     }
 
     resolvePersona(personaId); // validates persona id or falls back
-    const combinedInput = buildSpeechInput(personaId, excitement, speed, text);
+    // Not used for now
+    // const combinedInput = buildSpeechInput(personaId, excitement, speed, text);
 
     const mp3 = await openai.audio.speech.create({
       model: 'tts-1', // Using cheapest TTS model
       voice,
-      input: combinedInput,
+      input: text,
       speed,
     });
 

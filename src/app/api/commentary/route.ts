@@ -5,15 +5,15 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
-import { buildCommentaryPrompt } from '@/lib/commentary/promptBuilder';
+import { buildCommentaryPrompt, buildMatchRecapPrompt } from '@/lib/commentary/promptBuilder';
 import { resolvePersona } from '@/lib/commentary/personas';
-import type { CommentaryPayload } from '@/lib/commentary/types';
+import type { CommentaryPayload, MatchRecapPayload } from '@/lib/commentary/types';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-type CommentaryRequestBody = CommentaryPayload & {
+type CommentaryRequestBody = (CommentaryPayload | MatchRecapPayload) & {
   personaId?: string;
 };
 
@@ -32,7 +32,12 @@ export async function POST(request: NextRequest) {
     const { personaId, ...payload } = rawBody;
 
     const persona = resolvePersona(personaId ?? process.env.COMMENTARY_PERSONA);
-    const build = buildCommentaryPrompt(payload, { persona });
+
+    // Determine if this is a match recap or regular turn commentary
+    const isMatchRecap = 'type' in payload && payload.type === 'match_end';
+    const build = isMatchRecap
+      ? buildMatchRecapPrompt(payload as MatchRecapPayload, { persona })
+      : buildCommentaryPrompt(payload as CommentaryPayload, { persona });
 
     if (build.plainLine) {
       return NextResponse.json({

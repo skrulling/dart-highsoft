@@ -7,6 +7,7 @@ import type {
   CommentaryPayload,
   CommentaryResult,
   CommentaryPersonaId,
+  MatchRecapPayload,
 } from '@/lib/commentary/types';
 
 export type CommentaryContext = CommentaryPayload;
@@ -159,6 +160,65 @@ function getBobFallback(context: CommentaryContext): string {
     `${playerName} posts ${totalScore}, ${pointsBehindLeader} still to chase with ${remainingScore} on the docket.`,
     'Time for nerves of steel — the kind that never miss tops.'
   );
+}
+
+/**
+ * Generates match recap commentary via the API route
+ */
+export async function generateMatchRecap(
+  payload: MatchRecapPayload,
+  personaId: CommentaryPersonaId = 'chad'
+): Promise<CommentaryResponse> {
+  try {
+    const response = await fetch('/api/commentary', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ ...payload, personaId }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`API error: ${response.status}`);
+    }
+
+    console.log(`Getting ${personaId} match recap commentary`);
+    const data = await response.json();
+    console.log(data);
+    return {
+      commentary: data.commentary,
+      usage: data.usage,
+    };
+  } catch (error) {
+    console.error(`Failed to generate ${personaId} match recap:`, error);
+
+    // Fallback to generic match end message
+    return {
+      commentary: getMatchRecapFallback(personaId, payload),
+      error: error instanceof Error ? error.message : 'Unknown error',
+      usage: {
+        note: 'fallback',
+        persona: personaId,
+      },
+    };
+  }
+}
+
+/**
+ * Provides fallback match recap when API fails
+ */
+function getMatchRecapFallback(
+  personaId: CommentaryPersonaId,
+  payload: MatchRecapPayload
+): string {
+  const { context } = payload;
+  const score = `${context.winnerLegsWon}-${context.totalLegs - context.winnerLegsWon}`;
+
+  if (personaId === 'bob') {
+    return `${context.winnerName} takes the match ${score}! Brilliant performance from start to finish. That's darts at its finest, folks.`;
+  }
+
+  return `${context.winnerName} just closed out the W ${score}! Absolute main character energy all match. No cap, that was bussin'.`;
 }
 
 /**

@@ -160,7 +160,7 @@ Write ONE witty Merv line (max 15 words) that uses ${playerName}'s name and refe
 
     // Choose model based on environment variable
     // Options: 'gpt-4o-mini' (fast, default) or 'gpt-5-nano' (slower, more reasoning)
-    const useModel = process.env.COMMENTARY_MODEL || 'gpt-4o-mini';
+    const useModel = process.env.COMMENTARY_MODEL || 'gpt-4.1-nano-2025-04-14';
 
     let commentary: string;
     let usage: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | undefined;

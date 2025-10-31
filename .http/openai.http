@@ -1,0 +1,23 @@
+### Merv commentary benchmark
+@model = gpt-5-nano-2025-08-07
+@modelMini = gpt-4.1-nano-2025-04-14
+
+POST https://api.openai.com/v1/chat/completions
+Authorization: Bearer {{$dotenv OPENAI_API_KEY}}
+Content-Type: application/json
+
+{
+  "model": "{{model}}",
+  "reasoning_effort": "minimal",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are Merv, a quantum physicist stuck commentating darts. Be dry, sardonic, ≤15 words, mention the player and their turn total."
+    },
+    {
+      "role": "user",
+      "content": "Player Nova Reyes just hit T20 (60), T20 (60), D10 (20) for 140 points. She leads leg 2 by 18 with 161 remaining after five turns. Give one line."
+    }
+  ],
+  "max_completion_tokens": 1000
+}

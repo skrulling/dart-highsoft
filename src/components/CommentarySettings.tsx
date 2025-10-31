@@ -35,11 +35,16 @@ interface CommentarySettingsProps {
 
 const VOICE_OPTIONS: { value: VoiceOption; label: string; description: string }[] = [
   { value: 'alloy', label: 'Alloy', description: 'Neutral (androgynous)' },
+  { value: 'ash', label: 'Ash', description: 'Male - casual and conversational' },
+  { value: 'ballad', label: 'Ballad', description: 'Female - smooth and melodic' },
+  { value: 'coral', label: 'Coral', description: 'Female - bright and engaging' },
   { value: 'echo', label: 'Echo', description: 'Male - clear and articulate' },
   { value: 'fable', label: 'Fable', description: 'Female - warm and expressive' },
   { value: 'onyx', label: 'Onyx', description: 'Male - deep and authoritative' },
   { value: 'nova', label: 'Nova', description: 'Female - friendly and energetic' },
+  { value: 'sage', label: 'Sage', description: 'Male - calm and composed' },
   { value: 'shimmer', label: 'Shimmer', description: 'Female - soft and soothing' },
+  { value: 'verse', label: 'Verse', description: 'Male - dynamic and expressive' },
 ];
 
 export default function CommentarySettings({

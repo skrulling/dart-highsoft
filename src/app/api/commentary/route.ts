@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
     // Determine if this is a match recap or regular turn commentary
     const isMatchRecap = 'type' in payload && payload.type === 'match_end';
     const build = isMatchRecap
-      ? buildMatchRecapPrompt(payload as MatchRecapPayload, { persona })
+      ? buildMatchRecapPrompt(payload as MatchRecapPayload)
       : buildCommentaryPrompt(payload as CommentaryPayload, { persona });
 
     if (build.plainLine) {

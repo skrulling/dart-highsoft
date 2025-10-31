@@ -30,7 +30,7 @@ import CommentarySettings from '@/components/CommentarySettings';
 import { resolvePersona } from '@/lib/commentary/personas';
 import type { CommentaryPersonaId, PlayerStats, CommentaryExcitementLevel } from '@/lib/commentary/types';
 import { generateCommentary, generateMatchRecap, type CommentaryContext, CommentaryDebouncer } from '@/services/commentaryService';
-import { getTTSService } from '@/services/ttsService';
+import { getTTSService, type VoiceOption } from '@/services/ttsService';
 
 function getExcitementLevel(
   totalScore: number,
@@ -125,7 +125,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   // Commentary state (persona-driven)
   const [commentaryEnabled, setCommentaryEnabled] = useState(false);
   const [audioEnabled, setAudioEnabled] = useState(true);
-  const [voice, setVoice] = useState<'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer'>('onyx'); // Match TTSService default - male voice
+  const [voice, setVoice] = useState<VoiceOption>('onyx'); // Match TTSService default - male voice
   const [personaId, setPersonaId] = useState<CommentaryPersonaId>('chad');
   const [currentCommentary, setCurrentCommentary] = useState<string | null>(null);
   const [commentaryLoading, setCommentaryLoading] = useState(false);

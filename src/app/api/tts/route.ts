@@ -12,7 +12,7 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-type VoiceOption = 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer';
+type VoiceOption = 'alloy' | 'ash' | 'ballad' | 'coral' | 'echo' | 'fable' | 'onyx' | 'nova' | 'sage' | 'shimmer' | 'verse';
 
 interface TTSRequest {
   text: string;
@@ -20,21 +20,6 @@ interface TTSRequest {
   speed?: number;
   personaId?: CommentaryPersonaId;
   excitement?: CommentaryExcitementLevel;
-}
-
-interface AudioResponseParams {
-  model: string;
-  audio: {
-    voice: VoiceOption;
-    format: 'mp3';
-    speed: number;
-  };
-  instructions: string;
-  input: string;
-}
-
-interface AudioResponsePayload {
-  output?: unknown;
 }
 
 export async function POST(request: NextRequest) {
@@ -64,7 +49,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate voice option
-    const validVoices: VoiceOption[] = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'];
+    const validVoices: VoiceOption[] = ['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'onyx', 'nova', 'sage', 'shimmer', 'verse'];
     if (!validVoices.includes(voice)) {
       return NextResponse.json(
         { error: 'Invalid voice option' },
@@ -81,29 +66,16 @@ export async function POST(request: NextRequest) {
     }
 
     resolvePersona(personaId); // validates persona id or falls back
-    const personaInstruction = buildPersonaInstruction(personaId, excitement);
+    const combinedInput = buildSpeechInput(personaId, excitement, speed, text);
 
-    const responsesCreate = openai.responses.create.bind(openai.responses) as unknown as (
-      params: AudioResponseParams
-    ) => Promise<AudioResponsePayload>;
-
-    const response = await responsesCreate({
-      model: 'gpt-4o-mini-tts',
-      audio: {
-        voice,
-        format: 'mp3',
-        speed,
-      },
-      instructions: personaInstruction,
-      input: text,
+    const mp3 = await openai.audio.speech.create({
+      model: 'tts-1-hd',
+      voice,
+      input: combinedInput,
+      speed,
     });
 
-    const audioBase64 = extractAudioBase64(response);
-    if (!audioBase64) {
-      throw new Error('No audio content returned from TTS API');
-    }
-
-    const buffer = Buffer.from(audioBase64, 'base64');
+    const buffer = Buffer.from(await mp3.arrayBuffer());
 
     // Return the audio file
     return new NextResponse(buffer, {
@@ -136,56 +108,38 @@ export async function POST(request: NextRequest) {
   }
 }
 
-function buildPersonaInstruction(personaId: CommentaryPersonaId, excitement: CommentaryExcitementLevel): string {
+function buildInstructions(
+  personaId: CommentaryPersonaId,
+  excitement: CommentaryExcitementLevel,
+  speed: number
+): string {
+  const tempoNote = speed !== 1 ? `Keep your delivery paced for roughly ${speed.toFixed(2)}x playback.` : 'Maintain natural tempo.';
+
   if (personaId === 'bob') {
     const excitementNotes = {
-      high: 'Deliver with excited British broadcast energy, brighter tone and quicker cadence while remaining professional.',
-      medium: 'Maintain composed, authoritative British commentary with a warm lift in tone.',
-      low: 'Keep the call calm, measured, and understated with classic British reserve.',
+      high: 'Sound thrilled yet polished, brighten the tone and punch key phrases.',
+      medium: 'Keep a warm, confident booth energy.',
+      low: 'Stay composed and understated, classic British reserve.',
     } as const;
 
-    return `You are Bob "Steel-Tip" Harrison, an English darts commentator. Speak with a clear British broadcast accent, articulate diction, and sprinkle subtle pub humour. ${excitementNotes[excitement]}`;
+    return `You are Bob "Steel-Tip" Harrison, an English darts commentator. Speak in a clear British broadcast accent with rich stage presence. ${excitementNotes[excitement]} ${tempoNote}`;
   }
 
   const excitementNotes = {
-    high: 'Let the excitement show, but stay laid-back — smile through the words, energy dialed up without shouting.',
-    medium: 'Keep it relaxed with a friendly, dynamic surfer vibe.',
-    low: 'Deliver in an easy-going, chilled surfer tone with minimal excitement.',
+    high: 'Let some stoke through the mic but stay smooth and relaxed.',
+    medium: 'Keep the chill California surfer vibe with a friendly lift.',
+    low: 'Stay laid-back and mellow, minimal hype.',
   } as const;
 
-  return `You are Chad, a California surfer-style darts commentator. Use a West Coast surfer accent, relaxed pacing, and casual slang if it fits. ${excitementNotes[excitement]}`;
+  return `You are Chad, a California surfer-style darts commentator. Use a relaxed West Coast surfer accent with easygoing charm. ${excitementNotes[excitement]} ${tempoNote}`;
 }
 
-function extractAudioBase64(response: AudioResponsePayload): string | undefined {
-  const completion = response;
-  const output = completion.output;
-  if (!Array.isArray(output)) {
-    return undefined;
-  }
-
-  for (const item of output) {
-    if (!item || typeof item !== 'object' || !('content' in item)) {
-      continue;
-    }
-
-    const content = (item as { content?: unknown }).content;
-    if (!Array.isArray(content)) {
-      continue;
-    }
-
-    for (const part of content) {
-      if (!part || typeof part !== 'object') {
-        continue;
-      }
-
-      if ('audio' in part && part.audio && typeof part.audio === 'object') {
-        const payload = part.audio as { data?: string };
-        if (payload.data) {
-          return payload.data;
-        }
-      }
-    }
-  }
-
-  return undefined;
+function buildSpeechInput(
+  personaId: CommentaryPersonaId,
+  excitement: CommentaryExcitementLevel,
+  speed: number,
+  text: string
+): string {
+  const instructions = buildInstructions(personaId, excitement, speed);
+  return `${instructions}\n\n${text}`;
 }

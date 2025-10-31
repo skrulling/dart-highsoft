@@ -129,8 +129,7 @@ function formatOrdinal(value: number): string {
 }
 
 export function buildMatchRecapPrompt(
-  payload: MatchRecapPayload,
-  _options: PromptBuildOptions
+  payload: MatchRecapPayload
 ): PromptBuildResult {
   const { context } = payload;
 

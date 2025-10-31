@@ -5,7 +5,7 @@
 
 import type { CommentaryPersonaId, CommentaryExcitementLevel } from '@/lib/commentary/types';
 
-export type VoiceOption = 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer';
+export type VoiceOption = 'alloy' | 'ash' | 'ballad' | 'coral' | 'echo' | 'fable' | 'onyx' | 'nova' | 'sage' | 'shimmer' | 'verse';
 
 export interface TTSSettings {
   voice: VoiceOption;

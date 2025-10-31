@@ -49,6 +49,26 @@ export interface CommentaryPayload {
   gameContext: CommentaryGameContext;
 }
 
+export interface MatchRecapContext {
+  winnerName: string;
+  winnerId: string;
+  winnerLegsWon: number;
+  totalLegs: number;
+  allPlayers: PlayerStats[];
+  matchDuration?: string;
+  startScore: number;
+  legsToWin: number;
+  winningLeg?: {
+    finalThrows: ThrowData[];
+    checkoutScore?: number;
+  };
+}
+
+export interface MatchRecapPayload {
+  type: 'match_end';
+  context: MatchRecapContext;
+}
+
 export interface CommentaryUsageMeta {
   note?: string;
   persona?: CommentaryPersonaId;

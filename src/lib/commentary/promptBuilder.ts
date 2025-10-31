@@ -1,4 +1,4 @@
-import type { CommentaryPersona, CommentaryPayload } from './types';
+import type { CommentaryPersona, CommentaryPayload, MatchRecapPayload } from './types';
 import { computeDartIQ, humorStyleFromScore } from './insights';
 
 interface PromptBuildOptions {
@@ -126,4 +126,57 @@ function formatOrdinal(value: number): string {
     default:
       return `${value}th`;
   }
+}
+
+export function buildMatchRecapPrompt(
+  payload: MatchRecapPayload,
+  _options: PromptBuildOptions
+): PromptBuildResult {
+  const { context } = payload;
+
+  const finalStandings = context.allPlayers
+    .slice()
+    .sort((a, b) => b.legsWon - a.legsWon || a.remainingScore - b.remainingScore)
+    .map((p, idx) => `${idx + 1}. ${p.name} (${p.legsWon} legs, avg ${p.average.toFixed(1)})`)
+    .join('\n');
+
+  const checkoutInfo = context.winningLeg?.checkoutScore
+    ? `${context.winnerName} closed it with a ${context.winningLeg.checkoutScore} checkout.`
+    : '';
+
+  const finalThrowsInfo = context.winningLeg?.finalThrows
+    ? `Final darts: ${context.winningLeg.finalThrows.map(t => t.segment).join(', ')}.`
+    : '';
+
+  const matchStats = `
+Match: ${context.startScore} start, best of ${context.legsToWin * 2 - 1} legs.
+Winner: ${context.winnerName} wins ${context.winnerLegsWon}-${context.totalLegs - context.winnerLegsWon}.
+${checkoutInfo}
+${finalThrowsInfo}
+
+Final Standings:
+${finalStandings}
+${context.matchDuration ? `Duration: ${context.matchDuration}` : ''}
+`.trim();
+
+  const prompt = `
+${matchStats}
+
+MATCH ENDED. Write an enthusiastic, entertaining match recap and winner announcement.
+
+Requirements:
+- 2-4 sentences total (60-80 words max)
+- Lead with the winner's name and celebration
+- Highlight a key moment or stat from the match
+- Reference the final score
+- End with excitement about the victory
+- Use your persona's style but dial up the energy for this special moment
+
+This is the BIG finale - make it memorable! Output the recap only.`;
+
+  return {
+    prompt,
+    allowSlang: true,
+    humorStyle: 'hype-lite' as ReturnType<typeof humorStyleFromScore>
+  };
 }

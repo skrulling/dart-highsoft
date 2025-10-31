@@ -28,8 +28,8 @@ import { Home, ChevronUp, ChevronDown } from 'lucide-react';
 import CommentaryDisplay from '@/components/CommentaryDisplay';
 import CommentarySettings from '@/components/CommentarySettings';
 import { resolvePersona } from '@/lib/commentary/personas';
-import type { CommentaryPersonaId } from '@/lib/commentary/types';
-import { generateCommentary, type CommentaryContext, CommentaryDebouncer } from '@/services/commentaryService';
+import type { CommentaryPersonaId, PlayerStats } from '@/lib/commentary/types';
+import { generateCommentary, generateMatchRecap, type CommentaryContext, CommentaryDebouncer } from '@/services/commentaryService';
 import { getTTSService } from '@/services/ttsService';
 
 type Player = { id: string; display_name: string };
@@ -1272,6 +1272,121 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     }
   }
 
+  async function triggerMatchRecap(
+    winnerId: string,
+    allLegs: LegRecord[],
+    allPlayers: Player[],
+    allTurns: TurnWithThrows[]
+  ) {
+    try {
+      setCommentaryLoading(true);
+
+      const winner = allPlayers.find(p => p.id === winnerId);
+      if (!winner) return;
+
+      // Compute legs won by each player
+      const legsWonByPlayer = allLegs.reduce<Record<string, number>>((acc, leg) => {
+        if (leg.winner_player_id) {
+          acc[leg.winner_player_id] = (acc[leg.winner_player_id] || 0) + 1;
+        }
+        return acc;
+      }, {});
+
+      const winnerLegsWon = legsWonByPlayer[winnerId] || 0;
+
+      // Compute player stats
+      const startScoreValue = match?.start_score ? parseInt(match.start_score, 10) : 501;
+
+      const computeAverage = (playerId: string): number => {
+        const completedTurns = allTurns.filter(
+          (t) => t.player_id === playerId && !t.busted && typeof t.total_scored === 'number'
+        );
+        if (completedTurns.length === 0) return 0;
+        const total = completedTurns.reduce((sum, t) => sum + (t.total_scored ?? 0), 0);
+        return total / completedTurns.length;
+      };
+
+      const computeRemainingScore = (playerId: string): number => {
+        const playerTurns = allTurns
+          .filter((t) => t.player_id === playerId)
+          .sort((a, b) => a.turn_number - b.turn_number);
+
+        let scored = 0;
+        for (const playerTurn of playerTurns) {
+          if (playerTurn.busted) continue;
+          if (typeof playerTurn.total_scored === 'number') {
+            scored += playerTurn.total_scored;
+          } else if (playerTurn.throws && playerTurn.throws.length > 0) {
+            scored += playerTurn.throws.reduce((sum, thr) => sum + thr.scored, 0);
+          }
+        }
+        return Math.max(startScoreValue - scored, 0);
+      };
+
+      const allPlayersStats: PlayerStats[] = allPlayers.map((p) => ({
+        name: p.display_name,
+        id: p.id,
+        remainingScore: computeRemainingScore(p.id),
+        average: computeAverage(p.id),
+        legsWon: legsWonByPlayer[p.id] || 0,
+        isCurrentPlayer: false,
+      }));
+
+      // Get winning leg details
+      const winningLeg = allLegs.find(leg => leg.winner_player_id === winnerId && leg.leg_number === allLegs.length);
+      const winningLegTurns = winningLeg
+        ? allTurns.filter(t => t.leg_id === winningLeg.id).sort((a, b) => a.turn_number - b.turn_number)
+        : [];
+      const finalTurn = winningLegTurns[winningLegTurns.length - 1];
+      const finalThrows = finalTurn?.throws?.map(t => ({
+        segment: t.segment,
+        scored: t.scored,
+        dart_index: t.dart_index
+      })) || [];
+      const checkoutScore = finalTurn?.total_scored;
+
+      const payload = {
+        type: 'match_end' as const,
+        context: {
+          winnerName: winner.display_name,
+          winnerId: winner.id,
+          winnerLegsWon,
+          totalLegs: allLegs.length,
+          allPlayers: allPlayersStats,
+          startScore: startScoreValue,
+          legsToWin: match?.legs_to_win ?? 3,
+          winningLeg: {
+            finalThrows,
+            checkoutScore
+          }
+        }
+      };
+
+      const response = await generateMatchRecap(payload, personaId);
+
+      if (response.commentary) {
+        setCurrentCommentary(response.commentary);
+
+        const tts = ttsServiceRef.current;
+        if (tts.getSettings().enabled) {
+          setCommentaryPlaying(true);
+          await tts.queueCommentary(response.commentary);
+
+          const checkPlaying = setInterval(() => {
+            if (!tts.getIsPlaying()) {
+              setCommentaryPlaying(false);
+              clearInterval(checkPlaying);
+            }
+          }, 500);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to generate match recap:', error);
+    } finally {
+      setCommentaryLoading(false);
+    }
+  }
+
   async function endLegAndMaybeMatch(winnerPlayerId: string) {
     if (!currentLeg || !match) return;
     const supabase = await getSupabaseClient();
@@ -1344,6 +1459,27 @@ export default function MatchClient({ matchId }: { matchId: string }) {
             await updateMatchEloRatingsMultiplayer(matchId, results);
           } catch (error) {
             console.error('Failed to update multiplayer ELO ratings:', error);
+          }
+        }
+
+        // Trigger match recap commentary
+        if (commentaryEnabled) {
+          try {
+            // Fetch all turns for match recap
+            const { data: allTurns } = await supabase
+              .from('turns')
+              .select(`
+                id, leg_id, player_id, turn_number, total_scored, busted, created_at,
+                throws:throws(id, turn_id, dart_index, segment, scored)
+              `)
+              .in('leg_id', allLegs.map(l => l.id))
+              .order('turn_number', { ascending: true });
+
+            if (allTurns) {
+              void triggerMatchRecap(winnerPid, allLegs as LegRecord[], players, allTurns as TurnWithThrows[]);
+            }
+          } catch (error) {
+            console.error('Failed to trigger match recap:', error);
           }
         }
       }

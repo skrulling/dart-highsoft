@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
     const combinedInput = buildSpeechInput(personaId, excitement, speed, text);
 
     const mp3 = await openai.audio.speech.create({
-      model: 'tts-1-hd',
+      model: 'tts-1', // Using cheapest TTS model
       voice,
       input: combinedInput,
       speed,

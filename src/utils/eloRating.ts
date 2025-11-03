@@ -198,10 +198,10 @@ export async function getRecentEloChanges(limit: number = 20): Promise<RecentElo
 export function getEloTier(rating: number): { name: string; color: string; icon: string } {
   if (rating >= 2400) return { name: 'Grand Master', color: 'text-purple-600 dark:text-purple-400', icon: '👑' };
   if (rating >= 2200) return { name: 'Master', color: 'text-red-600 dark:text-red-400', icon: '💎' };
-  if (rating >= 2000) return { name: 'Expert', color: 'text-orange-600 dark:text-orange-400', icon: '🥇' };
-  if (rating >= 1800) return { name: 'Advanced', color: 'text-yellow-600 dark:text-yellow-400', icon: '🥈' };
-  if (rating >= 1600) return { name: 'Intermediate', color: 'text-green-600 dark:text-green-400', icon: '🥉' };
-  if (rating >= 1400) return { name: 'Novice', color: 'text-blue-600 dark:text-blue-400', icon: '📈' };
+  if (rating >= 1800) return { name: 'Expert', color: 'text-orange-600 dark:text-orange-400', icon: '🥇' };
+  if (rating >= 1600) return { name: 'Advanced', color: 'text-yellow-600 dark:text-yellow-400', icon: '🥈' };
+  if (rating >= 1400) return { name: 'Intermediate', color: 'text-green-600 dark:text-green-400', icon: '🥉' };
+  if (rating >= 1300) return { name: 'Novice', color: 'text-blue-600 dark:text-blue-400', icon: '📈' };
   if (rating >= 1200) return { name: 'Beginner', color: 'text-gray-600 dark:text-gray-400', icon: '🎯' };
   return { name: 'Unrated', color: 'text-gray-500 dark:text-gray-500', icon: '❓' };
 }

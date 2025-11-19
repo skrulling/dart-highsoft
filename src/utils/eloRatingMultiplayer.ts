@@ -109,6 +109,7 @@ export async function getMultiEloLeaderboard(limit: number = 50): Promise<MultiE
   const { data, error } = await supabase
     .from('elo_leaderboard_multi')
     .select('*')
+    .gt('wins', 0)
     .limit(limit);
   if (error) {
     console.error('Error fetching multiplayer Elo leaderboard:', error);

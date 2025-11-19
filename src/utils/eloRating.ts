@@ -139,6 +139,7 @@ export async function getEloLeaderboard(limit: number = 50): Promise<EloLeaderbo
   const { data, error } = await supabase
     .from('elo_leaderboard')
     .select('*')
+    .gt('wins', 0)
     .limit(limit);
     
   if (error) {

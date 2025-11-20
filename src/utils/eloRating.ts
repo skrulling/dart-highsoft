@@ -203,7 +203,7 @@ export function getEloTier(rating: number): { name: string; color: string; icon:
   if (rating >= 1400) return { name: 'Intermediate', color: 'text-green-600 dark:text-green-400', icon: '🥉' };
   if (rating >= 1300) return { name: 'Novice', color: 'text-blue-600 dark:text-blue-400', icon: '📈' };
   if (rating >= 1200) return { name: 'Beginner', color: 'text-gray-600 dark:text-gray-400', icon: '🎯' };
-  return { name: 'Unrated', color: 'text-gray-500 dark:text-gray-500', icon: '❓' };
+  return { name: 'Noob', color: 'text-gray-500 dark:text-gray-500', icon: '❓' };
 }
 
 /**

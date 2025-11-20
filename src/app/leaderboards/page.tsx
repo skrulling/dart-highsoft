@@ -58,7 +58,7 @@ export default function LeaderboardsPage() {
   const [eloLeaders, setEloLeaders] = useState<EloLeaderboardEntry[]>([]);
   const [eloMultiLeaders, setEloMultiLeaders] = useState<MultiEloLeaderboardEntry[]>([]);
   const [topRoundScores, setTopRoundScores] = useState<TopRoundScore[]>([]);
-  const [highestCheckouts, setHighestCheckouts] = useState<{ player_id: string; display_name: string; score: number; date: string }[]>([]);
+  const [highestCheckouts, setHighestCheckouts] = useState<{ player_id: string; display_name: string; score: number; date: string; darts_used: number }[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -120,7 +120,7 @@ export default function LeaderboardsPage() {
           .order('created_at', { ascending: false })
           .limit(500);
 
-        let checkoutLeaders: { player_id: string; display_name: string; score: number; date: string }[] = [];
+        let checkoutLeaders: { player_id: string; display_name: string; score: number; date: string; darts_used: number }[] = [];
 
         if (winningLegs && winningLegs.length > 0) {
           const legIds = winningLegs.map(l => l.id);
@@ -131,11 +131,41 @@ export default function LeaderboardsPage() {
             .in('leg_id', legIds);
 
           if (legTurns) {
-            const checkouts = winningLegs.map(leg => {
+            // Identify checkout turns to fetch throws count
+            const checkoutTurnsMap = new Map<string, string>(); // leg_id -> turn_id
+            const checkoutTurnsList: { leg_id: string; turn_id: string; total_scored: number }[] = [];
+            
+            winningLegs.forEach(leg => {
               const turns = legTurns.filter(t => t.leg_id === leg.id);
-              if (turns.length === 0) return null;
-              // Find last turn
-              const lastTurn = turns.reduce((prev, current) => (prev.turn_number > current.turn_number) ? prev : current);
+              if (turns.length > 0) {
+                const lastTurn = turns.reduce((prev, current) => (prev.turn_number > current.turn_number) ? prev : current);
+                checkoutTurnsMap.set(leg.id, lastTurn.id);
+                checkoutTurnsList.push({ leg_id: leg.id, turn_id: lastTurn.id, total_scored: lastTurn.total_scored });
+              }
+            });
+
+            const turnIds = checkoutTurnsList.map(t => t.turn_id);
+            
+            // Fetch throws for these turns to count darts
+            const { data: turnThrows } = await supabase
+              .from('throws')
+              .select('turn_id')
+              .in('turn_id', turnIds);
+
+            const throwsCountMap = new Map<string, number>();
+            if (turnThrows) {
+              turnThrows.forEach(t => {
+                throwsCountMap.set(t.turn_id, (throwsCountMap.get(t.turn_id) || 0) + 1);
+              });
+            }
+
+            const checkouts = winningLegs.map(leg => {
+              const turnId = checkoutTurnsMap.get(leg.id);
+              if (!turnId) return null;
+              
+              const turnData = checkoutTurnsList.find(t => t.turn_id === turnId);
+              if (!turnData) return null;
+
               const player = (playersData as { id: string; display_name: string }[] | null)?.find(p => p.id === leg.winner_player_id);
               
               if (!player || player.display_name.toLowerCase().includes('test')) return null;
@@ -143,10 +173,11 @@ export default function LeaderboardsPage() {
               return {
                 player_id: leg.winner_player_id!,
                 display_name: player.display_name,
-                score: lastTurn.total_scored,
-                date: leg.created_at
+                score: turnData.total_scored,
+                date: leg.created_at,
+                darts_used: throwsCountMap.get(turnId) || 0
               };
-            }).filter((c): c is { player_id: string; display_name: string; score: number; date: string } => c !== null);
+            }).filter((c): c is { player_id: string; display_name: string; score: number; date: string; darts_used: number } => c !== null);
 
             // Sort by score desc
             checkoutLeaders = checkouts.sort((a, b) => b.score - a.score).slice(0, 10);
@@ -399,7 +430,10 @@ export default function LeaderboardsPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-6">
-                    <div className="font-mono tabular-nums text-2xl font-bold text-green-600">{score.score}</div>
+                    <div className="text-right">
+                      <div className="font-mono tabular-nums text-2xl font-bold">{score.score}</div>
+                      <div className="text-xs text-muted-foreground">{score.darts_used} darts</div>
+                    </div>
                     {score.score >= 100 && <span className="text-lg">🚀</span>}
                   </div>
                 </li>

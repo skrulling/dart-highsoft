@@ -260,8 +260,10 @@ export default function StatsPage() {
       return sortedTurns[sortedTurns.length - 1];
     }).filter(t => t && !t.busted);
 
-    const highestCheckout = checkoutTurns.length > 0 
-      ? Math.max(...checkoutTurns.map(t => t.total_scored)) 
+    const highestCheckoutTurn = checkoutTurns.sort((a, b) => b.total_scored - a.total_scored)[0];
+    const highestCheckout = highestCheckoutTurn ? highestCheckoutTurn.total_scored : 0;
+    const highestCheckoutDarts = highestCheckoutTurn 
+      ? playerThrows.filter(th => th.turn_id === highestCheckoutTurn.id).length 
       : 0;
 
     const checkoutCounts = {
@@ -342,6 +344,7 @@ export default function StatsPage() {
       turns: playerTurns,
       checkoutRate,
       highestCheckout,
+      highestCheckoutDarts,
       checkoutCounts,
       checkoutBreakdown,
       scoreDistribution,
@@ -1036,7 +1039,11 @@ export default function StatsPage() {
                     </CardHeader>
                     <CardContent>
                       <div className="text-2xl font-bold">{selectedPlayerData.highestCheckout}</div>
-                      <p className="text-xs text-muted-foreground">best finish</p>
+                      <p className="text-xs text-muted-foreground">
+                        {selectedPlayerData.highestCheckout > 0 
+                          ? `${selectedPlayerData.highestCheckoutDarts} darts` 
+                          : 'best finish'}
+                      </p>
                     </CardContent>
                   </Card>
                 </div>
@@ -1051,17 +1058,17 @@ export default function StatsPage() {
                     <div className="grid grid-cols-3 gap-4 text-center">
                       <div className="bg-green-50 p-4 rounded-lg">
                         <div className="text-3xl font-bold text-green-600">{selectedPlayerData.checkoutBreakdown[1]}%</div>
-                        <div className="text-sm font-medium mt-1">1 Dart</div>
+                        <div className="text-sm font-medium mt-1">1 Dart Used</div>
                         <div className="text-xs text-muted-foreground">({selectedPlayerData.checkoutCounts[1]} times)</div>
                       </div>
                       <div className="bg-blue-50 p-4 rounded-lg">
                         <div className="text-3xl font-bold text-blue-600">{selectedPlayerData.checkoutBreakdown[2]}%</div>
-                        <div className="text-sm font-medium mt-1">2 Darts</div>
+                        <div className="text-sm font-medium mt-1">2 Darts Used</div>
                         <div className="text-xs text-muted-foreground">({selectedPlayerData.checkoutCounts[2]} times)</div>
                       </div>
                       <div className="bg-purple-50 p-4 rounded-lg">
                         <div className="text-3xl font-bold text-purple-600">{selectedPlayerData.checkoutBreakdown[3]}%</div>
-                        <div className="text-sm font-medium mt-1">3 Darts</div>
+                        <div className="text-sm font-medium mt-1">3 Darts Used</div>
                         <div className="text-xs text-muted-foreground">({selectedPlayerData.checkoutCounts[3]} times)</div>
                       </div>
                     </div>

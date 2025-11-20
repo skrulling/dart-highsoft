@@ -35,6 +35,8 @@ export default function StatsPage() {
   const [playerAdjacency, setPlayerAdjacency] = useState<PlayerAdjacencyRow[]>([]);
   const [selectedPlayer, setSelectedPlayer] = useState<string>('');
   const [loading, setLoading] = useState(true);
+  const [playerLoading, setPlayerLoading] = useState(false);
+  const [globalStats, setGlobalStats] = useState({ turns: 0, throws: 0 });
   const [activeView, setActiveView] = useState<'traditional' | 'elo'>('traditional');
 
   useEffect(() => {
@@ -43,12 +45,17 @@ export default function StatsPage() {
         setLoading(true);
         const supabase = await getSupabaseClient();
         
-        // Load basic data first
+        // Load basic data and global counts in parallel
         const [
           { data: s }, 
           { data: p }, 
           { data: l }, 
-          { data: m }
+          { data: m },
+          { count: turnsCount },
+          { count: throwsCount },
+          { data: segmentData },
+          { data: accuracyData },
+          { data: adjacencyData }
         ] = await Promise.all([
           supabase
             .from('player_summary')
@@ -69,7 +76,18 @@ export default function StatsPage() {
             .from('matches')
             .select('id, created_at, winner_player_id, start_score')
             .eq('ended_early', false)
-            .order('created_at')
+            .order('created_at'),
+          supabase
+            .from('turns')
+            .select('legs!inner(matches!inner(ended_early))', { count: 'exact', head: true })
+            .eq('legs.matches.ended_early', false),
+          supabase
+            .from('throws')
+            .select('turns!inner(legs!inner(matches!inner(ended_early)))', { count: 'exact', head: true })
+            .eq('turns.legs.matches.ended_early', false),
+          supabase.from('player_segment_summary').select('*'),
+          supabase.from('player_accuracy_stats').select('*'), 
+          supabase.from('player_adjacency_stats').select('*')
         ]);
         
         setSummary(((s as unknown) as SummaryRow[]) ?? []);
@@ -79,86 +97,17 @@ export default function StatsPage() {
         setLegs(lg);
         const mt = ((m as unknown) as MatchRow[]) ?? [];
         setMatches(mt);
-        
-        // Load basic data for statistics calculations - use batched approach
-        const allTurns: TurnRow[] = [];
-        const allThrows: ThrowRow[] = [];
-        
-        if (lg.length > 0) {
-          // Load turns in smaller batches to avoid URL length issues
-          const legBatches = [];
-          for (let i = 0; i < lg.length; i += 50) { // Process 50 legs at a time
-            legBatches.push(lg.slice(i, i + 50));
-          }
-          
-          for (const legBatch of legBatches) {
-            const { data: t } = await supabase
-              .from('turns')
-              .select('id, leg_id, player_id, total_scored, busted, turn_number, created_at')
-              .in('leg_id', legBatch.map(l => l.id))
-              .order('created_at');
-            
-            if (t) allTurns.push(...((t as unknown) as TurnRow[]));
-          }
-          
-          setTurns(allTurns);
-          
-          // Load throws in batches to avoid query timeout
-          if (allTurns.length > 0) {
-            const turnBatches = [];
-            for (let i = 0; i < allTurns.length; i += 100) { // Process 100 turns at a time
-              turnBatches.push(allTurns.slice(i, i + 100));
-            }
-            
-            for (const turnBatch of turnBatches) {
-              const { data: throwData } = await supabase
-                .from('throws')
-                .select('id, turn_id, dart_index, segment, scored')
-                .in('turn_id', turnBatch.map(t => t.id));
-              
-              if (throwData) allThrows.push(...((throwData as unknown) as ThrowRow[]));
-            }
-            
-            setThrows(allThrows);
-          }
-        }
-        
-        // Load from optimized views for enhanced features
-        const [
-          { data: segmentData, error: segmentError },
-          { data: accuracyData, error: accuracyError },
-          { data: adjacencyData, error: adjacencyError }
-        ] = await Promise.all([
-          supabase.from('player_segment_summary').select('*'),
-          supabase.from('player_accuracy_stats').select('*'), 
-          supabase.from('player_adjacency_stats').select('*')
-        ]);
-        
-        if (segmentError) console.log('Segment view error:', segmentError.message);
-        if (accuracyError) console.log('Accuracy view error:', accuracyError.message);
-        if (adjacencyError) console.log('Adjacency view error:', adjacencyError.message);
+        setGlobalStats({ turns: turnsCount ?? 0, throws: throwsCount ?? 0 });
         
         setPlayerSegments(((segmentData as unknown) as PlayerSegmentRow[]) ?? []);
         setPlayerAccuracy(((accuracyData as unknown) as PlayerAccuracyRow[]) ?? []);
         setPlayerAdjacency(((adjacencyData as unknown) as PlayerAdjacencyRow[]) ?? []);
         
-        console.log('Data loading summary:', {
-          players: pl.length,
-          matches: mt.length,
-          legs: lg.length,
-          turns: allTurns.length,
-          throws: allThrows.length,
-          segments: segmentData?.length || 0,
-          accuracy: accuracyData?.length || 0, 
-          adjacency: adjacencyData?.length || 0
-        });
       } catch (error) {
         console.error('Error loading stats:', error);
         setSummary([]);
         setPlayers([]);
         setLegs([]);
-        setTurns([]);
-        setThrows([]);
         setMatches([]);
       } finally {
         setLoading(false);
@@ -166,15 +115,72 @@ export default function StatsPage() {
     })();
   }, []);
 
+  // Lazy load player details when selected
+  useEffect(() => {
+    if (!selectedPlayer) {
+      setTurns([]);
+      setThrows([]);
+      return;
+    }
+
+    (async () => {
+      try {
+        setPlayerLoading(true);
+        const supabase = await getSupabaseClient();
+
+        // Fetch turns for selected player
+        const { data: t } = await supabase
+          .from('turns')
+          .select('id, leg_id, player_id, total_scored, busted, turn_number, created_at, legs!inner(matches!inner(ended_early))')
+          .eq('player_id', selectedPlayer)
+          .eq('legs.matches.ended_early', false)
+          .order('created_at');
+        
+        const playerTurns = ((t as unknown) as TurnRow[]) ?? [];
+        setTurns(playerTurns);
+
+        if (playerTurns.length > 0) {
+          // Fetch throws for these turns
+          // Process in batches if too many turns
+          const allThrows: ThrowRow[] = [];
+          const turnIds = playerTurns.map(turn => turn.id);
+          
+          const batchSize = 200;
+          for (let i = 0; i < turnIds.length; i += batchSize) {
+            const batch = turnIds.slice(i, i + batchSize);
+            const { data: throwData } = await supabase
+              .from('throws')
+              .select('id, turn_id, dart_index, segment, scored')
+              .in('turn_id', batch);
+            
+            if (throwData) {
+              allThrows.push(...((throwData as unknown) as ThrowRow[]));
+            }
+          }
+          setThrows(allThrows);
+        } else {
+          setThrows([]);
+        }
+
+      } catch (error) {
+        console.error('Error loading player details:', error);
+        setTurns([]);
+        setThrows([]);
+      } finally {
+        setPlayerLoading(false);
+      }
+    })();
+  }, [selectedPlayer]);
+
   // Overall statistics
   const overallStats = useMemo(() => {
     const totalMatches = matches.length;
     const totalLegs = legs.length;
-    const totalTurns = turns.length;
-    const totalThrows = throws.length;
+    const totalTurns = globalStats.turns;
+    const totalThrows = globalStats.throws;
     const completedMatches = matches.filter(m => m.winner_player_id).length;
-    const avgTurnsPerLeg = legs.length > 0 ? Math.round((turns.length / legs.length) * 10) / 10 : 0;
-    const avgThrowsPerTurn = turns.length > 0 ? Math.round((throws.length / turns.length) * 10) / 10 : 0;
+    const avgTurnsPerLeg = legs.length > 0 ? Math.round((totalTurns / legs.length) * 10) / 10 : 0;
+    const avgThrowsPerTurn = totalTurns > 0 ? Math.round((totalThrows / totalTurns) * 10) / 10 : 0;
     
     return {
       totalMatches,
@@ -185,7 +191,7 @@ export default function StatsPage() {
       avgTurnsPerLeg,
       avgThrowsPerTurn
     };
-  }, [matches, legs, turns, throws]);
+  }, [matches, legs, globalStats]);
 
   // Top players by average score (desc)
   const topAvgPlayers = useMemo(() => {
@@ -246,11 +252,46 @@ export default function StatsPage() {
       const scoreBefore = parseInt(match.start_score) - turnsBeforeThis.reduce((sum, turn) => sum + (turn.busted ? 0 : turn.total_scored), 0);
       
       // This is a checkout attempt if remaining score was <= 170 and > 0
-      return scoreBefore <= 170 && scoreBefore > 0 && scoreBefore > t.total_scored;
+      return scoreBefore <= 170 && scoreBefore > 0;
     });
     
     const successfulCheckouts = finishingLegs.length;
     const checkoutRate = checkoutAttempts.length > 0 ? Math.round((successfulCheckouts / checkoutAttempts.length) * 100) : 0;
+
+    // Calculate highest checkout and checkout breakdown
+    const checkoutTurns = finishingLegs.map(leg => {
+      const legTurns = playerTurns.filter(t => t.leg_id === leg.id);
+      // Sort by turn number to find the last one
+      const sortedTurns = legTurns.sort((a, b) => a.turn_number - b.turn_number);
+      return sortedTurns[sortedTurns.length - 1];
+    }).filter(t => t && !t.busted);
+
+    const highestCheckoutTurn = checkoutTurns.sort((a, b) => b.total_scored - a.total_scored)[0];
+    const highestCheckout = highestCheckoutTurn ? highestCheckoutTurn.total_scored : 0;
+    const highestCheckoutDarts = highestCheckoutTurn 
+      ? playerThrows.filter(th => th.turn_id === highestCheckoutTurn.id).length 
+      : 0;
+
+    const checkoutCounts = {
+      1: 0,
+      2: 0,
+      3: 0
+    };
+
+    checkoutTurns.forEach(turn => {
+      const turnThrows = playerThrows.filter(th => th.turn_id === turn.id);
+      const dartCount = turnThrows.length;
+      if (dartCount >= 1 && dartCount <= 3) {
+        checkoutCounts[dartCount as 1 | 2 | 3]++;
+      }
+    });
+
+    const totalCheckouts = checkoutTurns.length;
+    const checkoutBreakdown = {
+      1: totalCheckouts > 0 ? Math.round((checkoutCounts[1] / totalCheckouts) * 100) : 0,
+      2: totalCheckouts > 0 ? Math.round((checkoutCounts[2] / totalCheckouts) * 100) : 0,
+      3: totalCheckouts > 0 ? Math.round((checkoutCounts[3] / totalCheckouts) * 100) : 0
+    };
 
     // Calculate specific 20 and 19 target analysis
     const throws20Area = playerThrows.filter(th => ['20', 'S20', 'D20', 'T20', '1', 'S1', '5', 'S5'].includes(th.segment));
@@ -308,6 +349,10 @@ export default function StatsPage() {
       throws: playerThrows,
       turns: playerTurns,
       checkoutRate,
+      highestCheckout,
+      highestCheckoutDarts,
+      checkoutCounts,
+      checkoutBreakdown,
       scoreDistribution,
       // 20 target analysis
       hits20Single,
@@ -902,6 +947,11 @@ export default function StatsPage() {
           {/* Player-Specific Content */}
           {selectedPlayer && selectedPlayerData && (
             <Tabs defaultValue="overview" className="space-y-6">
+              {playerLoading && (
+                <div className="absolute inset-0 bg-background/50 z-50 flex items-center justify-center">
+                  <div className="text-lg font-semibold animate-pulse">Loading player data...</div>
+                </div>
+              )}
               <TabsList className="grid w-full grid-cols-4 h-14 p-1 bg-muted border rounded-lg shadow-sm">
                 <TabsTrigger value="overview" className="text-sm font-medium rounded-md px-4 py-2 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-md data-[state=active]:border data-[state=inactive]:text-muted-foreground data-[state=inactive]:hover:text-foreground data-[state=inactive]:hover:bg-muted/50 transition-all duration-200">Overview</TabsTrigger>
                 <TabsTrigger value="performance" className="text-sm font-medium rounded-md px-4 py-2 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-md data-[state=active]:border data-[state=inactive]:text-muted-foreground data-[state=inactive]:hover:text-foreground data-[state=inactive]:hover:bg-muted/50 transition-all duration-200">Performance</TabsTrigger>
@@ -993,7 +1043,48 @@ export default function StatsPage() {
                       <p className="text-xs text-muted-foreground">finish success</p>
                     </CardContent>
                   </Card>
+
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-medium">Highest Checkout</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">{selectedPlayerData.highestCheckout}</div>
+                      <p className="text-xs text-muted-foreground">
+                        {selectedPlayerData.highestCheckout > 0 
+                          ? `${selectedPlayerData.highestCheckoutDarts} darts` 
+                          : 'best finish'}
+                      </p>
+                    </CardContent>
+                  </Card>
                 </div>
+
+                {/* Checkout Breakdown */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Checkout Breakdown</CardTitle>
+                    <CardDescription>Percentage of checkouts by number of darts used</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-3 gap-4 text-center">
+                      <div className="bg-green-100 dark:bg-green-900/20 p-4 rounded-lg">
+                        <div className="text-3xl font-bold text-green-600 dark:text-green-400">{selectedPlayerData.checkoutBreakdown[1]}%</div>
+                        <div className="text-sm font-medium mt-1 text-green-900 dark:text-green-100">1 Dart Used</div>
+                        <div className="text-xs text-green-700 dark:text-green-300/80">({selectedPlayerData.checkoutCounts[1]} times)</div>
+                      </div>
+                      <div className="bg-blue-100 dark:bg-blue-900/20 p-4 rounded-lg">
+                        <div className="text-3xl font-bold text-blue-600 dark:text-blue-400">{selectedPlayerData.checkoutBreakdown[2]}%</div>
+                        <div className="text-sm font-medium mt-1 text-blue-900 dark:text-blue-100">2 Darts Used</div>
+                        <div className="text-xs text-blue-700 dark:text-blue-300/80">({selectedPlayerData.checkoutCounts[2]} times)</div>
+                      </div>
+                      <div className="bg-purple-100 dark:bg-purple-900/20 p-4 rounded-lg">
+                        <div className="text-3xl font-bold text-purple-600 dark:text-purple-400">{selectedPlayerData.checkoutBreakdown[3]}%</div>
+                        <div className="text-sm font-medium mt-1 text-purple-900 dark:text-purple-100">3 Darts Used</div>
+                        <div className="text-xs text-purple-700 dark:text-purple-300/80">({selectedPlayerData.checkoutCounts[3]} times)</div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
 
                 {/* Top 3 Highest Rounds */}
                 <Card>

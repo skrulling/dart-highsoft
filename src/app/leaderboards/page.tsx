@@ -58,7 +58,10 @@ export default function LeaderboardsPage() {
   const [eloLeaders, setEloLeaders] = useState<EloLeaderboardEntry[]>([]);
   const [eloMultiLeaders, setEloMultiLeaders] = useState<MultiEloLeaderboardEntry[]>([]);
   const [topRoundScores, setTopRoundScores] = useState<TopRoundScore[]>([]);
+  const [highestCheckoutsSingle, setHighestCheckoutsSingle] = useState<{ player_id: string; display_name: string; score: number; date: string; darts_used: number }[]>([]);
+  const [highestCheckoutsDouble, setHighestCheckoutsDouble] = useState<{ player_id: string; display_name: string; score: number; date: string; darts_used: number }[]>([]);
   const [loading, setLoading] = useState(true);
+  const [checkoutLoading, setCheckoutLoading] = useState(true);
 
   useEffect(() => {
     (async () => {
@@ -148,6 +151,37 @@ export default function LeaderboardsPage() {
         setTopRoundScores([]);
       } finally {
         setLoading(false);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        setCheckoutLoading(true);
+        const supabase = await getSupabaseClient();
+
+        const [{ data: singleData }, { data: doubleData }] = await Promise.all([
+          supabase
+            .from('checkout_leaderboard_single_out')
+            .select('*')
+            .order('score', { ascending: false })
+            .limit(10),
+          supabase
+            .from('checkout_leaderboard_double_out')
+            .select('*')
+            .order('score', { ascending: false })
+            .limit(10)
+        ]);
+
+        setHighestCheckoutsSingle((singleData as { player_id: string; display_name: string; score: number; date: string; darts_used: number }[]) ?? []);
+        setHighestCheckoutsDouble((doubleData as { player_id: string; display_name: string; score: number; date: string; darts_used: number }[]) ?? []);
+      } catch (error) {
+        console.error('Error loading highest checkouts:', error);
+        setHighestCheckoutsSingle([]);
+        setHighestCheckoutsDouble([]);
+      } finally {
+        setCheckoutLoading(false);
       }
     })();
   }, []);
@@ -329,6 +363,76 @@ export default function LeaderboardsPage() {
               ))}
               {topRoundScores.length === 0 && (
                 <li className="px-3 py-4 text-sm text-muted-foreground">No round scores recorded yet.</li>
+              )}
+            </ul>
+          </CardContent>
+        </Card>
+
+        {/* Highest Checkouts - Single Out */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-xl font-semibold">Highest Checkouts (Single Out)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ul className="divide-y border rounded bg-card">
+              {highestCheckoutsSingle.map((score, idx) => (
+                <li key={`${score.player_id}-${score.date}-single`} className="flex items-center justify-between px-3 py-2">
+                  <div className="flex items-center gap-3">
+                    <span className="w-8 text-lg text-center">{medal(idx)}</span>
+                    <div>
+                      <div className="font-medium">{score.display_name}</div>
+                      <div className="text-xs text-muted-foreground">{formatDate(score.date)}</div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-6">
+                    <div className="text-right">
+                      <div className="font-mono tabular-nums text-2xl font-bold">{score.score}</div>
+                      <div className="text-xs text-muted-foreground">{score.darts_used} darts</div>
+                    </div>
+                    {score.score >= 100 && <span className="text-lg">🚀</span>}
+                  </div>
+                </li>
+              ))}
+              {checkoutLoading && (
+                <li className="px-3 py-4 text-sm text-muted-foreground">Loading checkouts...</li>
+              )}
+              {!checkoutLoading && highestCheckoutsSingle.length === 0 && (
+                <li className="px-3 py-4 text-sm text-muted-foreground">No checkouts recorded yet.</li>
+              )}
+            </ul>
+          </CardContent>
+        </Card>
+
+        {/* Highest Checkouts - Double Out */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-xl font-semibold">Highest Checkouts (Double Out)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ul className="divide-y border rounded bg-card">
+              {highestCheckoutsDouble.map((score, idx) => (
+                <li key={`${score.player_id}-${score.date}-double`} className="flex items-center justify-between px-3 py-2">
+                  <div className="flex items-center gap-3">
+                    <span className="w-8 text-lg text-center">{medal(idx)}</span>
+                    <div>
+                      <div className="font-medium">{score.display_name}</div>
+                      <div className="text-xs text-muted-foreground">{formatDate(score.date)}</div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-6">
+                    <div className="text-right">
+                      <div className="font-mono tabular-nums text-2xl font-bold">{score.score}</div>
+                      <div className="text-xs text-muted-foreground">{score.darts_used} darts</div>
+                    </div>
+                    {score.score >= 100 && <span className="text-lg">🚀</span>}
+                  </div>
+                </li>
+              ))}
+              {checkoutLoading && (
+                <li className="px-3 py-4 text-sm text-muted-foreground">Loading checkouts...</li>
+              )}
+              {!checkoutLoading && highestCheckoutsDouble.length === 0 && (
+                <li className="px-3 py-4 text-sm text-muted-foreground">No checkouts recorded yet.</li>
               )}
             </ul>
           </CardContent>

@@ -117,8 +117,7 @@ export default function LeaderboardsPage() {
           .select('id, winner_player_id, created_at, matches!inner(ended_early)')
           .not('winner_player_id', 'is', null)
           .eq('matches.ended_early', false)
-          .order('created_at', { ascending: false })
-          .limit(500);
+          .order('created_at', { ascending: false });
 
         let checkoutLeaders: { player_id: string; display_name: string; score: number; date: string; darts_used: number }[] = [];
 
@@ -136,7 +135,7 @@ export default function LeaderboardsPage() {
             const checkoutTurnsList: { leg_id: string; turn_id: string; total_scored: number }[] = [];
             
             winningLegs.forEach(leg => {
-              const turns = legTurns.filter(t => t.leg_id === leg.id);
+              const turns = legTurns.filter(t => t.leg_id === leg.id && t.player_id === leg.winner_player_id);
               if (turns.length > 0) {
                 const lastTurn = turns.reduce((prev, current) => (prev.turn_number > current.turn_number) ? prev : current);
                 checkoutTurnsMap.set(leg.id, lastTurn.id);

@@ -246,7 +246,7 @@ export default function StatsPage() {
       const scoreBefore = parseInt(match.start_score) - turnsBeforeThis.reduce((sum, turn) => sum + (turn.busted ? 0 : turn.total_scored), 0);
       
       // This is a checkout attempt if remaining score was <= 170 and > 0
-      return scoreBefore <= 170 && scoreBefore > 0 && scoreBefore > t.total_scored;
+      return scoreBefore <= 170 && scoreBefore > 0;
     });
     
     const successfulCheckouts = finishingLegs.length;

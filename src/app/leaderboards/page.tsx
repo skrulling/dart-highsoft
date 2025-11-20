@@ -58,10 +58,12 @@ export default function LeaderboardsPage() {
   const [eloLeaders, setEloLeaders] = useState<EloLeaderboardEntry[]>([]);
   const [eloMultiLeaders, setEloMultiLeaders] = useState<MultiEloLeaderboardEntry[]>([]);
   const [topRoundScores, setTopRoundScores] = useState<TopRoundScore[]>([]);
-  const [highestCheckoutsSingle, setHighestCheckoutsSingle] = useState<{ player_id: string; display_name: string; score: number; date: string; darts_used: number }[]>([]);
-  const [highestCheckoutsDouble, setHighestCheckoutsDouble] = useState<{ player_id: string; display_name: string; score: number; date: string; darts_used: number }[]>([]);
+  const [highestCheckouts, setHighestCheckouts] = useState<{ player_id: string; display_name: string; score: number; date: string; darts_used: number }[]>([]);
+  const [quickestLegsDouble, setQuickestLegsDouble] = useState<{ player_id: string; display_name: string; dart_count: number; date: string; start_score: string }[]>([]);
+  const [quickestLegsSingle, setQuickestLegsSingle] = useState<{ player_id: string; display_name: string; dart_count: number; date: string; start_score: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [checkoutLoading, setCheckoutLoading] = useState(true);
+  const [quickestLegsLoading, setQuickestLegsLoading] = useState(true);
 
   useEffect(() => {
     (async () => {
@@ -161,27 +163,52 @@ export default function LeaderboardsPage() {
         setCheckoutLoading(true);
         const supabase = await getSupabaseClient();
 
-        const [{ data: singleData }, { data: doubleData }] = await Promise.all([
-          supabase
-            .from('checkout_leaderboard_single_out')
-            .select('*')
-            .order('score', { ascending: false })
-            .limit(10),
-          supabase
-            .from('checkout_leaderboard_double_out')
-            .select('*')
-            .order('score', { ascending: false })
-            .limit(10)
-        ]);
+        const { data: checkoutData } = await supabase
+          .from('checkout_leaderboard')
+          .select('*')
+          .order('score', { ascending: false })
+          .limit(10);
 
-        setHighestCheckoutsSingle((singleData as { player_id: string; display_name: string; score: number; date: string; darts_used: number }[]) ?? []);
-        setHighestCheckoutsDouble((doubleData as { player_id: string; display_name: string; score: number; date: string; darts_used: number }[]) ?? []);
+        if (checkoutData) {
+          setHighestCheckouts(checkoutData as { player_id: string; display_name: string; score: number; date: string; darts_used: number }[]);
+        } else {
+          setHighestCheckouts([]);
+        }
       } catch (error) {
         console.error('Error loading highest checkouts:', error);
-        setHighestCheckoutsSingle([]);
-        setHighestCheckoutsDouble([]);
+        setHighestCheckouts([]);
       } finally {
         setCheckoutLoading(false);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        setQuickestLegsLoading(true);
+        const supabase = await getSupabaseClient();
+
+        const { data: doubleData } = await supabase
+          .from('quickest_legs_leaderboard')
+          .select('*')
+          .eq('finish_rule', 'double_out')
+          .order('dart_count', { ascending: true })
+          .limit(10);
+
+        const { data: singleData } = await supabase
+          .from('quickest_legs_leaderboard')
+          .select('*')
+          .eq('finish_rule', 'single_out')
+          .order('dart_count', { ascending: true })
+          .limit(10);
+
+        if (doubleData) setQuickestLegsDouble(doubleData);
+        if (singleData) setQuickestLegsSingle(singleData);
+      } catch (error) {
+        console.error('Error loading quickest legs:', error);
+      } finally {
+        setQuickestLegsLoading(false);
       }
     })();
   }, []);
@@ -368,15 +395,15 @@ export default function LeaderboardsPage() {
           </CardContent>
         </Card>
 
-        {/* Highest Checkouts - Single Out */}
+        {/* Highest Checkouts */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-xl font-semibold">Highest Checkouts (Single Out)</CardTitle>
+            <CardTitle className="text-xl font-semibold">Highest Checkouts</CardTitle>
           </CardHeader>
           <CardContent>
             <ul className="divide-y border rounded bg-card">
-              {highestCheckoutsSingle.map((score, idx) => (
-                <li key={`${score.player_id}-${score.date}-single`} className="flex items-center justify-between px-3 py-2">
+              {highestCheckouts.map((score, idx) => (
+                <li key={`${score.player_id}-${score.date}`} className="flex items-center justify-between px-3 py-2">
                   <div className="flex items-center gap-3">
                     <span className="w-8 text-lg text-center">{medal(idx)}</span>
                     <div>
@@ -396,43 +423,94 @@ export default function LeaderboardsPage() {
               {checkoutLoading && (
                 <li className="px-3 py-4 text-sm text-muted-foreground">Loading checkouts...</li>
               )}
-              {!checkoutLoading && highestCheckoutsSingle.length === 0 && (
+              {!checkoutLoading && highestCheckouts.length === 0 && (
                 <li className="px-3 py-4 text-sm text-muted-foreground">No checkouts recorded yet.</li>
               )}
             </ul>
           </CardContent>
         </Card>
 
-        {/* Highest Checkouts - Double Out */}
+        {/* Quickest Legs (Double Out) */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-xl font-semibold">Highest Checkouts (Double Out)</CardTitle>
+            <CardTitle className="text-xl font-semibold">Quickest Legs (Double Out)</CardTitle>
           </CardHeader>
           <CardContent>
             <ul className="divide-y border rounded bg-card">
-              {highestCheckoutsDouble.map((score, idx) => (
-                <li key={`${score.player_id}-${score.date}-double`} className="flex items-center justify-between px-3 py-2">
+              {quickestLegsDouble.map((leg, idx) => (
+                <li key={`${leg.player_id}-${leg.date}`} className="flex items-center justify-between px-3 py-2">
                   <div className="flex items-center gap-3">
                     <span className="w-8 text-lg text-center">{medal(idx)}</span>
                     <div>
-                      <div className="font-medium">{score.display_name}</div>
-                      <div className="text-xs text-muted-foreground">{formatDate(score.date)}</div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">{leg.display_name}</span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-mono font-medium ${
+                          leg.start_score === '501' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' :
+                          leg.start_score === '301' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
+                          'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'
+                        }`}>
+                          {leg.start_score}
+                        </span>
+                      </div>
+                      <div className="text-xs text-muted-foreground">{formatDate(leg.date)}</div>
                     </div>
                   </div>
                   <div className="flex items-center gap-6">
                     <div className="text-right">
-                      <div className="font-mono tabular-nums text-2xl font-bold">{score.score}</div>
-                      <div className="text-xs text-muted-foreground">{score.darts_used} darts</div>
+                      <div className="font-mono tabular-nums text-2xl font-bold text-blue-600 dark:text-blue-400">{leg.dart_count}</div>
+                      <div className="text-xs text-muted-foreground">darts</div>
                     </div>
-                    {score.score >= 100 && <span className="text-lg">🚀</span>}
                   </div>
                 </li>
               ))}
-              {checkoutLoading && (
-                <li className="px-3 py-4 text-sm text-muted-foreground">Loading checkouts...</li>
+              {quickestLegsLoading && (
+                <li className="px-3 py-4 text-sm text-muted-foreground">Loading quickest legs...</li>
               )}
-              {!checkoutLoading && highestCheckoutsDouble.length === 0 && (
-                <li className="px-3 py-4 text-sm text-muted-foreground">No checkouts recorded yet.</li>
+              {!quickestLegsLoading && quickestLegsDouble.length === 0 && (
+                <li className="px-3 py-4 text-sm text-muted-foreground">No double-out legs recorded yet.</li>
+              )}
+            </ul>
+          </CardContent>
+        </Card>
+
+        {/* Quickest Legs (Single Out) */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-xl font-semibold">Quickest Legs (Single Out)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ul className="divide-y border rounded bg-card">
+              {quickestLegsSingle.map((leg, idx) => (
+                <li key={`${leg.player_id}-${leg.date}`} className="flex items-center justify-between px-3 py-2">
+                  <div className="flex items-center gap-3">
+                    <span className="w-8 text-lg text-center">{medal(idx)}</span>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">{leg.display_name}</span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-mono font-medium ${
+                          leg.start_score === '501' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' :
+                          leg.start_score === '301' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
+                          'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'
+                        }`}>
+                          {leg.start_score}
+                        </span>
+                      </div>
+                      <div className="text-xs text-muted-foreground">{formatDate(leg.date)}</div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-6">
+                    <div className="text-right">
+                      <div className="font-mono tabular-nums text-2xl font-bold text-green-600 dark:text-green-400">{leg.dart_count}</div>
+                      <div className="text-xs text-muted-foreground">darts</div>
+                    </div>
+                  </div>
+                </li>
+              ))}
+              {quickestLegsLoading && (
+                <li className="px-3 py-4 text-sm text-muted-foreground">Loading quickest legs...</li>
+              )}
+              {!quickestLegsLoading && quickestLegsSingle.length === 0 && (
+                <li className="px-3 py-4 text-sm text-muted-foreground">No single-out legs recorded yet.</li>
               )}
             </ul>
           </CardContent>

@@ -58,13 +58,14 @@ export default function LeaderboardsPage() {
   const [eloLeaders, setEloLeaders] = useState<EloLeaderboardEntry[]>([]);
   const [eloMultiLeaders, setEloMultiLeaders] = useState<MultiEloLeaderboardEntry[]>([]);
   const [topRoundScores, setTopRoundScores] = useState<TopRoundScore[]>([]);
+  const [highestCheckouts, setHighestCheckouts] = useState<{ player_id: string; display_name: string; score: number; date: string }[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     (async () => {
       try {
         const supabase = await getSupabaseClient();
-        const [{ data: winnersData }, eloData, eloMultiData, { data: avgData }, { data: topScoresData }] = await Promise.all([
+        const [{ data: winnersData }, eloData, eloMultiData, { data: avgData }, { data: topScoresData }, { data: playersData }] = await Promise.all([
           supabase
             .from('player_summary')
             .select('*')
@@ -104,13 +105,59 @@ export default function LeaderboardsPage() {
             .eq('legs.matches.ended_early', false)
             .not('players.display_name', 'ilike', '%test%')
             .order('total_scored', { ascending: false })
-            .limit(10)
+            .limit(10),
+          supabase
+            .from('players')
+            .select('id, display_name')
         ]);
+
+        // Fetch data for Highest Checkouts
+        const { data: winningLegs } = await supabase
+          .from('legs')
+          .select('id, winner_player_id, created_at, matches!inner(ended_early)')
+          .not('winner_player_id', 'is', null)
+          .eq('matches.ended_early', false)
+          .order('created_at', { ascending: false })
+          .limit(500);
+
+        let checkoutLeaders: { player_id: string; display_name: string; score: number; date: string }[] = [];
+
+        if (winningLegs && winningLegs.length > 0) {
+          const legIds = winningLegs.map(l => l.id);
+          // Fetch turns for these legs to find the checkout turn (last turn)
+          const { data: legTurns } = await supabase
+            .from('turns')
+            .select('id, leg_id, player_id, total_scored, turn_number')
+            .in('leg_id', legIds);
+
+          if (legTurns) {
+            const checkouts = winningLegs.map(leg => {
+              const turns = legTurns.filter(t => t.leg_id === leg.id);
+              if (turns.length === 0) return null;
+              // Find last turn
+              const lastTurn = turns.reduce((prev, current) => (prev.turn_number > current.turn_number) ? prev : current);
+              const player = (playersData as { id: string; display_name: string }[] | null)?.find(p => p.id === leg.winner_player_id);
+              
+              if (!player || player.display_name.toLowerCase().includes('test')) return null;
+
+              return {
+                player_id: leg.winner_player_id!,
+                display_name: player.display_name,
+                score: lastTurn.total_scored,
+                date: leg.created_at
+              };
+            }).filter((c): c is { player_id: string; display_name: string; score: number; date: string } => c !== null);
+
+            // Sort by score desc
+            checkoutLeaders = checkouts.sort((a, b) => b.score - a.score).slice(0, 10);
+          }
+        }
 
         setLeaders(((winnersData as unknown) as { player_id: string; display_name: string; wins: number; avg_per_turn: number }[]) ?? []);
         setAvgLeaders(((avgData as unknown) as { player_id: string; display_name: string; wins: number; avg_per_turn: number }[]) ?? []);
         setEloLeaders(eloData);
         setEloMultiLeaders(eloMultiData);
+        setHighestCheckouts(checkoutLeaders);
 
         // Transform top scores data
         const mapTopRoundScore = (row: TopRoundScorePayload): TopRoundScore | null => {
@@ -146,6 +193,7 @@ export default function LeaderboardsPage() {
         setEloLeaders([]);
         setEloMultiLeaders([]);
         setTopRoundScores([]);
+        setHighestCheckouts([]);
       } finally {
         setLoading(false);
       }
@@ -329,6 +377,35 @@ export default function LeaderboardsPage() {
               ))}
               {topRoundScores.length === 0 && (
                 <li className="px-3 py-4 text-sm text-muted-foreground">No round scores recorded yet.</li>
+              )}
+            </ul>
+          </CardContent>
+        </Card>
+
+        {/* Highest Checkouts */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-xl font-semibold">Highest Checkouts</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ul className="divide-y border rounded bg-card">
+              {highestCheckouts.map((score, idx) => (
+                <li key={`${score.player_id}-${score.date}`} className="flex items-center justify-between px-3 py-2">
+                  <div className="flex items-center gap-3">
+                    <span className="w-8 text-lg text-center">{medal(idx)}</span>
+                    <div>
+                      <div className="font-medium">{score.display_name}</div>
+                      <div className="text-xs text-muted-foreground">{formatDate(score.date)}</div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-6">
+                    <div className="font-mono tabular-nums text-2xl font-bold text-green-600">{score.score}</div>
+                    {score.score >= 100 && <span className="text-lg">🚀</span>}
+                  </div>
+                </li>
+              ))}
+              {highestCheckouts.length === 0 && (
+                <li className="px-3 py-4 text-sm text-muted-foreground">No checkouts recorded yet.</li>
               )}
             </ul>
           </CardContent>

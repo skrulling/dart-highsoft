@@ -252,6 +252,39 @@ export default function StatsPage() {
     const successfulCheckouts = finishingLegs.length;
     const checkoutRate = checkoutAttempts.length > 0 ? Math.round((successfulCheckouts / checkoutAttempts.length) * 100) : 0;
 
+    // Calculate highest checkout and checkout breakdown
+    const checkoutTurns = finishingLegs.map(leg => {
+      const legTurns = playerTurns.filter(t => t.leg_id === leg.id);
+      // Sort by turn number to find the last one
+      const sortedTurns = legTurns.sort((a, b) => a.turn_number - b.turn_number);
+      return sortedTurns[sortedTurns.length - 1];
+    }).filter(t => t && !t.busted);
+
+    const highestCheckout = checkoutTurns.length > 0 
+      ? Math.max(...checkoutTurns.map(t => t.total_scored)) 
+      : 0;
+
+    const checkoutCounts = {
+      1: 0,
+      2: 0,
+      3: 0
+    };
+
+    checkoutTurns.forEach(turn => {
+      const turnThrows = playerThrows.filter(th => th.turn_id === turn.id);
+      const dartCount = turnThrows.length;
+      if (dartCount >= 1 && dartCount <= 3) {
+        checkoutCounts[dartCount as 1 | 2 | 3]++;
+      }
+    });
+
+    const totalCheckouts = checkoutTurns.length;
+    const checkoutBreakdown = {
+      1: totalCheckouts > 0 ? Math.round((checkoutCounts[1] / totalCheckouts) * 100) : 0,
+      2: totalCheckouts > 0 ? Math.round((checkoutCounts[2] / totalCheckouts) * 100) : 0,
+      3: totalCheckouts > 0 ? Math.round((checkoutCounts[3] / totalCheckouts) * 100) : 0
+    };
+
     // Calculate specific 20 and 19 target analysis
     const throws20Area = playerThrows.filter(th => ['20', 'S20', 'D20', 'T20', '1', 'S1', '5', 'S5'].includes(th.segment));
     const throws19Area = playerThrows.filter(th => ['19', 'S19', 'D19', 'T19', '3', 'S3', '7', 'S7'].includes(th.segment));
@@ -308,6 +341,9 @@ export default function StatsPage() {
       throws: playerThrows,
       turns: playerTurns,
       checkoutRate,
+      highestCheckout,
+      checkoutCounts,
+      checkoutBreakdown,
       scoreDistribution,
       // 20 target analysis
       hits20Single,
@@ -993,7 +1029,44 @@ export default function StatsPage() {
                       <p className="text-xs text-muted-foreground">finish success</p>
                     </CardContent>
                   </Card>
+
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-medium">Highest Checkout</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">{selectedPlayerData.highestCheckout}</div>
+                      <p className="text-xs text-muted-foreground">best finish</p>
+                    </CardContent>
+                  </Card>
                 </div>
+
+                {/* Checkout Breakdown */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Checkout Breakdown</CardTitle>
+                    <CardDescription>Percentage of checkouts by number of darts used</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-3 gap-4 text-center">
+                      <div className="bg-green-50 p-4 rounded-lg">
+                        <div className="text-3xl font-bold text-green-600">{selectedPlayerData.checkoutBreakdown[1]}%</div>
+                        <div className="text-sm font-medium mt-1">1 Dart</div>
+                        <div className="text-xs text-muted-foreground">({selectedPlayerData.checkoutCounts[1]} times)</div>
+                      </div>
+                      <div className="bg-blue-50 p-4 rounded-lg">
+                        <div className="text-3xl font-bold text-blue-600">{selectedPlayerData.checkoutBreakdown[2]}%</div>
+                        <div className="text-sm font-medium mt-1">2 Darts</div>
+                        <div className="text-xs text-muted-foreground">({selectedPlayerData.checkoutCounts[2]} times)</div>
+                      </div>
+                      <div className="bg-purple-50 p-4 rounded-lg">
+                        <div className="text-3xl font-bold text-purple-600">{selectedPlayerData.checkoutBreakdown[3]}%</div>
+                        <div className="text-sm font-medium mt-1">3 Darts</div>
+                        <div className="text-xs text-muted-foreground">({selectedPlayerData.checkoutCounts[3]} times)</div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
 
                 {/* Top 3 Highest Rounds */}
                 <Card>

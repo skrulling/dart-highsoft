@@ -38,6 +38,7 @@ export default function StatsPage() {
   const [playerLoading, setPlayerLoading] = useState(false);
   const [globalStats, setGlobalStats] = useState({ turns: 0, throws: 0 });
   const [activeView, setActiveView] = useState<'traditional' | 'elo'>('traditional');
+  const [warningDismissed, setWarningDismissed] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -71,12 +72,14 @@ export default function StatsPage() {
             .from('legs')
             .select('*, matches!inner(ended_early)')
             .eq('matches.ended_early', false)
-            .order('created_at'),
+            .order('created_at')
+            .limit(100000),
           supabase
             .from('matches')
             .select('id, created_at, winner_player_id, start_score')
             .eq('ended_early', false)
-            .order('created_at'),
+            .order('created_at')
+            .limit(100000),
           supabase
             .from('turns')
             .select('legs!inner(matches!inner(ended_early))', { count: 'exact', head: true })
@@ -85,9 +88,9 @@ export default function StatsPage() {
             .from('throws')
             .select('turns!inner(legs!inner(matches!inner(ended_early)))', { count: 'exact', head: true })
             .eq('turns.legs.matches.ended_early', false),
-          supabase.from('player_segment_summary').select('*'),
-          supabase.from('player_accuracy_stats').select('*'), 
-          supabase.from('player_adjacency_stats').select('*')
+          supabase.from('player_segment_summary').select('*').limit(100000),
+          supabase.from('player_accuracy_stats').select('*').limit(100000),
+          supabase.from('player_adjacency_stats').select('*').limit(100000)
         ]);
         
         setSummary(((s as unknown) as SummaryRow[]) ?? []);
@@ -117,6 +120,8 @@ export default function StatsPage() {
 
   // Lazy load player details when selected
   useEffect(() => {
+    setWarningDismissed(false); // Reset warning when player changes
+
     if (!selectedPlayer) {
       setTurns([]);
       setThrows([]);
@@ -134,7 +139,8 @@ export default function StatsPage() {
           .select('id, leg_id, player_id, total_scored, busted, turn_number, created_at, legs!inner(matches!inner(ended_early))')
           .eq('player_id', selectedPlayer)
           .eq('legs.matches.ended_early', false)
-          .order('created_at');
+          .order('created_at')
+          .limit(100000);
         
         const playerTurns = ((t as unknown) as TurnRow[]) ?? [];
         setTurns(playerTurns);
@@ -192,6 +198,24 @@ export default function StatsPage() {
       avgThrowsPerTurn
     };
   }, [matches, legs, globalStats]);
+
+  // Data limit warning detection
+  const dataLimitWarnings = useMemo(() => {
+    const THRESHOLD = 95000; // 95% of 100000 limit
+
+    const legsWarning = legs.length >= THRESHOLD;
+    const matchesWarning = matches.length >= THRESHOLD;
+    const turnsWarning = selectedPlayer ? turns.length >= THRESHOLD : false;
+
+    return {
+      anyWarning: legsWarning || matchesWarning || turnsWarning,
+      message: [
+        legsWarning && 'leg data',
+        matchesWarning && 'match data',
+        turnsWarning && 'player turn data'
+      ].filter(Boolean).join(', ')
+    };
+  }, [legs.length, matches.length, turns.length, selectedPlayer]);
 
   // Top players by average score (desc)
   const topAvgPlayers = useMemo(() => {
@@ -833,6 +857,32 @@ export default function StatsPage() {
       {/* Performance Stats View */}
       {activeView === 'traditional' && (
         <div className="space-y-6">
+          {/* Data Limit Warning Banner */}
+          {!warningDismissed && dataLimitWarnings.anyWarning && (
+            <Card className="border-yellow-500 bg-yellow-50 dark:bg-yellow-900/20">
+              <CardContent className="flex items-start justify-between gap-4 p-4">
+                <div className="flex-1 space-y-1">
+                  <div className="font-semibold text-yellow-900 dark:text-yellow-100 flex items-center gap-2">
+                    <span className="text-xl">⚠️</span>
+                    Data Limit Warning
+                  </div>
+                  <p className="text-sm text-yellow-800 dark:text-yellow-200">
+                    Your {dataLimitWarnings.message} is approaching the query limit (95,000+ rows).
+                    Some statistics may be incomplete. Consider archiving old matches or filtering data by date range.
+                  </p>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setWarningDismissed(true)}
+                  className="text-yellow-900 dark:text-yellow-100 hover:bg-yellow-100 dark:hover:bg-yellow-800/30"
+                >
+                  Dismiss
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Overall Statistics Cards */}
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-4">
             <Card>

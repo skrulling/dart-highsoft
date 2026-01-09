@@ -3171,7 +3171,12 @@ export default function MatchClient({ matchId }: { matchId: string }) {
           </Card>
         )}
         {false && matchWinnerId && null}
-        <TurnsHistoryCard turns={turns} playerById={playerById} placeholder="—" />
+        <TurnsHistoryCard
+          turns={turns}
+          playerById={playerById}
+          playersCount={players.length}
+          placeholder="—"
+        />
       </div>
       </div>
       {/* Action Buttons - Mobile only */}

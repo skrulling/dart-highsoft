@@ -3,6 +3,8 @@
 import Dartboard from '@/components/Dartboard';
 import MobileKeypad from '@/components/MobileKeypad';
 import { ScoreProgressChart } from '@/components/ScoreProgressChart';
+import { ThrowSegmentBadges } from '@/components/ThrowSegmentBadges';
+import { TurnsHistoryCard } from '@/components/TurnsHistoryCard';
 import { computeHit, SegmentResult } from '@/utils/dartboard';
 import { getDoubleOutCheckout } from '@/utils/checkoutTable';
 import { applyThrow, FinishRule } from '@/utils/x01';
@@ -299,7 +301,10 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       if (currentLeg) {
         const { data: tns } = await supabase
           .from('turns')
-          .select('*')
+          .select(`
+            *,
+            throws:throws(id, turn_id, dart_index, segment, scored)
+          `)
           .eq('leg_id', currentLeg.id)
           .order('turn_number');
         setTurns(((tns ?? []) as TurnRecord[]).sort((a, b) => a.turn_number - b.turn_number));
@@ -358,7 +363,10 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       if (currentLeg) {
         const { data: tns } = await supabase
           .from('turns')
-          .select('*')
+          .select(`
+            *,
+            throws:throws(id, turn_id, dart_index, segment, scored)
+          `)
           .eq('leg_id', currentLeg.id)
           .order('turn_number');
         if (tns) setTurns(((tns ?? []) as TurnRecord[]).sort((a, b) => a.turn_number - b.turn_number));
@@ -1161,45 +1169,50 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     return orderPlayers[idx];
   }, [orderPlayers, turns, turnThrowCounts, currentLeg]);
 
-  // Memoized base scores for all players (without live local/remote turn adjustments)
-  const playerBaseScores = useMemo(() => {
-    const scores: Record<string, number> = {};
-    for (const player of players) {
-      const legTurns = turns.filter((t) => t.player_id === player.id && t.leg_id === currentLeg?.id);
-      const scored = legTurns.reduce((sum, t) => (t.busted ? sum : sum + (t.total_scored || 0)), 0);
-      scores[player.id] = startScore - scored;
-    }
-    return scores;
-  }, [players, turns, currentLeg?.id, startScore]);
+  const currentLegId = currentLeg?.id;
 
-  // Memoized averages for all players
-  const playerAverages = useMemo(() => {
-    const avgs: Record<string, number> = {};
+  // Memoized player stats in a single pass over turns
+  const playerStats = useMemo(() => {
+    const baseScores: Record<string, number> = {};
+    const avgData: Record<string, { sum: number; count: number }> = {};
+    const lastTurns: Record<string, TurnRecord | null> = {};
+    const playerIdSet = new Set<string>();
+
     for (const player of players) {
-      const legTurns = turns.filter((t) => t.player_id === player.id && t.leg_id === currentLeg?.id);
-      const valid = legTurns.filter((t) => !t.busted);
-      if (valid.length === 0) {
-        avgs[player.id] = 0;
-      } else {
-        const sum = valid.reduce((s, t) => s + (t.total_scored || 0), 0);
-        avgs[player.id] = sum / valid.length;
+      playerIdSet.add(player.id);
+      baseScores[player.id] = startScore;
+      avgData[player.id] = { sum: 0, count: 0 };
+      lastTurns[player.id] = null;
+    }
+
+    for (const turn of turns) {
+      const playerId = turn.player_id;
+      if (!playerIdSet.has(playerId)) continue;
+
+      const prev = lastTurns[playerId];
+      if (!prev || turn.turn_number >= prev.turn_number) {
+        lastTurns[playerId] = turn;
+      }
+
+      if (turn.leg_id === currentLegId && !turn.busted) {
+        const scored = turn.total_scored || 0;
+        baseScores[playerId] -= scored;
+        avgData[playerId].sum += scored;
+        avgData[playerId].count += 1;
       }
     }
-    return avgs;
-  }, [players, turns, currentLeg?.id]);
 
-  // Memoized last turn lookup per player for incomplete turn detection
-  const playerLastTurns = useMemo(() => {
-    const lastTurns: Record<string, TurnRecord | null> = {};
+    const averages: Record<string, number> = {};
     for (const player of players) {
-      const playerTurns = turns.filter(turn => turn.player_id === player.id);
-      lastTurns[player.id] = playerTurns.length > 0 ? playerTurns[playerTurns.length - 1] : null;
+      const data = avgData[player.id];
+      averages[player.id] = data.count > 0 ? data.sum / data.count : 0;
     }
-    return lastTurns;
-  }, [players, turns]);
+
+    return { baseScores, averages, lastTurns };
+  }, [players, turns, currentLegId, startScore]);
 
   function getScoreForPlayer(playerId: string): number {
-    let current = playerBaseScores[playerId] ?? startScore;
+    let current = playerStats.baseScores[playerId] ?? startScore;
 
     // Check for local turn first (our client's active turn)
     if (localTurn.playerId === playerId) {
@@ -1208,7 +1221,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     }
 
     // Check for incomplete turns from other clients
-    const lastTurn = playerLastTurns[playerId];
+    const lastTurn = playerStats.lastTurns[playerId];
     if (lastTurn && !lastTurn.busted) {
       const throwCount = turnThrowCounts[lastTurn.id] || 0;
       if (throwCount > 0 && throwCount < 3) {
@@ -1223,7 +1236,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   }
 
   function getAvgForPlayer(playerId: string): number {
-    return playerAverages[playerId] ?? 0;
+    return playerStats.averages[playerId] ?? 0;
   }
 
   async function startTurnIfNeeded() {
@@ -2410,30 +2423,13 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                           
                           {/* Inline throw indicators */}
                           {displayThrows.length > 0 && (
-                            <div className="flex items-center gap-1 ml-2">
-                              {Array.from({ length: 3 }, (_, index) => {
-                                const throwData = displayThrows[index];
-                                const hasThrow = index < displayThrows.length;
-                                const isIncomplete = isCurrent && hasThrow && displayThrows.length < 3;
-                                return (
-                                  <div
-                                    key={index}
-                                    className={`min-w-[20px] h-5 px-1 rounded border flex items-center justify-center text-xs font-medium transition-all duration-300 ${
-                                      hasThrow 
-                                        ? isIncomplete
-                                          ? 'border-primary bg-primary/10 text-primary' 
-                                          : 'border-muted-foreground bg-muted-foreground/10 text-muted-foreground'
-                                        : 'border-dashed border-muted-foreground/40 text-muted-foreground/40'
-                                    }`}
-                                  >
-                                    {hasThrow ? throwData.segment : '—'}
-                                  </div>
-                                );
-                              })}
-                              <span className="text-xs text-muted-foreground ml-1">
-                                {displayThrows.length}/3
-                              </span>
-                            </div>
+                            <ThrowSegmentBadges
+                              throws={displayThrows}
+                              highlightIncomplete={isCurrent}
+                              showCount
+                              placeholder="—"
+                              className="ml-2"
+                            />
                           )}
                         </div>
                         <div className="text-right">
@@ -3133,7 +3129,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
             </div>
           </CardContent>
         </Card>
-        {legs.length > 0 && (
+        {match && match.legs_to_win > 1 && legs.length > 0 && (
           <Card>
             <CardHeader>
               <CardTitle>Legs</CardTitle>
@@ -3175,22 +3171,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
           </Card>
         )}
         {false && matchWinnerId && null}
-        <Card>
-          <CardHeader>
-            <CardTitle>Turns</CardTitle>
-            <CardDescription>History of this leg</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="max-h-72 overflow-auto divide-y">
-              {(turns ?? []).map((t) => (
-                <div key={t.id} className="py-2 text-sm flex items-center justify-between">
-                  <div>{players.find((p) => p.id === t.player_id)?.display_name}</div>
-                  <div className="font-mono">{t.busted ? 'BUST' : t.total_scored}</div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+        <TurnsHistoryCard turns={turns} playerById={playerById} placeholder="—" />
       </div>
       </div>
       {/* Action Buttons - Mobile only */}

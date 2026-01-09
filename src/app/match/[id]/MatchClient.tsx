@@ -4,6 +4,7 @@ import Dartboard from '@/components/Dartboard';
 import MobileKeypad from '@/components/MobileKeypad';
 import { ScoreProgressChart } from '@/components/ScoreProgressChart';
 import { computeHit, SegmentResult } from '@/utils/dartboard';
+import { getDoubleOutCheckout } from '@/utils/checkoutTable';
 import { applyThrow, FinishRule } from '@/utils/x01';
 import { getSupabaseClient } from '@/lib/supabaseClient';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -1135,10 +1136,13 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   }
 
   function computeCheckoutSuggestions(remainingScore: number, dartsLeft: number, finish: FinishRule): string[][] {
-    const finalSuggestions: string[][] = [];
-    if (dartsLeft <= 0) return finalSuggestions;
-    if (remainingScore <= 0) return finalSuggestions;
-    if (remainingScore > dartsLeft * 60) return finalSuggestions; // impossible in remaining darts
+    if (dartsLeft <= 0) return [];
+    if (remainingScore <= 0) return [];
+    if (remainingScore > dartsLeft * 60) return []; // impossible in remaining darts
+
+    if (finish === 'double_out') {
+      return getDoubleOutCheckout(remainingScore, dartsLeft);
+    }
 
     type Option = { label: string; scored: number; isDouble: boolean };
 
@@ -1153,96 +1157,22 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     const triples: Option[] = [];
     for (let n = 1; n <= 20; n++) triples.push({ label: `T${n}`, scored: n * 3, isDouble: false });
 
-    const orderedTriples = [20, 19, 18, 17, 16, 15, 14, 13, 12, 11];
-    const orderedSingles = [20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 25];
-    const preferredDoublesPoints = [32, 40, 36, 24, 20, 16, 12, 8, 4, 50]; // favor D16/D20 lines, include DB
-
-    function doubleLabelFromPoints(points: number): string | null {
-      if (points === 50) return 'DB';
-      if (points % 2 !== 0) return null;
-      const n = points / 2;
-      if (n >= 1 && n <= 20) return `D${n}`;
-      return null;
-    }
-
-    function addUnique(path: string[]) {
-      const key = path.join('>');
-      if (!finalSuggestions.some((p) => p.join('>') === key)) {
-        finalSuggestions.push(path);
-      }
-    }
-
-    // Pro-style heuristics for double out
-    function twoDartPlanDoubleOut(rem: number): string[] | null {
-      // Direct finish if already on an ideal double
-      const direct = doubleLabelFromPoints(rem);
-      if (direct && rem <= 50) return [direct];
-
-      // Try single to leave preferred double
-      for (const s of orderedSingles) {
-        const toLeave = rem - s;
-        if (toLeave <= 0) continue;
-        if (!preferredDoublesPoints.includes(toLeave)) continue;
-        const dbl = doubleLabelFromPoints(toLeave);
-        if (!dbl) continue;
-        return [s === 25 ? 'SB' : `S${s}`, dbl];
-      }
-
-      // Try triple to leave preferred double
-      for (const t of orderedTriples) {
-        const toLeave = rem - t * 3;
-        if (toLeave <= 0) continue;
-        if (!preferredDoublesPoints.includes(toLeave)) continue;
-        const dbl = doubleLabelFromPoints(toLeave);
-        if (!dbl) continue;
-        return [`T${t}`, dbl];
-      }
-      return null;
-    }
-
-    function threeDartPlanDoubleOut(rem: number): string[] | null {
-      // Try a triple first to set up a two-dart finish
-      for (const t of orderedTriples) {
-        const afterT = rem - t * 3;
-        if (afterT <= 1) continue;
-        const plan2 = twoDartPlanDoubleOut(afterT);
-        if (plan2) return [`T${t}`, ...plan2];
-      }
-      // Try a single first as a safe setup then two-dart finish
-      for (const s of orderedSingles) {
-        const afterS = rem - s;
-        if (afterS <= 1) continue;
-        const plan2 = twoDartPlanDoubleOut(afterS);
-        if (plan2) return [s === 25 ? 'SB' : `S${s}`, ...plan2];
-      }
-      return null;
-    }
-
-    // Build pro suggestions first
-    if (finish === 'double_out') {
-      if (dartsLeft >= 1) {
-        const direct = doubleLabelFromPoints(remainingScore);
-        if (direct) addUnique([direct]);
-      }
-      if (dartsLeft >= 2) {
-        const plan2 = twoDartPlanDoubleOut(remainingScore);
-        if (plan2) addUnique(plan2);
-      }
-      if (dartsLeft >= 3) {
-        const plan3 = threeDartPlanDoubleOut(remainingScore);
-        if (plan3) addUnique(plan3);
-      }
-    }
-
-    // Fallback DFS to fill remaining options or for single-out mode
     const dfsSuggestions: string[][] = [];
+    const seen = new Set<string>();
     const orderedOptions: Option[] = [...triples, ...singles, ...doubles].sort((a, b) => b.scored - a.scored);
 
+    function addSuggestion(path: string[]) {
+      const key = path.join('>');
+      if (seen.has(key)) return;
+      seen.add(key);
+      dfsSuggestions.push(path);
+    }
+
     function dfs(rem: number, dartsRemaining: number, path: string[]) {
-      if (dfsSuggestions.length >= 5) return; // gather more to merge later
+      if (dfsSuggestions.length >= 5) return;
       if (rem < 0) return;
       if (rem === 0) {
-        if (path.length > 0) dfsSuggestions.push([...path]);
+        if (path.length > 0) addSuggestion([...path]);
         return;
       }
       if (dartsRemaining === 0) return;
@@ -1251,12 +1181,10 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         if (opt.scored > rem) continue;
         const newRem = rem - opt.scored;
         if (newRem === 0) {
-          if (finish === 'double_out' && !opt.isDouble) continue;
-          dfsSuggestions.push([...path, opt.label]);
+          addSuggestion([...path, opt.label]);
           if (dfsSuggestions.length >= 5) return;
           continue;
         }
-        if (dartsRemaining > 1 && finish === 'double_out' && newRem === 1) continue;
         if (dartsRemaining === 1) continue;
         dfs(newRem, dartsRemaining - 1, [...path, opt.label]);
         if (dfsSuggestions.length >= 5) return;
@@ -1264,12 +1192,8 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     }
 
     dfs(remainingScore, dartsLeft, []);
-
-    // Merge pro + dfs, unique, then sort by fewest darts
-    for (const p of dfsSuggestions) addUnique(p);
-    finalSuggestions.sort((a, b) => a.length - b.length);
-
-    return finalSuggestions.slice(0, 3);
+    dfsSuggestions.sort((a, b) => a.length - b.length);
+    return dfsSuggestions.slice(0, 3);
   }
 
   async function startTurnIfNeeded() {

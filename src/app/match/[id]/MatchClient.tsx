@@ -58,6 +58,74 @@ function getExcitementLevel(
   return 'medium';
 }
 
+function decorateAvg(avg: number): { cls: string; emoji: string } {
+  if (avg > 60) return { cls: 'text-purple-600', emoji: '👑' };
+  if (avg >= 40) return { cls: 'text-green-600', emoji: '🙂' };
+  if (avg >= 32) return { cls: 'text-muted-foreground', emoji: '😐' };
+  return { cls: 'text-red-600', emoji: '🙁' };
+}
+
+function computeCheckoutSuggestions(remainingScore: number, dartsLeft: number, finish: FinishRule): string[][] {
+  if (dartsLeft <= 0) return [];
+  if (remainingScore <= 0) return [];
+  if (remainingScore > dartsLeft * 60) return []; // impossible in remaining darts
+
+  if (finish === 'double_out') {
+    return getDoubleOutCheckout(remainingScore, dartsLeft);
+  }
+
+  type Option = { label: string; scored: number; isDouble: boolean };
+
+  const singles: Option[] = [];
+  for (let n = 1; n <= 20; n++) singles.push({ label: `S${n}`, scored: n, isDouble: false });
+  singles.push({ label: 'SB', scored: 25, isDouble: false });
+
+  const doubles: Option[] = [];
+  for (let n = 1; n <= 20; n++) doubles.push({ label: `D${n}`, scored: n * 2, isDouble: true });
+  doubles.push({ label: 'DB', scored: 50, isDouble: true });
+
+  const triples: Option[] = [];
+  for (let n = 1; n <= 20; n++) triples.push({ label: `T${n}`, scored: n * 3, isDouble: false });
+
+  const dfsSuggestions: string[][] = [];
+  const seen = new Set<string>();
+  const orderedOptions: Option[] = [...triples, ...singles, ...doubles].sort((a, b) => b.scored - a.scored);
+
+  function addSuggestion(path: string[]) {
+    const key = path.join('>');
+    if (seen.has(key)) return;
+    seen.add(key);
+    dfsSuggestions.push(path);
+  }
+
+  function dfs(rem: number, dartsRemaining: number, path: string[]) {
+    if (dfsSuggestions.length >= 5) return;
+    if (rem < 0) return;
+    if (rem === 0) {
+      if (path.length > 0) addSuggestion([...path]);
+      return;
+    }
+    if (dartsRemaining === 0) return;
+
+    for (const opt of orderedOptions) {
+      if (opt.scored > rem) continue;
+      const newRem = rem - opt.scored;
+      if (newRem === 0) {
+        addSuggestion([...path, opt.label]);
+        if (dfsSuggestions.length >= 5) return;
+        continue;
+      }
+      if (dartsRemaining === 1) continue;
+      dfs(newRem, dartsRemaining - 1, [...path, opt.label]);
+      if (dfsSuggestions.length >= 5) return;
+    }
+  }
+
+  dfs(remainingScore, dartsLeft, []);
+  dfsSuggestions.sort((a, b) => a.length - b.length);
+  return dfsSuggestions.slice(0, 3);
+}
+
 type Player = { id: string; display_name: string };
 
 type MatchRecord = {
@@ -1093,20 +1161,54 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     return orderPlayers[idx];
   }, [orderPlayers, turns, turnThrowCounts, currentLeg]);
 
+  // Memoized base scores for all players (without live local/remote turn adjustments)
+  const playerBaseScores = useMemo(() => {
+    const scores: Record<string, number> = {};
+    for (const player of players) {
+      const legTurns = turns.filter((t) => t.player_id === player.id && t.leg_id === currentLeg?.id);
+      const scored = legTurns.reduce((sum, t) => (t.busted ? sum : sum + (t.total_scored || 0)), 0);
+      scores[player.id] = startScore - scored;
+    }
+    return scores;
+  }, [players, turns, currentLeg?.id, startScore]);
+
+  // Memoized averages for all players
+  const playerAverages = useMemo(() => {
+    const avgs: Record<string, number> = {};
+    for (const player of players) {
+      const legTurns = turns.filter((t) => t.player_id === player.id && t.leg_id === currentLeg?.id);
+      const valid = legTurns.filter((t) => !t.busted);
+      if (valid.length === 0) {
+        avgs[player.id] = 0;
+      } else {
+        const sum = valid.reduce((s, t) => s + (t.total_scored || 0), 0);
+        avgs[player.id] = sum / valid.length;
+      }
+    }
+    return avgs;
+  }, [players, turns, currentLeg?.id]);
+
+  // Memoized last turn lookup per player for incomplete turn detection
+  const playerLastTurns = useMemo(() => {
+    const lastTurns: Record<string, TurnRecord | null> = {};
+    for (const player of players) {
+      const playerTurns = turns.filter(turn => turn.player_id === player.id);
+      lastTurns[player.id] = playerTurns.length > 0 ? playerTurns[playerTurns.length - 1] : null;
+    }
+    return lastTurns;
+  }, [players, turns]);
+
   function getScoreForPlayer(playerId: string): number {
-    const legTurns = turns.filter((t) => t.player_id === playerId && t.leg_id === currentLeg?.id);
-    const scored = legTurns.reduce((sum, t) => (t.busted ? sum : sum + (t.total_scored || 0)), 0);
-    let current = startScore - scored;
-    
+    let current = playerBaseScores[playerId] ?? startScore;
+
     // Check for local turn first (our client's active turn)
     if (localTurn.playerId === playerId) {
       const sub = localTurn.darts.reduce((s, d) => s + d.scored, 0);
       return Math.max(0, current - sub);
     }
-    
+
     // Check for incomplete turns from other clients
-    const playerTurns = turns.filter(turn => turn.player_id === playerId);
-    const lastTurn = playerTurns.length > 0 ? playerTurns[playerTurns.length - 1] : null;
+    const lastTurn = playerLastTurns[playerId];
     if (lastTurn && !lastTurn.busted) {
       const throwCount = turnThrowCounts[lastTurn.id] || 0;
       if (throwCount > 0 && throwCount < 3) {
@@ -1116,84 +1218,12 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         current -= incompleteTotal;
       }
     }
-    
+
     return Math.max(0, current);
   }
 
   function getAvgForPlayer(playerId: string): number {
-    const legTurns = turns.filter((t) => t.player_id === playerId && t.leg_id === currentLeg?.id);
-    const valid = legTurns.filter((t) => !t.busted);
-    if (valid.length === 0) return 0;
-    const sum = valid.reduce((s, t) => s + (t.total_scored || 0), 0);
-    return sum / valid.length;
-  }
-
-  function decorateAvg(avg: number): { cls: string; emoji: string } {
-    if (avg > 60) return { cls: 'text-purple-600', emoji: '👑' };
-    if (avg >= 40) return { cls: 'text-green-600', emoji: '🙂' };
-    if (avg >= 32) return { cls: 'text-muted-foreground', emoji: '😐' };
-    return { cls: 'text-red-600', emoji: '🙁' };
-  }
-
-  function computeCheckoutSuggestions(remainingScore: number, dartsLeft: number, finish: FinishRule): string[][] {
-    if (dartsLeft <= 0) return [];
-    if (remainingScore <= 0) return [];
-    if (remainingScore > dartsLeft * 60) return []; // impossible in remaining darts
-
-    if (finish === 'double_out') {
-      return getDoubleOutCheckout(remainingScore, dartsLeft);
-    }
-
-    type Option = { label: string; scored: number; isDouble: boolean };
-
-    const singles: Option[] = [];
-    for (let n = 1; n <= 20; n++) singles.push({ label: `S${n}`, scored: n, isDouble: false });
-    singles.push({ label: 'SB', scored: 25, isDouble: false });
-
-    const doubles: Option[] = [];
-    for (let n = 1; n <= 20; n++) doubles.push({ label: `D${n}`, scored: n * 2, isDouble: true });
-    doubles.push({ label: 'DB', scored: 50, isDouble: true });
-
-    const triples: Option[] = [];
-    for (let n = 1; n <= 20; n++) triples.push({ label: `T${n}`, scored: n * 3, isDouble: false });
-
-    const dfsSuggestions: string[][] = [];
-    const seen = new Set<string>();
-    const orderedOptions: Option[] = [...triples, ...singles, ...doubles].sort((a, b) => b.scored - a.scored);
-
-    function addSuggestion(path: string[]) {
-      const key = path.join('>');
-      if (seen.has(key)) return;
-      seen.add(key);
-      dfsSuggestions.push(path);
-    }
-
-    function dfs(rem: number, dartsRemaining: number, path: string[]) {
-      if (dfsSuggestions.length >= 5) return;
-      if (rem < 0) return;
-      if (rem === 0) {
-        if (path.length > 0) addSuggestion([...path]);
-        return;
-      }
-      if (dartsRemaining === 0) return;
-
-      for (const opt of orderedOptions) {
-        if (opt.scored > rem) continue;
-        const newRem = rem - opt.scored;
-        if (newRem === 0) {
-          addSuggestion([...path, opt.label]);
-          if (dfsSuggestions.length >= 5) return;
-          continue;
-        }
-        if (dartsRemaining === 1) continue;
-        dfs(newRem, dartsRemaining - 1, [...path, opt.label]);
-        if (dfsSuggestions.length >= 5) return;
-      }
-    }
-
-    dfs(remainingScore, dartsLeft, []);
-    dfsSuggestions.sort((a, b) => a.length - b.length);
-    return dfsSuggestions.slice(0, 3);
+    return playerAverages[playerId] ?? 0;
   }
 
   async function startTurnIfNeeded() {
@@ -2621,7 +2651,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   }
 
   return (
-    <div className="w-full space-y-3 md:space-y-6 md:max-w-6xl md:mx-auto relative">
+    <div className="w-full space-y-3 md:space-y-6 md:-ml-[calc(50vw-50%)] md:-mr-6 md:pl-4 md:pr-4 lg:pr-6 md:max-w-none relative">
       {/* Connection status indicator */}
       <div className="fixed bottom-4 right-4 z-50">
         <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-white/90 dark:bg-gray-800/90 shadow-sm text-xs">
@@ -2640,7 +2670,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         </div>
       </div>
       {/* Scoring input at top (mobile keypad or desktop board) */}
-      <div className="w-full space-y-6 md:space-y-0 md:grid md:grid-cols-[minmax(280px,340px)_1fr] md:gap-6 md:items-start">
+      <div className="w-full space-y-6 md:space-y-0 md:grid md:grid-cols-[minmax(320px,25%)_1fr] md:gap-4 lg:gap-6 md:items-start">
         <div className="space-y-3 md:col-start-2 md:row-start-1">
           {/* Mobile: player indicator + keypad at top */}
           <div className="md:hidden space-y-3">
@@ -2742,22 +2772,60 @@ export default function MatchClient({ matchId }: { matchId: string }) {
           <div className={`${matchWinnerId ? 'pointer-events-none opacity-50' : ''} md:hidden`}>
             <MobileKeypad onHit={(seg) => handleBoardClick(0, 0, seg as unknown as ReturnType<typeof computeHit>)} />
           </div>
-          {/* Desktop: current player header */}
-          <div className="hidden md:flex items-center justify-center mt-2">
-            <div className="flex items-center gap-3">
-              <div className="text-lg font-medium">{currentPlayer?.display_name ?? '—'}</div>
-              {currentPlayer && (
-                <span className="rounded-full border border-yellow-400/60 bg-yellow-50 px-3 py-1 text-sm font-mono text-yellow-700 shadow-sm dark:border-yellow-700/60 dark:bg-yellow-900/30 dark:text-yellow-200">
-                  {getScoreForPlayer(currentPlayer.id)} pts
-                </span>
+          {/* Desktop: board with buttons on the right */}
+          <div className="hidden md:flex items-start gap-4">
+            <div className={`flex-1 flex justify-center ${matchWinnerId ? 'pointer-events-none opacity-50' : ''}`}>
+              <Dartboard onHit={handleBoardClick} />
+            </div>
+            <div className="flex flex-col gap-2 pt-4">
+              <Button variant="outline" size="sm" onClick={undoLastThrow} disabled={!!matchWinnerId} className="text-xs whitespace-nowrap">
+                Undo dart
+              </Button>
+              <Button variant="outline" size="sm" onClick={openEditModal} disabled={!currentLeg} className="text-xs whitespace-nowrap">
+                Edit throws
+              </Button>
+              <Button variant="outline" size="sm" onClick={openEditPlayersModal} disabled={!canEditPlayers} className="text-xs whitespace-nowrap">
+                Edit players
+              </Button>
+              <Button variant="outline" size="sm" onClick={toggleSpectatorMode} className="text-xs whitespace-nowrap">
+                Spectator
+              </Button>
+              {!matchWinnerId && (
+                <Dialog open={endGameDialogOpen} onOpenChange={setEndGameDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button variant="destructive" size="sm" className="text-xs whitespace-nowrap">
+                      End Game
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>End Game Early?</DialogTitle>
+                      <DialogDescription>
+                        Are you sure you want to end this game early? This action cannot be undone.
+                        <br /><br />
+                        <strong>Warning:</strong> This match and all its statistics will not count towards player records.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                      <Button variant="outline" onClick={() => setEndGameDialogOpen(false)} disabled={endGameLoading}>
+                        Cancel
+                      </Button>
+                      <Button variant="destructive" onClick={endGameEarly} disabled={endGameLoading}>
+                        {endGameLoading ? 'Ending...' : 'End Game'}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              )}
+              {matchWinnerId && (
+                <Button onClick={startRematch} disabled={rematchLoading} size="sm" className="text-xs whitespace-nowrap">
+                  {rematchLoading ? 'Starting…' : 'Rematch'}
+                </Button>
               )}
             </div>
           </div>
-          {/* Desktop: board */}
-          <div className={`hidden md:flex justify-center ${matchWinnerId ? 'pointer-events-none opacity-50' : ''}`}>
-            <Dartboard onHit={handleBoardClick} />
-          </div>
-          <div className="flex flex-wrap items-center gap-2 sm:gap-3 mt-2 md:justify-center">
+          {/* Mobile: buttons below keypad */}
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3 mt-2 md:hidden">
             <Button variant="outline" size="sm" onClick={undoLastThrow} disabled={!!matchWinnerId} className="text-xs sm:text-sm">
               Undo dart
             </Button>
@@ -2767,12 +2835,9 @@ export default function MatchClient({ matchId }: { matchId: string }) {
             <Button variant="outline" size="sm" onClick={openEditPlayersModal} disabled={!canEditPlayers} className="text-xs sm:text-sm">
               Edit players
             </Button>
-            <div className="text-sm text-muted-foreground hidden md:block">
-              Hover a segment to preview its score, then click to register the dart.
-            </div>
           </div>
           {matchWinnerId && (
-            <Card className="mt-4 overflow-hidden border-2 border-green-500/80 shadow-md ring-2 ring-green-400/30 bg-gradient-to-br from-emerald-50 to-green-50 dark:from-emerald-900/20 dark:to-green-900/10">
+            <Card className="mt-4 overflow-hidden border-2 border-green-500/80 shadow-md ring-2 ring-green-400/30 bg-gradient-to-br from-emerald-50 to-green-50 dark:from-emerald-900/20 dark:to-green-900/10 md:hidden">
               <CardContent className="py-6">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
@@ -2795,6 +2860,15 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         </div>
 
         <div className="space-y-4 md:col-start-1 md:row-start-1">
+          {/* Desktop: current player header - above sidebar */}
+          <div className="hidden md:flex items-center gap-3 mb-2">
+            <div className="text-lg font-medium">{currentPlayer?.display_name ?? '—'}</div>
+            {currentPlayer && (
+              <span className="rounded-full border border-yellow-400/60 bg-yellow-50 px-3 py-1 text-sm font-mono text-yellow-700 shadow-sm dark:border-yellow-700/60 dark:bg-yellow-900/30 dark:text-yellow-200">
+                {getScoreForPlayer(currentPlayer.id)} pts
+              </span>
+            )}
+          </div>
           {/* Match info and summaries */}
         {/* Edit throws modal */}
         {editOpen && (
@@ -3119,13 +3193,12 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         </Card>
       </div>
       </div>
-      {/* Action Buttons */}
-      <div className="flex flex-col sm:flex-row gap-2 pt-4 md:pt-6 md:justify-center md:gap-4">
-        {/* End Game Early Button - Show when match is ongoing */}
+      {/* Action Buttons - Mobile only */}
+      <div className="flex flex-col sm:flex-row gap-2 pt-4 md:hidden">
         {!matchWinnerId && (
           <Dialog open={endGameDialogOpen} onOpenChange={setEndGameDialogOpen}>
             <DialogTrigger asChild>
-              <Button variant="destructive" className="flex-1 sm:max-w-xs md:max-w-sm">
+              <Button variant="destructive" className="flex-1 sm:max-w-xs">
                 End Game Early
               </Button>
             </DialogTrigger>
@@ -3149,9 +3222,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
             </DialogContent>
           </Dialog>
         )}
-
-        {/* Spectator Mode Button */}
-        <Button variant="outline" onClick={toggleSpectatorMode} className="flex-1 sm:max-w-xs md:max-w-sm">
+        <Button variant="outline" onClick={toggleSpectatorMode} className="flex-1 sm:max-w-xs">
           Enter Spectator Mode
         </Button>
       </div>

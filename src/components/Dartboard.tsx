@@ -9,7 +9,7 @@ type DartboardProps = {
 };
 
 export default function Dartboard({ onHit }: DartboardProps) {
-  const viewBox = 500;
+  const viewBox = 580;
   const cx = viewBox / 2;
   const cy = viewBox / 2;
   const [hoverLabel, setHoverLabel] = useState<string | null>(null);
@@ -25,6 +25,9 @@ export default function Dartboard({ onHit }: DartboardProps) {
     numberRingBg: '#111111',
     separators: '#222222',
   } as const;
+
+  // Number ring radius (includes miss area outside the board)
+  const NUMBER_RING_RADIUS = DOUBLE_OUTER_RADIUS + 50;
 
   const segments = useMemo(() => {
     const paths: { d: string; fill: string }[] = [];
@@ -98,11 +101,19 @@ export default function Dartboard({ onHit }: DartboardProps) {
     const { x, y } = extractPoint(event);
     const result = computeHit(x, y, viewBox);
     if (result.kind === 'Miss') {
+      // Check if within the number ring area to show "Miss" tooltip
+      const dx = x - cx;
+      const dy = y - cy;
+      const r = Math.sqrt(dx * dx + dy * dy);
+      if (r <= NUMBER_RING_RADIUS && r > DOUBLE_OUTER_RADIUS) {
+        setHoverLabel((prev) => (prev === 'Miss' ? prev : 'Miss'));
+        return;
+      }
       setHoverLabel(null);
       return;
     }
     setHoverLabel((prev) => (prev === result.label ? prev : result.label));
-  }, [extractPoint, viewBox]);
+  }, [extractPoint, viewBox, cx, cy, NUMBER_RING_RADIUS]);
 
   const handleMouseLeave = useCallback(() => {
     setHoverLabel(null);
@@ -127,13 +138,13 @@ export default function Dartboard({ onHit }: DartboardProps) {
           <svg
             role="img"
             viewBox={`0 0 ${viewBox} ${viewBox}`}
-            className="w-full max-w-[360px] sm:max-w-[480px] md:max-w-[720px] lg:max-w-[840px] xl:max-w-[960px] 2xl:max-w-[1100px] cursor-pointer select-none drop-shadow overflow-visible"
+            className="w-full max-w-[360px] sm:max-w-[480px] md:max-w-none md:w-auto md:h-[calc(100vh-56px)] md:max-h-[1200px] md:aspect-square md:-mt-12 cursor-pointer select-none drop-shadow overflow-visible"
             onClick={handleClick}
             onMouseMove={handleHover}
             onMouseLeave={handleMouseLeave}
           >
-            {/* Number ring background */}
-            <circle cx={cx} cy={cy} r={DOUBLE_OUTER_RADIUS + 26} fill={COLORS.numberRingBg} />
+            {/* Number ring background (extended for larger miss click area) */}
+            <circle cx={cx} cy={cy} r={NUMBER_RING_RADIUS} fill={COLORS.numberRingBg} />
             {/* Board background */}
             <circle cx={cx} cy={cy} r={DOUBLE_OUTER_RADIUS} fill="#222" stroke="#111" strokeWidth={2} />
             {segments.map((seg, i) => (

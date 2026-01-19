@@ -4,9 +4,14 @@ import Dartboard from '@/components/Dartboard';
 import MobileKeypad from '@/components/MobileKeypad';
 import { ScoreProgressChart } from '@/components/ScoreProgressChart';
 import { ThrowSegmentBadges } from '@/components/ThrowSegmentBadges';
+import { TurnRow } from '@/components/TurnRow';
 import { TurnsHistoryCard } from '@/components/TurnsHistoryCard';
+import { computeCheckoutSuggestions } from '@/utils/checkoutSuggestions';
 import { computeHit, SegmentResult } from '@/utils/dartboard';
-import { getDoubleOutCheckout } from '@/utils/checkoutTable';
+import { computeRemainingScore, computeTurnTotal } from '@/lib/commentary/stats';
+import { getExcitementLevel } from '@/lib/commentary/utils';
+import { getSpectatorScore, getLegRoundStats } from '@/utils/matchStats';
+import { decorateAvg } from '@/utils/playerStats';
 import { applyThrow, FinishRule } from '@/utils/x01';
 import { getSupabaseClient } from '@/lib/supabaseClient';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -31,102 +36,9 @@ import { Home, ChevronUp, ChevronDown } from 'lucide-react';
 import CommentaryDisplay from '@/components/CommentaryDisplay';
 import CommentarySettings from '@/components/CommentarySettings';
 import { resolvePersona } from '@/lib/commentary/personas';
-import type { CommentaryPersonaId, PlayerStats, CommentaryExcitementLevel } from '@/lib/commentary/types';
+import type { CommentaryPersonaId, PlayerStats } from '@/lib/commentary/types';
 import { generateCommentary, generateMatchRecap, type CommentaryContext, CommentaryDebouncer } from '@/services/commentaryService';
 import { getTTSService, type VoiceOption } from '@/services/ttsService';
-
-function getExcitementLevel(
-  totalScore: number,
-  busted: boolean,
-  is180: boolean,
-  isHighScore: boolean
-): CommentaryExcitementLevel {
-  if (busted) {
-    return 'low';
-  }
-
-  if (is180 || totalScore >= 140) {
-    return 'high';
-  }
-
-  if (isHighScore || totalScore >= 80) {
-    return 'medium';
-  }
-
-  if (totalScore <= 30) {
-    return 'low';
-  }
-
-  return 'medium';
-}
-
-function decorateAvg(avg: number): { cls: string; emoji: string } {
-  if (avg > 60) return { cls: 'text-purple-600', emoji: '👑' };
-  if (avg >= 40) return { cls: 'text-green-600', emoji: '🙂' };
-  if (avg >= 32) return { cls: 'text-muted-foreground', emoji: '😐' };
-  return { cls: 'text-red-600', emoji: '🙁' };
-}
-
-function computeCheckoutSuggestions(remainingScore: number, dartsLeft: number, finish: FinishRule): string[][] {
-  if (dartsLeft <= 0) return [];
-  if (remainingScore <= 0) return [];
-  if (remainingScore > dartsLeft * 60) return []; // impossible in remaining darts
-
-  if (finish === 'double_out') {
-    return getDoubleOutCheckout(remainingScore, dartsLeft);
-  }
-
-  type Option = { label: string; scored: number; isDouble: boolean };
-
-  const singles: Option[] = [];
-  for (let n = 1; n <= 20; n++) singles.push({ label: `S${n}`, scored: n, isDouble: false });
-  singles.push({ label: 'SB', scored: 25, isDouble: false });
-
-  const doubles: Option[] = [];
-  for (let n = 1; n <= 20; n++) doubles.push({ label: `D${n}`, scored: n * 2, isDouble: true });
-  doubles.push({ label: 'DB', scored: 50, isDouble: true });
-
-  const triples: Option[] = [];
-  for (let n = 1; n <= 20; n++) triples.push({ label: `T${n}`, scored: n * 3, isDouble: false });
-
-  const dfsSuggestions: string[][] = [];
-  const seen = new Set<string>();
-  const orderedOptions: Option[] = [...triples, ...singles, ...doubles].sort((a, b) => b.scored - a.scored);
-
-  function addSuggestion(path: string[]) {
-    const key = path.join('>');
-    if (seen.has(key)) return;
-    seen.add(key);
-    dfsSuggestions.push(path);
-  }
-
-  function dfs(rem: number, dartsRemaining: number, path: string[]) {
-    if (dfsSuggestions.length >= 5) return;
-    if (rem < 0) return;
-    if (rem === 0) {
-      if (path.length > 0) addSuggestion([...path]);
-      return;
-    }
-    if (dartsRemaining === 0) return;
-
-    for (const opt of orderedOptions) {
-      if (opt.scored > rem) continue;
-      const newRem = rem - opt.scored;
-      if (newRem === 0) {
-        addSuggestion([...path, opt.label]);
-        if (dfsSuggestions.length >= 5) return;
-        continue;
-      }
-      if (dartsRemaining === 1) continue;
-      dfs(newRem, dartsRemaining - 1, [...path, opt.label]);
-      if (dfsSuggestions.length >= 5) return;
-    }
-  }
-
-  dfs(remainingScore, dartsLeft, []);
-  dfsSuggestions.sort((a, b) => a.length - b.length);
-  return dfsSuggestions.slice(0, 3);
-}
 
 type Player = { id: string; display_name: string };
 
@@ -238,6 +150,8 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     legs: [] as LegRecord[],
     players: [] as Player[],
     match: null as MatchRecord | null,
+    knownLegIds: new Set<string>(),
+    knownTurnIds: new Set<string>(),
   });
 
   const [match, setMatch] = useState<MatchRecord | null>(null);
@@ -513,6 +427,17 @@ export default function MatchClient({ matchId }: { matchId: string }) {
 
   // Sync latest state to ref (prevents stale closures in event handlers)
   useEffect(() => {
+    const knownLegIds = new Set<string>(legs.map((leg) => leg.id));
+    const knownTurnIds = new Set<string>();
+    for (const turn of turns) {
+      knownTurnIds.add(turn.id);
+    }
+    for (const legTurns of Object.values(turnsByLeg)) {
+      for (const turn of legTurns) {
+        knownTurnIds.add(turn.id);
+      }
+    }
+
     latestStateRef.current = {
       isSpectatorMode,
       playerById,
@@ -521,8 +446,10 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       legs,
       players,
       match,
+      knownLegIds,
+      knownTurnIds,
     };
-  }, [isSpectatorMode, playerById, turnThrowCounts, turns, legs, players, match]);
+  }, [isSpectatorMode, playerById, turnThrowCounts, turns, turnsByLeg, legs, players, match]);
 
   // Set up real-time event listeners
   useEffect(() => {
@@ -568,36 +495,6 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         const startScoreValue = matchSnapshot?.start_score ? parseInt(matchSnapshot.start_score, 10) : 501;
         const legsToWinValue = matchSnapshot?.legs_to_win ?? 3;
 
-        const computeTurnTotal = (targetTurn: TurnWithThrows): number => {
-          if (typeof targetTurn.total_scored === 'number') {
-            return targetTurn.total_scored;
-          }
-          const dartSum = targetTurn.throws?.reduce((sum, thr) => sum + thr.scored, 0) ?? 0;
-          return dartSum;
-        };
-
-        const computeRemainingScore = (playerId: string): number => {
-          const playerTurns = turnsSnapshot
-            .filter((t) => t.player_id === playerId)
-            .sort((a, b) => a.turn_number - b.turn_number);
-
-          let scored = 0;
-          for (const playerTurn of playerTurns) {
-            if (playerTurn.busted) {
-              continue;
-            }
-
-            if (typeof playerTurn.total_scored === 'number') {
-              scored += playerTurn.total_scored;
-            } else if (playerTurn.throws && playerTurn.throws.length > 0) {
-              const partial = playerTurn.throws.reduce((sum, thr) => sum + thr.scored, 0);
-              scored += partial;
-            }
-          }
-
-          return Math.max(startScoreValue - scored, 0);
-        };
-
         const computeAverage = (playerId: string): number => {
           const completedTurns = turnsSnapshot.filter(
             (t) => t.player_id === playerId && !t.busted && typeof t.total_scored === 'number'
@@ -611,7 +508,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
           return total / completedTurns.length;
         };
 
-        const remainingScore = computeRemainingScore(turn.player_id);
+        const remainingScore = computeRemainingScore(turnsSnapshot, turn.player_id, startScoreValue);
         const playerAverage = computeAverage(turn.player_id);
 
         const legsWonByPlayer = legsSnapshot.reduce<Record<string, number>>((acc, leg) => {
@@ -624,7 +521,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         const allPlayersStats = playersSnapshot.map((p) => ({
           name: p.display_name,
           id: p.id,
-          remainingScore: computeRemainingScore(p.id),
+          remainingScore: computeRemainingScore(turnsSnapshot, p.id, startScoreValue),
           average: computeAverage(p.id),
           legsWon: legsWonByPlayer[p.id] || 0,
           isCurrentPlayer: p.id === turn.player_id,
@@ -752,9 +649,29 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       }
     };
 
+    const shouldIgnoreRealtimePayload = (payload: { new?: { leg_id?: string; turn_id?: string }; old?: { leg_id?: string; turn_id?: string } }) => {
+      if (!payload) return false;
+      const legId = payload.new?.leg_id ?? payload.old?.leg_id ?? null;
+      if (legId) {
+        const { knownLegIds } = latestStateRef.current;
+        if (knownLegIds.size === 0) return false;
+        return !knownLegIds.has(legId);
+      }
+      const turnId = payload.new?.turn_id ?? payload.old?.turn_id ?? null;
+      if (turnId) {
+        const { knownTurnIds } = latestStateRef.current;
+        if (knownTurnIds.size === 0) return false;
+        return !knownTurnIds.has(turnId);
+      }
+      return false;
+    };
+
     // Spectator-specific throw change handler
     const handleSpectatorThrowChange = async (event: CustomEvent) => {
       const payload = event.detail;
+      if (shouldIgnoreRealtimePayload(payload)) {
+        return;
+      }
 
       try {
         const supabase = await getSupabaseClient();
@@ -904,6 +821,9 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       if (latestStateRef.current.isSpectatorMode) return; // Only for normal match UI
       
       const payload = event.detail;
+      if (shouldIgnoreRealtimePayload(payload)) {
+        return;
+      }
       
       try {
         const supabase = await getSupabaseClient();
@@ -2299,28 +2219,13 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                 {(() => {
                   if (!spectatorCurrentPlayer) return <div className="invisible">-</div>;
                   
-                  // Calculate current score including incomplete throws
-                  const getSpectatorScore = (playerId: string): number => {
-                    const legTurns = turns.filter((t) => t.player_id === playerId && t.leg_id === currentLeg?.id);
-                    const scored = legTurns.reduce((sum, t) => (t.busted ? sum : sum + (t.total_scored || 0)), 0);
-                    let current = startScore - scored;
-                    
-                    // Add incomplete throws from current turn
-                    const playerTurns = turns.filter(turn => turn.player_id === playerId);
-                    const lastTurn = playerTurns.length > 0 ? playerTurns[playerTurns.length - 1] : null;
-                    if (lastTurn && !lastTurn.busted) {
-                      const throwCount = turnThrowCounts[lastTurn.id] || 0;
-                      if (throwCount > 0 && throwCount < 3) {
-                        const currentThrows = (lastTurn as TurnWithThrows).throws || [];
-                        const incompleteTotal = currentThrows.reduce((sum: number, thr: ThrowRecord) => sum + thr.scored, 0);
-                        current -= incompleteTotal;
-                      }
-                    }
-                    
-                    return Math.max(0, current);
-                  };
-                  
-                  const currentScore = getSpectatorScore(spectatorCurrentPlayer.id);
+                  const currentScore = getSpectatorScore(
+                    turns,
+                    currentLeg?.id,
+                    startScore,
+                    turnThrowCounts,
+                    spectatorCurrentPlayer.id
+                  );
                   const playerTurns = turns.filter(turn => turn.player_id === spectatorCurrentPlayer.id);
                   const lastTurn = playerTurns.length > 0 ? playerTurns[playerTurns.length - 1] : null;
                   const throwCount = lastTurn ? turnThrowCounts[lastTurn.id] || 0 : 0;
@@ -2358,28 +2263,13 @@ export default function MatchClient({ matchId }: { matchId: string }) {
               {/* Player scores with inline throw indicators */}
               <div className="grid gap-3">
                 {orderPlayers.map((player) => {
-                  // Use live score calculation for spectator mode
-                  const getSpectatorScore = (playerId: string): number => {
-                    const legTurns = turns.filter((t) => t.player_id === playerId && t.leg_id === currentLeg?.id);
-                    const scored = legTurns.reduce((sum, t) => (t.busted ? sum : sum + (t.total_scored || 0)), 0);
-                    let current = startScore - scored;
-                    
-                    // Add incomplete throws from current turn
-                    const playerTurns = turns.filter(turn => turn.player_id === playerId);
-                    const lastTurn = playerTurns.length > 0 ? playerTurns[playerTurns.length - 1] : null;
-                    if (lastTurn && !lastTurn.busted) {
-                      const throwCount = turnThrowCounts[lastTurn.id] || 0;
-                      if (throwCount > 0 && throwCount < 3) {
-                        const currentThrows = (lastTurn as TurnWithThrows).throws || [];
-                        const incompleteTotal = currentThrows.reduce((sum: number, thr: ThrowRecord) => sum + thr.scored, 0);
-                        current -= incompleteTotal;
-                      }
-                    }
-                    
-                    return Math.max(0, current);
-                  };
-                  
-                  const score = getSpectatorScore(player.id);
+                  const score = getSpectatorScore(
+                    turns,
+                    currentLeg?.id,
+                    startScore,
+                    turnThrowCounts,
+                    player.id
+                  );
                   const avg = getAvgForPlayer(player.id);
                   const deco = decorateAvg(avg);
                   const isCurrent = spectatorCurrentPlayer?.id === player.id;
@@ -2439,14 +2329,11 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                               {deco.emoji} {avg.toFixed(1)} avg
                             </div>
                             {(() => {
-                              // Get player's turn data for this leg
-                              const legTurns = turns.filter((t) => t.player_id === player.id && t.leg_id === currentLeg?.id && !t.busted);
-                              
-                              // Last round score (most recent completed turn)
-                              const lastRoundScore = legTurns.length > 0 ? legTurns[legTurns.length - 1].total_scored : 0;
-                              
-                              // Best round score (highest score in this leg)
-                              const bestRoundScore = legTurns.length > 0 ? Math.max(...legTurns.map(t => t.total_scored)) : 0;
+                              const { lastRoundScore, bestRoundScore } = getLegRoundStats(
+                                turns,
+                                currentLeg?.id,
+                                player.id
+                              );
                               
                               return (
                                 <div className="space-y-0.5">
@@ -2495,71 +2382,72 @@ export default function MatchClient({ matchId }: { matchId: string }) {
           )}
 
           {/* Round Statistics */}
-          <Card>
+          <Card className="flex flex-col">
             <CardHeader>
               <CardTitle>Round Statistics</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-6">
-              {/* Top 3 Round Scores */}
-              <div>
-                <h4 className="font-semibold mb-3">Top 3 Rounds</h4>
-                <div className="space-y-1">
-                  {(() => {
-                    // Get all completed turns from current leg, sorted by score
-                    const allTurns = turns
-                      .filter((t) => t.leg_id === currentLeg?.id && !t.busted && t.total_scored > 0)
-                      .sort((a, b) => b.total_scored - a.total_scored)
-                      .slice(0, 3);
+            <CardContent>
+              <div className="max-h-[55vh] overflow-y-auto space-y-6 pr-1">
+                {/* Top 3 Round Scores */}
+                <div>
+                  <h4 className="font-semibold mb-3">Top 3 Rounds</h4>
+                  <div className="space-y-1">
+                    {(() => {
+                      const allTurns = turns
+                        .filter((t) => t.leg_id === currentLeg?.id && !t.busted && t.total_scored > 0)
+                        .sort((a, b) => b.total_scored - a.total_scored)
+                        .slice(0, 3);
 
-                    return allTurns.length > 0 ? allTurns.map((turn, index) => {
-                      const player = players.find((p) => p.id === turn.player_id);
-                      const medal = ['🥇', '🥈', '🥉'][index] || '🏆';
-                      
-                      return (
-                        <div key={turn.id} className="flex items-center justify-between p-3 rounded-md bg-muted/30 hover:bg-muted/50 transition-colors">
-                          <div className="flex items-center gap-3">
-                            <span className="text-xl">{medal}</span>
-                            <span className="font-medium">{player?.display_name || 'Unknown'}</span>
-                          </div>
-                          <span className="text-lg font-bold text-primary">{turn.total_scored}</span>
+                      return allTurns.length > 0 ? allTurns.map((turn, index) => {
+                        const medal = ['🥇', '🥈', '🥉'][index] || '🏆';
+                        return (
+                          <TurnRow
+                            key={turn.id}
+                            turn={turn}
+                            playerName={playerById[turn.player_id]?.display_name}
+                            playersCount={players.length}
+                            leading={<span className="text-xl">{medal}</span>}
+                            placeholder="—"
+                            className="p-3 rounded-md bg-muted/30 hover:bg-muted/50 transition-colors"
+                            totalClassName="text-primary text-lg"
+                            throwBadgeClassName="text-[10px]"
+                          />
+                        );
+                      }) : (
+                        <div className="text-center py-4 text-muted-foreground">
+                          <div className="text-sm">No completed rounds yet</div>
                         </div>
                       );
-                    }) : (
-                      <div className="text-center py-4 text-muted-foreground">
-                        <div className="text-sm">No completed rounds yet</div>
-                      </div>
-                    );
-                  })()}
+                    })()}
+                  </div>
                 </div>
-              </div>
 
-              {/* Last 3 Rounds */}
-              <div>
-                <h4 className="font-semibold mb-3">Recent Rounds</h4>
-                <div className="space-y-1">
-                  {(() => {
-                    // Get last 3 completed turns from current leg, sorted by turn number
+                {/* Last 3 Rounds */}
+                <div>
+                  <h4 className="font-semibold mb-3">Recent Rounds</h4>
+                  <div className="space-y-1">
+                    {(() => {
                     const recentTurns = turns
                       .filter((t) => t.leg_id === currentLeg?.id && !t.busted)
-                      .sort((a, b) => b.turn_number - a.turn_number)
-                      .slice(0, 3)
-                      .reverse(); // Show oldest to newest
+                      .sort((a, b) => b.turn_number - a.turn_number);
 
-                    return recentTurns.length > 0 ? recentTurns.map((turn) => {
-                      const player = players.find((p) => p.id === turn.player_id);
-                      
-                      return (
-                        <div key={turn.id} className="flex items-center justify-between p-3 rounded-md bg-muted/30 hover:bg-muted/50 transition-colors">
-                          <span className="font-medium">{player?.display_name || 'Unknown'}</span>
-                          <span className="font-mono font-semibold">{turn.total_scored}</span>
+                      return recentTurns.length > 0 ? recentTurns.map((turn) => (
+                        <TurnRow
+                          key={turn.id}
+                          turn={turn}
+                          playerName={playerById[turn.player_id]?.display_name}
+                          playersCount={players.length}
+                          placeholder="—"
+                          className="p-3 rounded-md bg-muted/30 hover:bg-muted/50 transition-colors"
+                          throwBadgeClassName="text-[10px]"
+                        />
+                      )) : (
+                        <div className="text-center py-4 text-muted-foreground">
+                          <div className="text-sm">No recent rounds yet</div>
                         </div>
                       );
-                    }) : (
-                      <div className="text-center py-4 text-muted-foreground">
-                        <div className="text-sm">No recent rounds yet</div>
-                      </div>
-                    );
-                  })()}
+                    })()}
+                  </div>
                 </div>
               </div>
             </CardContent>

@@ -22,7 +22,51 @@ npm start
 
 # Run linter
 npm run lint
+
+# Run tests in watch mode
+npm test
+
+# Run tests once (for CI)
+npm run test:run
+
+# Run tests with visual UI
+npm run test:ui
+
+# Generate coverage report
+npm run test:coverage
 ```
+
+## Testing
+
+The project uses **Vitest** for unit testing with TypeScript support.
+
+### Test Structure
+- Test files are colocated with source files: `filename.test.ts`
+- Tests use Vitest's Jest-compatible API
+- Configuration in `vitest.config.ts`
+
+### Current Coverage
+- **X01 Game Logic** (`src/utils/x01.ts`): 100% coverage with 42 test cases
+  - Both single-out and double-out finish rules
+  - All bust scenarios (going below 0, landing on 1, non-double finish)
+  - Edge cases and boundary conditions
+
+### Writing Tests
+```typescript
+import { describe, it, expect } from 'vitest';
+
+describe('My Function', () => {
+  it('should handle expected case', () => {
+    const result = myFunction(input);
+    expect(result).toEqual(expectedOutput);
+  });
+});
+```
+
+### Running Tests During Development
+- Use `npm test` for watch mode - tests re-run on file changes
+- Use `npm run test:ui` for a visual interface to browse and run tests
+- Always run `npm run test:run` before committing to ensure all tests pass
 
 ## Database Operations
 

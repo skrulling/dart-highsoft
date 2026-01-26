@@ -9,15 +9,22 @@ import { buildCommentaryPrompt, buildMatchRecapPrompt } from '@/lib/commentary/p
 import { resolvePersona } from '@/lib/commentary/personas';
 import type { CommentaryPayload, MatchRecapPayload } from '@/lib/commentary/types';
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+// Lazy-load OpenAI client to avoid initialization errors during build
+let openaiClient: OpenAI | null = null;
+function getOpenAI(): OpenAI {
+  if (!openaiClient) {
+    openaiClient = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    });
+  }
+  return openaiClient;
+}
 
 type CommentaryRequestBody = (CommentaryPayload | MatchRecapPayload) & {
   personaId?: string;
 };
 
-type ResponsesResult = Awaited<ReturnType<typeof openai.responses.create>>;
+type ResponsesResult = Awaited<ReturnType<OpenAI['responses']['create']>>;
 
 export async function POST(request: NextRequest) {
   try {
@@ -60,6 +67,8 @@ export async function POST(request: NextRequest) {
 
     let commentary: string;
     let tokenUsage: unknown;
+
+    const openai = getOpenAI();
 
     if (modelConfig.kind === 'responses') {
       const completion = await openai.responses.create({

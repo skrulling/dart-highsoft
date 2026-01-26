@@ -1137,7 +1137,16 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     // Check for local turn first (our client's active turn)
     if (localTurn.playerId === playerId) {
       const sub = localTurn.darts.reduce((s, d) => s + d.scored, 0);
-      return Math.max(0, current - sub);
+      const lastTurn = playerStats.lastTurns[playerId];
+      const throwCount = lastTurn ? turnThrowCounts[lastTurn.id] || 0 : 0;
+      const isCurrentTurn = lastTurn && lastTurn.id === ongoingTurnRef.current?.turnId;
+      const hasSubtotalInTurn =
+        isCurrentTurn &&
+        throwCount > 0 &&
+        throwCount < 3 &&
+        typeof lastTurn.total_scored === 'number' &&
+        lastTurn.total_scored > 0;
+      return Math.max(0, current - (hasSubtotalInTurn ? 0 : sub));
     }
 
     // Check for incomplete turns from other clients
@@ -1474,6 +1483,9 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       }
       ongoingTurnRef.current.darts.pop();
       setLocalTurn((prev) => ({ playerId: prev.playerId, darts: prev.darts.slice(0, -1) }));
+      const newTotal = ongoingTurnRef.current.darts.reduce((sum, dart) => sum + dart.scored, 0);
+      await supabase.from('turns').update({ total_scored: newTotal, busted: false }).eq('id', turnId);
+      await loadAll();
       return;
     }
 

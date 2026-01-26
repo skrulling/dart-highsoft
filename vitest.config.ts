@@ -9,6 +9,8 @@ export default defineConfig({
 
     // Test file patterns
     include: ['**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'],
+    // Exclude Playwright E2E tests
+    exclude: ['**/node_modules/**', '**/e2e/**'],
 
     // Coverage configuration
     coverage: {

@@ -896,6 +896,19 @@ export default function MatchClient({ matchId }: { matchId: string }) {
 
     // Handle turn changes - hot update
     const handleTurnChange = async (event: CustomEvent) => {
+      // Race guard: throws can arrive immediately after a new turn is inserted.
+      // Add this turn id to our known set early so subsequent throw events for the same turn
+      // are not ignored before state catches up.
+      const payload = event.detail as { new?: { id?: string; leg_id?: string }; old?: { id?: string; leg_id?: string } };
+      const legId = payload?.new?.leg_id ?? payload?.old?.leg_id ?? null;
+      if (legId) {
+        const { knownLegIds, knownTurnIds } = latestStateRef.current;
+        if (knownLegIds.size === 0 || knownLegIds.has(legId)) {
+          const turnId = payload?.new?.id ?? payload?.old?.id ?? null;
+          if (turnId) knownTurnIds.add(turnId);
+        }
+      }
+
       // Use spectator logic for spectator mode, match UI logic for normal mode (use ref)
       if (latestStateRef.current.isSpectatorMode) {
         await handleThrowChange(event);
@@ -1153,7 +1166,10 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         // This player has an incomplete turn with throws from another client
         const currentThrows = (lastTurn as TurnWithThrows).throws || [];
         const incompleteTotal = currentThrows.reduce((sum: number, thr: ThrowRecord) => sum + thr.scored, 0);
-        current -= incompleteTotal;
+        // `playerStats.baseScores` already subtracts `turn.total_scored`. During undo/edit flows, we may
+        // persist the partial subtotal on the turn row, so only subtract the delta to reach `sum(throws)`.
+        const persistedSubtotal = typeof lastTurn.total_scored === 'number' ? lastTurn.total_scored : 0;
+        current -= incompleteTotal - persistedSubtotal;
       }
     }
 

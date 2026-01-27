@@ -102,11 +102,10 @@ test.describe('Match Undo/Edit Functionality', () => {
 
       // Throw three darts: 20, 20, 20
       await page.getByRole('button', { name: '20', exact: true }).click();
-      await expectHistoryCountAtLeast(page, 'S20', 1);
+      await expectMatchScore(page, PLAYER_NAMES.ONE, 281, { timeout: 10000 });
       await page.getByRole('button', { name: '20', exact: true }).click();
-      await expectHistoryCountAtLeast(page, 'S20', 2);
+      await expectMatchScore(page, PLAYER_NAMES.ONE, 261, { timeout: 10000 });
       await page.getByRole('button', { name: '20', exact: true }).click();
-      await expectHistoryCountAtLeast(page, 'S20', 3);
       await expectMatchScore(page, PLAYER_NAMES.ONE, 241, { timeout: 10000 });
 
       // Undo all three
@@ -219,7 +218,7 @@ test.describe('Match Undo/Edit Functionality', () => {
 
       // Throw a dart first
       await page.getByRole('button', { name: '20', exact: true }).click();
-      await expectHistoryCountAtLeast(page, 'S20', 1);
+      await expectScoreVisible(page, 281, { timeout: 15000 });
 
       // Open edit modal
       await page.getByRole('button', { name: 'Edit throws' }).click();
@@ -295,6 +294,109 @@ test.describe('Match Undo/Edit Functionality', () => {
 
       // Score should be recalculated (S20 + S20 + S19 = 59, so 301 - 59 = 242)
       await expectScoreVisible(page, 242, { timeout: 10000 });
+    });
+
+    test('editing multiple historical throws recalculates scores without changing the current player', async ({
+      page,
+      supabase,
+      createMatch,
+    }) => {
+      const { matchId, legId } = await createMatch({ startScore: 301, finish: 'double_out' });
+
+      // Seed a "mid-game" state with an incomplete current turn:
+      // - Several full turns have been played
+      // - Player One is currently Up and has thrown 2 darts in turn 5
+      const turn1 = await createTurn(supabase, legId, TEST_PLAYERS.ONE, 1);
+      await addThrowsToTurn(supabase, turn1.id, matchId, [
+        { segment: 'S20', scored: 20, dart_index: 1 },
+        { segment: 'S20', scored: 20, dart_index: 2 },
+        { segment: 'S20', scored: 20, dart_index: 3 },
+      ]);
+      await supabase.from('turns').update({ total_scored: 60, busted: false }).eq('id', turn1.id);
+
+      const turn2 = await createTurn(supabase, legId, TEST_PLAYERS.TWO, 2);
+      await addThrowsToTurn(supabase, turn2.id, matchId, [
+        { segment: 'S20', scored: 20, dart_index: 1 },
+        { segment: 'S20', scored: 20, dart_index: 2 },
+        { segment: 'S20', scored: 20, dart_index: 3 },
+      ]);
+      await supabase.from('turns').update({ total_scored: 60, busted: false }).eq('id', turn2.id);
+
+      const turn3 = await createTurn(supabase, legId, TEST_PLAYERS.ONE, 3);
+      await addThrowsToTurn(supabase, turn3.id, matchId, [
+        { segment: 'S20', scored: 20, dart_index: 1 },
+        { segment: 'S20', scored: 20, dart_index: 2 },
+        { segment: 'S20', scored: 20, dart_index: 3 },
+      ]);
+      await supabase.from('turns').update({ total_scored: 60, busted: false }).eq('id', turn3.id);
+
+      const turn4 = await createTurn(supabase, legId, TEST_PLAYERS.TWO, 4);
+      await addThrowsToTurn(supabase, turn4.id, matchId, [
+        { segment: 'S20', scored: 20, dart_index: 1 },
+        { segment: 'S20', scored: 20, dart_index: 2 },
+        { segment: 'S20', scored: 20, dart_index: 3 },
+      ]);
+      await supabase.from('turns').update({ total_scored: 60, busted: false }).eq('id', turn4.id);
+
+      const turn5 = await createTurn(supabase, legId, TEST_PLAYERS.ONE, 5);
+      await addThrowsToTurn(supabase, turn5.id, matchId, [
+        { segment: 'S20', scored: 20, dart_index: 1 },
+        { segment: 'S20', scored: 20, dart_index: 2 },
+      ]);
+      // Keep turn5 total_scored at 0 (the app typically only sets total_scored when a turn is completed).
+      // The UI should still show the subtotal via the throws list for incomplete turns.
+
+      await page.goto(`/match/${matchId}`);
+      await waitForMatchLoad(page);
+
+      await expectCurrentPlayer(page, PLAYER_NAMES.ONE);
+      // Player One has an incomplete turn (2 darts) so the UI includes the subtotal (40) in the displayed score.
+      await expectMatchScore(page, PLAYER_NAMES.ONE, 141, { timeout: 15000 });
+      await expectMatchScore(page, PLAYER_NAMES.TWO, 181, { timeout: 15000 });
+
+      // Edit TWO throws "a couple rounds back": change the first two S20s in the leg (turn 1)
+      // into T20, which should pull Player One's current score down from 141 -> 61.
+      await page.getByRole('button', { name: 'Edit throws' }).click();
+      const modal = page.locator('div.fixed.inset-0').filter({ hasText: 'Edit throws' }).first();
+      await expect(modal).toBeVisible({ timeout: 10000 });
+
+      await expect(modal.getByText('Turn 1', { exact: true })).toBeVisible({ timeout: 15000 });
+
+      const turn1Section = modal.getByText('Turn 1', { exact: true }).locator('..').locator('..');
+      const turn1DartButton = (dartIndex: number) =>
+        turn1Section.getByText(`Dart ${dartIndex}`, { exact: true }).locator('..');
+      const turn1DartSegment = (dartIndex: number) =>
+        turn1DartButton(dartIndex).locator('div.font-mono');
+
+      await expect(turn1DartSegment(1)).toHaveText('S20', { timeout: 15000 });
+      await expect(turn1DartSegment(2)).toHaveText('S20', { timeout: 15000 });
+
+      // Change historical throw Turn 1 / Dart 1: S20 -> T20.
+      await turn1DartButton(1).click();
+      await expect(modal.getByText('Select a new segment:', { exact: true })).toBeVisible({ timeout: 15000 });
+      await modal.getByRole('button', { name: 'Triple' }).click();
+      await modal.getByRole('button', { name: '20', exact: true }).click();
+      await expect(turn1DartSegment(1)).toHaveText('T20', { timeout: 15000 });
+
+      // After an edit, the modal reloads and clears selection.
+      await expect(modal.getByText('Select a throw above to edit')).toBeVisible({ timeout: 15000 });
+
+      // Change historical throw Turn 1 / Dart 2: S20 -> T20.
+      await turn1DartButton(2).click();
+      await expect(modal.getByText('Select a new segment:', { exact: true })).toBeVisible({ timeout: 15000 });
+      await modal.getByRole('button', { name: 'Triple' }).click();
+      await modal.getByRole('button', { name: '20', exact: true }).click();
+      await expect(turn1DartSegment(2)).toHaveText('T20', { timeout: 15000 });
+
+      // Close modal and verify:
+      // - Current player stays Player One (incomplete turn still theirs)
+      // - Scores are recalculated from the edited history
+      await page.keyboard.press('Escape');
+
+      await expectCurrentPlayer(page, PLAYER_NAMES.ONE);
+      await expectMatchScore(page, PLAYER_NAMES.ONE, 61, { timeout: 15000 });
+      await expectMatchScore(page, PLAYER_NAMES.TWO, 181, { timeout: 15000 });
+      await expect(page.getByText('61 pts', { exact: true }).first()).toBeVisible({ timeout: 15000 });
     });
   });
 

@@ -683,4 +683,130 @@ describe('undo/edit scenarios', () => {
       expect(editedResult.turns[1].busted).toBe(true);
     });
   });
+
+  describe('editing multiple throws several rounds back', () => {
+    it('recalculates later turn scores and bust status correctly (multi-player, long leg)', () => {
+      // Scenario:
+      // - Two players have played several rounds.
+      // - We edit TWO darts in an earlier turn (turn 3) for player-1.
+      // - That changes player-1's later starting scores enough that a later turn (turn 7)
+      //   now busts by landing on 1 in double-out.
+      const playerIds = ['player-1', 'player-2'];
+
+      const turnsBefore: TurnData[] = [
+        {
+          id: 'turn-1',
+          player_id: 'player-1',
+          turn_number: 1,
+          throws: [
+            { segment: 'S20', scored: 20, dart_index: 1 },
+            { segment: 'S20', scored: 20, dart_index: 2 },
+            { segment: 'S20', scored: 20, dart_index: 3 },
+          ],
+        },
+        {
+          id: 'turn-2',
+          player_id: 'player-2',
+          turn_number: 2,
+          throws: [
+            { segment: 'S20', scored: 20, dart_index: 1 },
+            { segment: 'S20', scored: 20, dart_index: 2 },
+            { segment: 'S20', scored: 20, dart_index: 3 },
+          ],
+        },
+        {
+          id: 'turn-3',
+          player_id: 'player-1',
+          turn_number: 3,
+          throws: [
+            { segment: 'S20', scored: 20, dart_index: 1 },
+            { segment: 'S20', scored: 20, dart_index: 2 },
+            { segment: 'S20', scored: 20, dart_index: 3 },
+          ],
+        },
+        {
+          id: 'turn-4',
+          player_id: 'player-2',
+          turn_number: 4,
+          throws: [
+            { segment: 'S20', scored: 20, dart_index: 1 },
+            { segment: 'S20', scored: 20, dart_index: 2 },
+            { segment: 'S20', scored: 20, dart_index: 3 },
+          ],
+        },
+        {
+          id: 'turn-5',
+          player_id: 'player-1',
+          turn_number: 5,
+          throws: [
+            { segment: 'S20', scored: 20, dart_index: 1 },
+            { segment: 'S20', scored: 20, dart_index: 2 },
+            { segment: 'Miss', scored: 0, dart_index: 3 },
+          ],
+        },
+        {
+          id: 'turn-6',
+          player_id: 'player-2',
+          turn_number: 6,
+          throws: [
+            { segment: 'S20', scored: 20, dart_index: 1 },
+            { segment: 'S20', scored: 20, dart_index: 2 },
+            { segment: 'S20', scored: 20, dart_index: 3 },
+          ],
+        },
+        {
+          id: 'turn-7',
+          player_id: 'player-1',
+          turn_number: 7,
+          throws: [
+            { segment: 'S20', scored: 20, dart_index: 1 },
+            { segment: 'S20', scored: 20, dart_index: 2 },
+            { segment: 'S20', scored: 20, dart_index: 3 },
+          ],
+        },
+      ];
+
+      const before = replayLeg(turnsBefore, playerIds, 301, 'double_out');
+
+      expect(before.legWinnerId).toBeNull();
+      expect(before.playerScores.get('player-1')).toBe(81);
+      expect(before.playerScores.get('player-2')).toBe(121);
+
+      const turn7Before = before.turns.find((t) => t.id === 'turn-7');
+      expect(turn7Before?.busted).toBe(false);
+      expect(turn7Before?.total_scored).toBe(60);
+      expect(turn7Before?.score_after).toBe(81);
+
+      // Edit 2 throws in player-1's turn-3: S20,S20,S20 -> T20,T20,S20 (60+60+20 = 140)
+      const turnsAfter: TurnData[] = turnsBefore.map((t) =>
+        t.id === 'turn-3'
+          ? {
+              ...t,
+              throws: [
+                { segment: 'T20', scored: 60, dart_index: 1 },
+                { segment: 'T20', scored: 60, dart_index: 2 },
+                { segment: 'S20', scored: 20, dart_index: 3 },
+              ],
+            }
+          : t
+      );
+
+      const after = replayLeg(turnsAfter, playerIds, 301, 'double_out');
+
+      expect(after.legWinnerId).toBeNull();
+      // player-2 unaffected by player-1 edits
+      expect(after.playerScores.get('player-2')).toBe(121);
+      // player-1 now busts on turn-7 by landing on 1 (double-out), so score reverts to 61
+      expect(after.playerScores.get('player-1')).toBe(61);
+
+      const turn5After = after.turns.find((t) => t.id === 'turn-5');
+      expect(turn5After?.busted).toBe(false);
+      expect(turn5After?.score_after).toBe(61);
+
+      const turn7After = after.turns.find((t) => t.id === 'turn-7');
+      expect(turn7After?.busted).toBe(true);
+      expect(turn7After?.total_scored).toBe(0);
+      expect(turn7After?.score_after).toBe(61);
+    });
+  });
 });

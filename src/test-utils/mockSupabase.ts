@@ -79,6 +79,7 @@ type MockBuilder = {
   eq: (column: string, value: unknown) => MockBuilder;
   in: (column: string, values: unknown[]) => MockBuilder;
   order: (column: string, options?: { ascending?: boolean }) => MockBuilder;
+  limit: (count: number) => MockBuilder;
   single: () => Promise<SupabaseResponse>;
   maybeSingle: () => Promise<SupabaseResponse>;
   then: <TResult1 = SupabaseResponse, TResult2 = never>(
@@ -91,7 +92,7 @@ type MockBuilder = {
   finally: (onFinally?: (() => void) | null) => Promise<SupabaseResponse>;
   insert: (payload: unknown | unknown[]) => MockBuilder;
   update: (values: Record<string, unknown>) => MockBuilder;
-  delete: () => Promise<SupabaseResponse>;
+  delete: () => MockBuilder;
 };
 
 // Query logging
@@ -114,6 +115,7 @@ const clone = <T>(value: T): T => structuredClone(value);
 export const createQueryBuilder = (mockDb: MockDb, table: keyof MockDb): MockBuilder => {
   const filters: FilterFn[] = [];
   let order: OrderState | null = null;
+  let limitCount: number | null = null;
   let selectQuery = '';
 
   const buildRows = () => {
@@ -140,6 +142,9 @@ export const createQueryBuilder = (mockDb: MockDb, table: keyof MockDb): MockBui
         return 0;
       });
     }
+    if (typeof limitCount === 'number') {
+      rows = rows.slice(0, limitCount);
+    }
     return rows;
   };
 
@@ -153,19 +158,23 @@ export const createQueryBuilder = (mockDb: MockDb, table: keyof MockDb): MockBui
     select(query: string) {
       selectQuery = query ?? '';
       recordQuery(table, 'select', selectQuery);
-      return builder;
+      return this;
     },
     eq(column: string, value: unknown) {
       filters.push((row) => row[column] === value);
-      return builder;
+      return this;
     },
     in(column: string, values: unknown[]) {
       filters.push((row) => values.includes(row[column]));
-      return builder;
+      return this;
     },
     order(column: string, options?: { ascending?: boolean }) {
       order = { column, ascending: options?.ascending !== false };
-      return builder;
+      return this;
+    },
+    limit(count: number) {
+      limitCount = count;
+      return this;
     },
     single() {
       return Promise.resolve(buildSingleResponse());
@@ -198,16 +207,19 @@ export const createQueryBuilder = (mockDb: MockDb, table: keyof MockDb): MockBui
 
       const insertBuilder: MockBuilder = {
         select() {
-          return insertBuilder;
+          return this;
         },
         eq() {
-          return insertBuilder;
+          return this;
         },
         in() {
-          return insertBuilder;
+          return this;
         },
         order() {
-          return insertBuilder;
+          return this;
+        },
+        limit() {
+          return this;
         },
         single() {
           return Promise.resolve({ data: insertedRecords[0] ?? null, error: null });
@@ -225,13 +237,13 @@ export const createQueryBuilder = (mockDb: MockDb, table: keyof MockDb): MockBui
           return Promise.resolve(response).finally(onFinally ?? undefined);
         },
         insert() {
-          return insertBuilder;
+          return this;
         },
         update() {
-          return insertBuilder;
+          return this;
         },
         delete() {
-          return Promise.resolve(response);
+          return this;
         },
       };
 
@@ -254,19 +266,36 @@ export const createQueryBuilder = (mockDb: MockDb, table: keyof MockDb): MockBui
     },
     delete() {
       recordQuery(table, 'delete');
-      const dataset = mockDb[table] as TableRow[];
-      const keep: TableRow[] = [];
-      const removed: TableRow[] = [];
-      dataset.forEach((row) => {
-        if (filters.every((fn) => fn(row))) {
-          removed.push(row);
-        } else {
-          keep.push(row);
-        }
-      });
-      dataset.length = 0;
-      dataset.push(...keep);
-      return Promise.resolve({ data: removed, error: null });
+      const deleteBuilder = { ...builder };
+      deleteBuilder.then = (onFulfilled, onRejected) => {
+        const dataset = mockDb[table] as TableRow[];
+        const keep: TableRow[] = [];
+        const removed: TableRow[] = [];
+        dataset.forEach((row) => {
+          if (filters.every((fn) => fn(row))) {
+            removed.push(row);
+          } else {
+            keep.push(row);
+          }
+        });
+        dataset.length = 0;
+        dataset.push(...keep);
+        return Promise.resolve({ data: removed.map((row) => clone(row)), error: null } as SupabaseResponse).then(
+          onFulfilled,
+          onRejected
+        );
+      };
+      deleteBuilder.catch = (onRejected) => {
+        return (deleteBuilder.then as unknown as MockBuilder['then'])(null, onRejected) as unknown as Promise<
+          SupabaseResponse
+        >;
+      };
+      deleteBuilder.finally = (onFinally) => {
+        return (deleteBuilder.then as unknown as MockBuilder['then'])(null, null).finally(onFinally ?? undefined) as unknown as Promise<
+          SupabaseResponse
+        >;
+      };
+      return deleteBuilder;
     },
   };
 

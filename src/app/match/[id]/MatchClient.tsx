@@ -221,9 +221,18 @@ export default function MatchClient({ matchId }: { matchId: string }) {
           `)
           .eq('leg_id', currentLeg.id)
           .order('turn_number');
-        setTurns(((tns ?? []) as TurnRecord[]).sort((a, b) => a.turn_number - b.turn_number));
+        const sortedTurns = ((tns ?? []) as TurnWithThrows[]).sort((a, b) => a.turn_number - b.turn_number);
+        setTurns(sortedTurns as unknown as TurnRecord[]);
+        // Derive throw counts from the loaded turns so current-player logic stays correct
+        // even when realtime events are delayed/disconnected.
+        const throwCounts: Record<string, number> = {};
+        for (const turn of sortedTurns) {
+          throwCounts[turn.id] = (turn.throws ?? []).length;
+        }
+        setTurnThrowCounts(throwCounts);
       } else {
         setTurns([]);
+        setTurnThrowCounts({});
       }
 
       // Load turns for all legs to compute per-leg averages
@@ -283,9 +292,18 @@ export default function MatchClient({ matchId }: { matchId: string }) {
           `)
           .eq('leg_id', currentLeg.id)
           .order('turn_number');
-        if (tns) setTurns(((tns ?? []) as TurnRecord[]).sort((a, b) => a.turn_number - b.turn_number));
+        if (tns) {
+          const sortedTurns = ((tns ?? []) as TurnWithThrows[]).sort((a, b) => a.turn_number - b.turn_number);
+          setTurns(sortedTurns as unknown as TurnRecord[]);
+          const throwCounts: Record<string, number> = {};
+          for (const turn of sortedTurns) {
+            throwCounts[turn.id] = (turn.throws ?? []).length;
+          }
+          setTurnThrowCounts(throwCounts);
+        }
       } else {
         setTurns([]);
+        setTurnThrowCounts({});
       }
 
       // Load turns for all legs to compute per-leg averages
@@ -306,29 +324,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         setTurnsByLeg({});
       }
 
-      // Count throws per turn to determine current player correctly
-      const { data: allCurrentLegThrows } = await supabase
-          .from('throws')
-          .select(`
-            turn_id,
-            turns!inner (
-              id,
-              player_id,
-              turn_number,
-              leg_id
-            )
-          `)
-          .eq('turns.leg_id', currentLeg.id)
-          .order('turn_number', { foreignTable: 'turns' });
-
-        if (allCurrentLegThrows) {
-          const throwCountsByTurn: Record<string, number> = {};
-          for (const throwData of allCurrentLegThrows as unknown as { turn_id: string; turns: { id: string; player_id: string; turn_number: number; leg_id: string; } }[]) {
-            const turnId = throwData.turns.id;
-            throwCountsByTurn[turnId] = (throwCountsByTurn[turnId] || 0) + 1;
-          }
-          setTurnThrowCounts(throwCountsByTurn);
-        }
+      // NOTE: throw counts are derived from the loaded turns above to avoid extra queries.
     } catch (e) {
       console.error('Spectator mode refresh error:', e);
       // Don't set error state in spectator mode to avoid disrupting the view
@@ -1468,6 +1464,28 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   async function undoLastThrow() {
     if (!currentLeg) return;
     const supabase = await getSupabaseClient();
+    // If we have an empty local turn (no darts), remove it before undoing previous throws
+    if (ongoingTurnRef.current && ongoingTurnRef.current.darts.length === 0) {
+      const emptyTurnId = ongoingTurnRef.current.turnId;
+      const { data: existingThrows, error: emptyErr } = await supabase
+        .from('throws')
+        .select('id')
+        .eq('turn_id', emptyTurnId)
+        .limit(1);
+      if (emptyErr) {
+        alert(`Failed to check empty turn: ${emptyErr.message}`);
+        return;
+      }
+      if (!existingThrows || existingThrows.length === 0) {
+        const { error: delTurnErr } = await supabase.from('turns').delete().eq('id', emptyTurnId);
+        if (delTurnErr) {
+          alert(`Failed to remove empty turn: ${delTurnErr.message}`);
+          return;
+        }
+        ongoingTurnRef.current = null;
+        setLocalTurn({ playerId: null, darts: [] });
+      }
+    }
     // If we have local darts in the ongoing turn, remove last one
     if (ongoingTurnRef.current && ongoingTurnRef.current.darts.length > 0) {
       const turnId = ongoingTurnRef.current.turnId;
@@ -1490,20 +1508,38 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     }
 
     // Otherwise, remove the last persisted throw in the current leg
-    const { data: lastList, error: qErr } = await supabase
-      .from('throws')
-      .select('id, turn_id, dart_index, segment, scored, turns:turn_id!inner(leg_id, player_id, turn_number)')
-      .eq('turns.leg_id', currentLeg.id)
-      .order('turn_number', { ascending: false, foreignTable: 'turns' })
-      .order('dart_index', { ascending: false })
-      .limit(1);
-    if (qErr) {
-      alert(`Failed to query last throw: ${qErr.message}`);
+    const { data: legTurns, error: turnsErr } = await supabase
+      .from('turns')
+      .select('id, player_id, turn_number')
+      .eq('leg_id', currentLeg.id)
+      .order('turn_number', { ascending: false });
+    if (turnsErr) {
+      alert(`Failed to query turns: ${turnsErr.message}`);
       return;
     }
-    const last = ((lastList ?? [])[0] as unknown) as
+    let last:
       | { id: string; turn_id: string; dart_index: number; segment: string; scored: number; turns: { leg_id: string; player_id: string; turn_number: number } }
       | undefined;
+    for (const t of legTurns ?? []) {
+      const { data: thrRows, error: thrErr } = await supabase
+        .from('throws')
+        .select('id, turn_id, dart_index, segment, scored')
+        .eq('turn_id', t.id)
+        .order('dart_index', { ascending: false })
+        .limit(1);
+      if (thrErr) {
+        alert(`Failed to query last throw: ${thrErr.message}`);
+        return;
+      }
+      if (thrRows && thrRows.length > 0) {
+        const thr = thrRows[0];
+        last = {
+          ...thr,
+          turns: { leg_id: currentLeg.id, player_id: t.player_id, turn_number: t.turn_number },
+        };
+        break;
+      }
+    }
     if (!last) return; // nothing to undo
 
     const { error: delErr2 } = await supabase.from('throws').delete().eq('id', last.id);
@@ -1525,9 +1561,22 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     }));
 
     if (darts.length === 0) {
-      // Delete empty turn
+      // If undoing the current player's only throw, keep the turn open with 0 darts
+      if (currentPlayer?.id === last.turns.player_id) {
+        await supabase.from('turns').update({ total_scored: 0, busted: false }).eq('id', last.turn_id);
+        ongoingTurnRef.current = {
+          turnId: last.turn_id,
+          playerId: last.turns.player_id,
+          darts: [],
+          startScore: getScoreForPlayer(last.turns.player_id),
+        };
+        setLocalTurn({ playerId: last.turns.player_id, darts: [] });
+        await loadAll();
+        return;
+      }
+
+      // Otherwise delete empty turn and reopen previous player's turn
       await supabase.from('turns').delete().eq('id', last.turn_id);
-      // After removing an entire turn, compute whose turn it should be and reopen if it's the previous player's turn
       await loadAll();
       const prevLeg = (legs ?? []).find((l) => !l.winner_player_id) ?? legs[legs.length - 1];
       if (!prevLeg) return;

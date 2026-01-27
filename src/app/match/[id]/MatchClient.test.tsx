@@ -14,6 +14,7 @@
 
 import React from 'react';
 import { render, screen, cleanup } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { vi, describe, beforeEach, beforeAll, it, expect } from 'vitest';
 import {
   createTwoPlayerGameSetup,
@@ -203,6 +204,87 @@ describe('MatchClient', () => {
 
       const liveIndicator = await screen.findByText('Live Match');
       expect(liveIndicator).toBeDefined();
+
+      view.unmount();
+    });
+  });
+
+  describe('turn rotation (game state)', () => {
+    it('shows the next player after a completed 3-dart turn (even without realtime events)', async () => {
+      // Setup: Player One has completed a full 3-dart turn, so it should now be Player Two's turn.
+      mockDb.turns = [
+        {
+          id: 'turn-1',
+          leg_id: 'leg-1',
+          player_id: 'player-1',
+          turn_number: 1,
+          total_scored: 60,
+          busted: false,
+        },
+      ];
+      mockDb.throws = [
+        { id: 'throw-1', turn_id: 'turn-1', dart_index: 1, segment: 'S20', scored: 20, match_id: 'match-1' },
+        { id: 'throw-2', turn_id: 'turn-1', dart_index: 2, segment: 'S20', scored: 20, match_id: 'match-1' },
+        { id: 'throw-3', turn_id: 'turn-1', dart_index: 3, segment: 'S20', scored: 20, match_id: 'match-1' },
+      ];
+
+      // Make sure we don't rely on realtime updates to derive throw counts.
+      mockRealtime.isConnected = false;
+      mockRealtime.connectionStatus = 'offline';
+
+      const view = render(<MatchClient matchId="match-1" />);
+
+      // Wait for main UI to render
+      await screen.findAllByText('Undo dart');
+
+      // Current-player badge should reflect Player Two (start score 501)
+      const badges = await screen.findAllByText('501 pts');
+      expect(badges.length).toBeGreaterThan(0);
+      for (const badge of badges) {
+        expect(badge.parentElement?.textContent).toContain('Player Two');
+      }
+
+      view.unmount();
+    });
+
+    it('switches back to the previous player after undo makes the last turn incomplete', async () => {
+      // Setup: Player One has completed a full 3-dart turn, so it should now be Player Two's turn.
+      mockDb.turns = [
+        {
+          id: 'turn-1',
+          leg_id: 'leg-1',
+          player_id: 'player-1',
+          turn_number: 1,
+          total_scored: 60,
+          busted: false,
+        },
+      ];
+      mockDb.throws = [
+        { id: 'throw-1', turn_id: 'turn-1', dart_index: 1, segment: 'S20', scored: 20, match_id: 'match-1' },
+        { id: 'throw-2', turn_id: 'turn-1', dart_index: 2, segment: 'S20', scored: 20, match_id: 'match-1' },
+        { id: 'throw-3', turn_id: 'turn-1', dart_index: 3, segment: 'S20', scored: 20, match_id: 'match-1' },
+      ];
+
+      // Make sure we don't rely on realtime updates to derive throw counts.
+      mockRealtime.isConnected = false;
+      mockRealtime.connectionStatus = 'offline';
+
+      const user = userEvent.setup();
+      const view = render(<MatchClient matchId="match-1" />);
+
+      // Initially: it's Player Two with full start score.
+      await screen.findAllByText('Undo dart');
+      await screen.findAllByText('501 pts');
+
+      // Undo last dart: Player One's turn becomes incomplete (2 darts), so turn should switch back.
+      const undoButtons = screen.getAllByText('Undo dart');
+      await user.click(undoButtons[0]!);
+
+      const badges = await screen.findAllByText('461 pts');
+      expect(badges.length).toBeGreaterThan(0);
+      for (const badge of badges) {
+        expect(badge.parentElement?.textContent).toContain('Player One');
+      }
 
       view.unmount();
     });

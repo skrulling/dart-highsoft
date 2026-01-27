@@ -156,39 +156,37 @@ test.describe('Match Undo/Edit Functionality', () => {
       await expectScoreVisible(page, 301, { timeout: 5000 });
     });
 
-    test('can undo across turn boundaries', async ({ page, createMatch }) => {
-      const { matchId } = await createMatch({ startScore: 301 });
+    test('can undo across turn boundaries', async ({ page, supabase, createMatch }) => {
+      const { matchId, legId } = await createMatch({ startScore: 301 });
+
+      const turn1 = await createTurn(supabase, legId, TEST_PLAYERS.ONE, 1);
+      await addThrowsToTurn(supabase, turn1.id, matchId, [
+        { segment: 'S20', scored: 20, dart_index: 1 },
+        { segment: 'S20', scored: 20, dart_index: 2 },
+        { segment: 'S20', scored: 20, dart_index: 3 },
+      ]);
+      await supabase.from('turns').update({ total_scored: 60, busted: false }).eq('id', turn1.id);
+
+      const turn2 = await createTurn(supabase, legId, TEST_PLAYERS.TWO, 2);
+      await addThrowsToTurn(supabase, turn2.id, matchId, [
+        { segment: 'S19', scored: 19, dart_index: 1 },
+      ]);
+      await supabase.from('turns').update({ total_scored: 0, busted: false }).eq('id', turn2.id);
+
       await page.goto(`/match/${matchId}`);
-
-      await waitForMatchLoad(page);
-
-      // Player 1 throws 3 darts to complete turn
-      await page.getByRole('button', { name: '20', exact: true }).click();
-      await expectHistoryCountAtLeast(page, 'S20', 1);
-      await page.getByRole('button', { name: '20', exact: true }).click();
-      await expectHistoryCountAtLeast(page, 'S20', 2);
-      await page.getByRole('button', { name: '20', exact: true }).click();
-      await expectHistoryCountAtLeast(page, 'S20', 3);
-
-      // Now it should be Player 2's turn
       await expectCurrentPlayer(page, PLAYER_NAMES.TWO);
 
-      // Player 2 throws 1 dart
-      await page.getByRole('button', { name: '19', exact: true }).click();
-      await expectScoreVisible(page, 282, { timeout: 10000 });
-      await expectCurrentPlayer(page, PLAYER_NAMES.TWO);
-
-      // Undo should revert Player 2's dart
+      // Undo should keep Player 2 as current (0 darts now)
       await page.getByRole('button', { name: 'Undo dart' }).click();
       await expectCurrentPlayer(page, PLAYER_NAMES.TWO);
+      await expectHistoryCount(page, 'S19', 0);
 
-      // Undo again should go back to Player 1's turn (their 3rd dart)
+      // Undo again should go back to Player 1 with two darts remaining
       await page.getByRole('button', { name: 'Undo dart' }).click();
-
-      // Now current player should be Player 1 again
       await expectCurrentPlayer(page, PLAYER_NAMES.ONE);
-      await expectHistoryCountAtLeast(page, 'S20', 2);
+      await expectHistoryCount(page, 'S20', 2);
     });
+
 
     test('undo handles bust correctly', async ({ page, supabase, createMatch }) => {
       const { matchId, legId } = await createMatch({ startScore: 201, finish: 'double_out' });
@@ -264,20 +262,19 @@ test.describe('Match Undo/Edit Functionality', () => {
       await page.keyboard.press('Escape');
     });
 
-    test('can edit a throw from edit modal', async ({ page, createMatch }) => {
-      const { matchId } = await createMatch({ startScore: 301 });
+    test('can edit a throw from edit modal', async ({ page, supabase, createMatch }) => {
+      const { matchId, legId } = await createMatch({ startScore: 301 });
+
+      const turn = await createTurn(supabase, legId, TEST_PLAYERS.ONE, 1);
+      await addThrowsToTurn(supabase, turn.id, matchId, [
+        { segment: 'S20', scored: 20, dart_index: 1 },
+        { segment: 'S20', scored: 20, dart_index: 2 },
+        { segment: 'S20', scored: 20, dart_index: 3 },
+      ]);
+      await supabase.from('turns').update({ total_scored: 60 }).eq('id', turn.id);
+
       await page.goto(`/match/${matchId}`);
-
       await waitForMatchLoad(page);
-
-      // Throw 3 darts: 20, 20, 20 = 60 total
-      await page.getByRole('button', { name: '20', exact: true }).click();
-      await expectHistoryCountAtLeast(page, 'S20', 1);
-      await page.getByRole('button', { name: '20', exact: true }).click();
-      await expectHistoryCountAtLeast(page, 'S20', 2);
-      await page.getByRole('button', { name: '20', exact: true }).click();
-
-      await expectHistoryCountAtLeast(page, 'S20', 3);
 
       // Open edit modal
       await page.getByRole('button', { name: 'Edit throws' }).click();

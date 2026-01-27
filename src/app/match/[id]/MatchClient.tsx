@@ -39,53 +39,23 @@ import { resolvePersona } from '@/lib/commentary/personas';
 import type { CommentaryPersonaId, PlayerStats } from '@/lib/commentary/types';
 import { generateCommentary, generateMatchRecap, type CommentaryContext, CommentaryDebouncer } from '@/services/commentaryService';
 import { getTTSService, type VoiceOption } from '@/services/ttsService';
-
-type Player = { id: string; display_name: string };
-
-type MatchRecord = {
-  id: string;
-  mode: 'x01';
-  start_score: '201' | '301' | '501';
-  finish: FinishRule;
-  legs_to_win: number;
-  ended_early?: boolean;
-};
-
-type LegRecord = {
-  id: string;
-  match_id: string;
-  leg_number: number;
-  starting_player_id: string;
-  winner_player_id: string | null;
-};
-
-type TurnRecord = {
-  id: string;
-  leg_id: string;
-  player_id: string;
-  turn_number: number;
-  total_scored: number;
-  busted: boolean;
-};
-
-type MatchPlayersRow = {
-  match_id: string;
-  player_id: string;
-  play_order: number;
-  players: Player;
-};
-
-type ThrowRecord = {
-  id: string;
-  turn_id: string;
-  dart_index: number;
-  segment: string;
-  scored: number;
-};
-
-type TurnWithThrows = TurnRecord & {
-  throws: ThrowRecord[];
-};
+import type {
+  LegRecord,
+  MatchPlayersRow,
+  MatchRecord,
+  Player,
+  ThrowRecord,
+  TurnRecord,
+  TurnWithThrows,
+} from '@/lib/match/types';
+import { loadMatchData } from '@/lib/match/loadMatchData';
+import {
+  PendingThrowBuffer,
+  getRealtimePayloadLegId,
+  getRealtimePayloadTurnId,
+  shouldIgnoreRealtimePayload,
+  type RealtimePayload,
+} from '@/lib/match/realtime';
 
 export default function MatchClient({ matchId }: { matchId: string }) {
   const router = useRouter();
@@ -190,146 +160,64 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   // Real-time connection
   const realtime = useRealtime(matchId);
   const realtimeEnabled = true; // For now, always enabled
+  const realtimeIsConnected = realtime.isConnected;
+  const realtimeConnectionStatus = realtime.connectionStatus;
+  const realtimeUpdatePresence = realtime.updatePresence;
+
+  const loadAllRequestIdRef = useRef(0);
+  const loadAllSpectatorRequestIdRef = useRef(0);
 
   const loadAll = useCallback(async () => {
+    const requestId = ++loadAllRequestIdRef.current;
     setLoading(true);
     setError(null);
     try {
       const supabase = await getSupabaseClient();
-      const { data: m } = await supabase.from('matches').select('*').eq('id', matchId).single();
-      setMatch(m as MatchRecord);
+      const result = await loadMatchData(supabase, matchId);
 
-      const { data: mp } = await supabase
-        .from('match_players')
-        .select('*, players:player_id(*)')
-        .eq('match_id', matchId)
-        .order('play_order');
-      const flatPlayers = ((mp as MatchPlayersRow[] | null) ?? []).map((r) => r.players);
-      setPlayers(flatPlayers);
+      if (requestId !== loadAllRequestIdRef.current) return;
 
-      const { data: lgs } = await supabase.from('legs').select('*').eq('match_id', matchId).order('leg_number');
-      const legsTyped = (lgs ?? []) as LegRecord[];
-      setLegs(legsTyped);
-
-      const currentLeg = legsTyped.find((l) => !l.winner_player_id) || legsTyped[legsTyped.length - 1];
-      if (currentLeg) {
-        const { data: tns } = await supabase
-          .from('turns')
-          .select(`
-            *,
-            throws:throws(id, turn_id, dart_index, segment, scored)
-          `)
-          .eq('leg_id', currentLeg.id)
-          .order('turn_number');
-        const sortedTurns = ((tns ?? []) as TurnWithThrows[]).sort((a, b) => a.turn_number - b.turn_number);
-        setTurns(sortedTurns as unknown as TurnRecord[]);
-        // Derive throw counts from the loaded turns so current-player logic stays correct
-        // even when realtime events are delayed/disconnected.
-        const throwCounts: Record<string, number> = {};
-        for (const turn of sortedTurns) {
-          throwCounts[turn.id] = (turn.throws ?? []).length;
-        }
-        setTurnThrowCounts(throwCounts);
-      } else {
-        setTurns([]);
-        setTurnThrowCounts({});
-      }
-
-      // Load turns for all legs to compute per-leg averages
-      if (legsTyped.length > 0) {
-        const legIds = legsTyped.map((l) => l.id);
-        const { data: allTurns } = await supabase
-          .from('turns')
-          .select('*')
-          .in('leg_id', legIds)
-          .order('turn_number');
-        const grouped: Record<string, TurnRecord[]> = {};
-        for (const t of ((allTurns ?? []) as TurnRecord[])) {
-          if (!grouped[t.leg_id]) grouped[t.leg_id] = [];
-          grouped[t.leg_id].push(t);
-        }
-        setTurnsByLeg(grouped);
-      } else {
-        setTurnsByLeg({});
-      }
+      setMatch(result.match);
+      setPlayers(result.players);
+      setLegs(result.legs);
+      setTurns(result.turns);
+      setTurnThrowCounts(result.turnThrowCounts);
+      setTurnsByLeg(result.turnsByLeg);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Unknown error';
       setError(msg);
     } finally {
-      setLoading(false);
+      if (requestId === loadAllRequestIdRef.current) {
+        setLoading(false);
+      }
     }
   }, [matchId]);
 
   // Separate loading function for spectator mode that doesn't show loading screen
   const loadAllSpectator = useCallback(async () => {
+    const requestId = ++loadAllSpectatorRequestIdRef.current;
     setSpectatorLoading(true);
     try {
       const supabase = await getSupabaseClient();
-      const { data: m } = await supabase.from('matches').select('*').eq('id', matchId).single();
-      if (m) setMatch(m as MatchRecord);
+      const result = await loadMatchData(supabase, matchId);
 
-      const { data: mp } = await supabase
-        .from('match_players')
-        .select('*, players:player_id(*)')
-        .eq('match_id', matchId)
-        .order('play_order');
-      if (mp) {
-        const flatPlayers = ((mp as MatchPlayersRow[] | null) ?? []).map((r) => r.players);
-        setPlayers(flatPlayers);
-      }
+      if (requestId !== loadAllSpectatorRequestIdRef.current) return;
 
-      const { data: lgs } = await supabase.from('legs').select('*').eq('match_id', matchId).order('leg_number');
-      const legsTyped = (lgs ?? []) as LegRecord[];
-      if (lgs) setLegs(legsTyped);
-
-      const currentLeg = legsTyped.find((l) => !l.winner_player_id) || legsTyped[legsTyped.length - 1];
-      if (currentLeg) {
-        const { data: tns } = await supabase
-          .from('turns')
-          .select(`
-            *,
-            throws:throws(id, turn_id, dart_index, segment, scored)
-          `)
-          .eq('leg_id', currentLeg.id)
-          .order('turn_number');
-        if (tns) {
-          const sortedTurns = ((tns ?? []) as TurnWithThrows[]).sort((a, b) => a.turn_number - b.turn_number);
-          setTurns(sortedTurns as unknown as TurnRecord[]);
-          const throwCounts: Record<string, number> = {};
-          for (const turn of sortedTurns) {
-            throwCounts[turn.id] = (turn.throws ?? []).length;
-          }
-          setTurnThrowCounts(throwCounts);
-        }
-      } else {
-        setTurns([]);
-        setTurnThrowCounts({});
-      }
-
-      // Load turns for all legs to compute per-leg averages
-      if (legsTyped.length > 0) {
-        const legIds = legsTyped.map((l) => l.id);
-        const { data: allTurns } = await supabase
-          .from('turns')
-          .select('*')
-          .in('leg_id', legIds)
-          .order('turn_number');
-        const grouped: Record<string, TurnRecord[]> = {};
-        for (const t of ((allTurns ?? []) as TurnRecord[])) {
-          if (!grouped[t.leg_id]) grouped[t.leg_id] = [];
-          grouped[t.leg_id].push(t);
-        }
-        setTurnsByLeg(grouped);
-      } else {
-        setTurnsByLeg({});
-      }
+      if (result.match) setMatch(result.match);
+      setPlayers(result.players);
+      setLegs(result.legs);
+      setTurns(result.turns);
+      setTurnThrowCounts(result.turnThrowCounts);
+      setTurnsByLeg(result.turnsByLeg);
 
       // NOTE: throw counts are derived from the loaded turns above to avoid extra queries.
     } catch (e) {
       console.error('Spectator mode refresh error:', e);
       // Don't set error state in spectator mode to avoid disrupting the view
     } finally {
-      setSpectatorLoading(false);
+      if (requestId === loadAllSpectatorRequestIdRef.current) {
+        setSpectatorLoading(false);
+      }
     }
   }, [matchId]);
 
@@ -449,24 +337,44 @@ export default function MatchClient({ matchId }: { matchId: string }) {
 
   // Set up real-time event listeners
   useEffect(() => {
-    if (!realtime.isConnected || !realtimeEnabled) {
+    if (!realtimeIsConnected || !realtimeEnabled) {
       console.log('Real-time not ready:', { 
-        connected: realtime.isConnected, 
+        connected: realtimeIsConnected, 
         enabled: realtimeEnabled,
-        status: realtime.connectionStatus 
+        status: realtimeConnectionStatus 
       });
       return;
     }
 
-
     // Handle throw changes - hot update without full reload
-    const handleThrowChange = async (event: CustomEvent) => {
+    const processThrowChange = async (event: CustomEvent) => {
       // Route to appropriate handler based on mode (use ref to avoid stale closure)
       if (latestStateRef.current.isSpectatorMode) {
         await handleSpectatorThrowChange(event);
       } else {
         await handleMatchUIUpdate(event);
       }
+    };
+
+    // Realtime can deliver a throw for a freshly inserted turn before we observe the matching
+    // turn insert. We filter throw events by known turn IDs to avoid cross-match noise, so we
+    // buffer unknown turn_ids and flush once the corresponding turn becomes known.
+    const pendingThrowBuffer = new PendingThrowBuffer();
+
+    const handleThrowChange = async (event: CustomEvent) => {
+      const payload = event.detail as RealtimePayload;
+      const legId = getRealtimePayloadLegId(payload);
+      const turnId = getRealtimePayloadTurnId(payload);
+
+      if (!legId && turnId) {
+        const { knownTurnIds } = latestStateRef.current;
+        if (knownTurnIds.size > 0 && !knownTurnIds.has(turnId)) {
+          pendingThrowBuffer.set(turnId, payload);
+          return;
+        }
+      }
+
+      await processThrowChange(event);
     };
     
     // Trigger Chad commentary for a completed turn
@@ -645,27 +553,10 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       }
     };
 
-    const shouldIgnoreRealtimePayload = (payload: { new?: { leg_id?: string; turn_id?: string }; old?: { leg_id?: string; turn_id?: string } }) => {
-      if (!payload) return false;
-      const legId = payload.new?.leg_id ?? payload.old?.leg_id ?? null;
-      if (legId) {
-        const { knownLegIds } = latestStateRef.current;
-        if (knownLegIds.size === 0) return false;
-        return !knownLegIds.has(legId);
-      }
-      const turnId = payload.new?.turn_id ?? payload.old?.turn_id ?? null;
-      if (turnId) {
-        const { knownTurnIds } = latestStateRef.current;
-        if (knownTurnIds.size === 0) return false;
-        return !knownTurnIds.has(turnId);
-      }
-      return false;
-    };
-
     // Spectator-specific throw change handler
     const handleSpectatorThrowChange = async (event: CustomEvent) => {
       const payload = event.detail;
-      if (shouldIgnoreRealtimePayload(payload)) {
+      if (shouldIgnoreRealtimePayload(payload as RealtimePayload, latestStateRef.current.knownLegIds, latestStateRef.current.knownTurnIds)) {
         return;
       }
 
@@ -673,14 +564,20 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         const supabase = await getSupabaseClient();
         
         if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-          // Hot update: fetch latest legs to avoid stale closure
-          const { data: currentLegs } = await supabase
-            .from('legs')
-            .select('*')
-            .eq('match_id', matchId)
-            .order('leg_number', { ascending: true });
-            
-          const currentLeg = currentLegs?.find(l => !l.winner_player_id);
+          // Prefer local state (ref) to avoid extra round-trips on every throw.
+          let legsSnapshot = latestStateRef.current.legs;
+          let currentLeg = legsSnapshot.find((l) => !l.winner_player_id) ?? legsSnapshot[legsSnapshot.length - 1];
+
+          // Fallback if we don't have legs yet.
+          if (!currentLeg) {
+            const { data: fetchedLegs } = await supabase
+              .from('legs')
+              .select('*')
+              .eq('match_id', matchId)
+              .order('leg_number', { ascending: true });
+            legsSnapshot = (fetchedLegs as LegRecord[] | null) ?? legsSnapshot;
+            currentLeg = legsSnapshot.find((l) => !l.winner_player_id) ?? legsSnapshot[legsSnapshot.length - 1];
+          }
           
           if (currentLeg) {
             const { data: updatedTurns } = await supabase
@@ -773,7 +670,6 @@ export default function MatchClient({ matchId }: { matchId: string }) {
                       // Trigger commentary if enabled
                       if (commentaryEnabled && commentaryDebouncer.current.canCall()) {
                         commentaryDebouncer.current.markCalled();
-                        const legsSnapshot = (currentLegs as LegRecord[] | null) ?? latestStateRef.current.legs;
                         const snapshot: CommentarySnapshot = {
                           turns: updatedTurns as TurnWithThrows[],
                           legs: legsSnapshot,
@@ -817,7 +713,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       if (latestStateRef.current.isSpectatorMode) return; // Only for normal match UI
       
       const payload = event.detail;
-      if (shouldIgnoreRealtimePayload(payload)) {
+      if (shouldIgnoreRealtimePayload(payload as RealtimePayload, latestStateRef.current.knownLegIds, latestStateRef.current.knownTurnIds)) {
         return;
       }
       
@@ -825,14 +721,20 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         const supabase = await getSupabaseClient();
         
         if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-          // Get fresh data for current leg
-          const { data: currentLegs } = await supabase
-            .from('legs')
-            .select('*')
-            .eq('match_id', matchId)
-            .order('leg_number', { ascending: true });
-            
-          const currentLeg = currentLegs?.find(l => !l.winner_player_id);
+          // Prefer local state (ref) to avoid extra round-trips on every throw.
+          let legsSnapshot = latestStateRef.current.legs;
+          let currentLeg = legsSnapshot.find((l) => !l.winner_player_id) ?? legsSnapshot[legsSnapshot.length - 1];
+
+          // Fallback if we don't have legs yet.
+          if (!currentLeg) {
+            const { data: fetchedLegs } = await supabase
+              .from('legs')
+              .select('*')
+              .eq('match_id', matchId)
+              .order('leg_number', { ascending: true });
+            legsSnapshot = (fetchedLegs as LegRecord[] | null) ?? legsSnapshot;
+            currentLeg = legsSnapshot.find((l) => !l.winner_player_id) ?? legsSnapshot[legsSnapshot.length - 1];
+          }
           
           if (currentLeg) {
             const { data: updatedTurns } = await supabase
@@ -905,7 +807,11 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         const { knownLegIds, knownTurnIds } = latestStateRef.current;
         if (knownLegIds.size === 0 || knownLegIds.has(legId)) {
           const turnId = payload?.new?.id ?? payload?.old?.id ?? null;
-          if (turnId) knownTurnIds.add(turnId);
+          if (turnId) {
+            knownTurnIds.add(turnId);
+            const pending = pendingThrowBuffer.take(turnId);
+            if (pending) await processThrowChange({ detail: pending } as unknown as CustomEvent);
+          }
         }
       }
 
@@ -953,10 +859,12 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     window.addEventListener('supabase-match-players-change', handleMatchPlayersChange as unknown as EventListener);
 
     // Update presence to indicate we're viewing this match (use ref)
-    realtime.updatePresence(latestStateRef.current.isSpectatorMode);
+    realtimeUpdatePresence(latestStateRef.current.isSpectatorMode);
 
     // Cleanup function
     return () => {
+      pendingThrowBuffer.clear();
+
       window.removeEventListener('supabase-throws-change', handleThrowChange as unknown as EventListener);
       window.removeEventListener('supabase-turns-change', handleTurnChange as unknown as EventListener);
       window.removeEventListener('supabase-legs-change', handleLegChange as unknown as EventListener);
@@ -965,8 +873,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     };
 
   }, [
-    realtime,
-    realtime.isConnected,
+    realtimeIsConnected,
     realtimeEnabled,
     matchId,
     isSpectatorMode,
@@ -974,6 +881,8 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     loadAllSpectator,
     commentaryEnabled,
     personaId,
+    realtimeConnectionStatus,
+    realtimeUpdatePresence,
   ]);
 
   // Check for spectator mode from URL params
@@ -1001,18 +910,20 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     return () => clearInterval(interval);
   }, [isSpectatorMode, loadAllSpectator, spectatorLoading, realtime.isConnected, realtimeEnabled]);
 
-  const currentLeg = useMemo(() => {
-    const newCurrentLeg = (legs ?? []).find((l) => !l.winner_player_id) ?? legs[legs.length - 1];
-    // Clear celebrated turns when moving to a new leg
-    if (newCurrentLeg && celebratedTurns.current.size > 0) {
-      celebratedTurns.current.clear();
-    }
-    return newCurrentLeg;
-  }, [legs]);
+  const currentLeg = useMemo(
+    () => (legs ?? []).find((l) => !l.winner_player_id) ?? legs[legs.length - 1],
+    [legs]
+  );
+
+  useEffect(() => {
+    // Reset per-leg celebration tracking only when the active leg changes.
+    celebratedTurns.current.clear();
+  }, [currentLeg?.id]);
 
   const orderPlayers = useMemo(() => {
     if (!match || players.length === 0 || !currentLeg) return [] as Player[];
     const startIdx = players.findIndex((p) => p.id === currentLeg.starting_player_id);
+    if (startIdx < 0) return players;
     const rotated = [...players.slice(startIdx), ...players.slice(0, startIdx)];
     return rotated;
   }, [match, players, currentLeg]);

@@ -8,9 +8,16 @@ import OpenAI from 'openai';
 import type { CommentaryPersonaId, CommentaryExcitementLevel } from '@/lib/commentary/types';
 import { resolvePersona } from '@/lib/commentary/personas';
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+// Lazy-load OpenAI client to avoid initialization errors during build
+let openaiClient: OpenAI | null = null;
+function getOpenAI(): OpenAI {
+  if (!openaiClient) {
+    openaiClient = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    });
+  }
+  return openaiClient;
+}
 
 type VoiceOption = 'alloy' | 'ash' | 'ballad' | 'coral' | 'echo' | 'fable' | 'onyx' | 'nova' | 'sage' | 'shimmer' | 'verse';
 
@@ -69,6 +76,7 @@ export async function POST(request: NextRequest) {
     // Not used for now
     // const combinedInput = buildSpeechInput(personaId, excitement, speed, text);
 
+    const openai = getOpenAI();
     const mp3 = await openai.audio.speech.create({
       model: 'tts-1', // Using cheapest TTS model
       voice,

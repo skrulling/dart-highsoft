@@ -35,7 +35,8 @@ export function getSpectatorScore(
     if (throwCount > 0 && throwCount < 3) {
       const currentThrows = (lastTurn as TurnWithThrows).throws || [];
       const incompleteTotal = currentThrows.reduce((sum, thr) => sum + thr.scored, 0);
-      current -= incompleteTotal;
+      const persistedSubtotal = typeof lastTurn.total_scored === 'number' ? lastTurn.total_scored : 0;
+      current -= Math.max(0, incompleteTotal - persistedSubtotal);
     }
   }
 

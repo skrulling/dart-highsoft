@@ -51,3 +51,12 @@ next-env.d.ts
 supabase/.temp/
 supabase/.branches/
 supabase/.logs/
+supabase-test/.temp/
+supabase-test/.branches/
+supabase-test/.logs/
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/

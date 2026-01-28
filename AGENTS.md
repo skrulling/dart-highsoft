@@ -13,6 +13,10 @@
 - `npm run build`: Create optimized production build.
 - `npm start`: Run the built app in production mode.
 - `npm run lint`: Lint with Next.js + ESLint config.
+- `npm test`: Run tests in watch mode (interactive).
+- `npm run test:run`: Run all tests once (for CI/CD).
+- `npm run test:ui`: Open visual test interface.
+- `npm run test:coverage`: Generate and display coverage report.
 
 ## Coding Style & Naming Conventions
 - **Language**: TypeScript (strict), React 19, Next.js 15.
@@ -23,9 +27,15 @@
 - **Styling**: Tailwind CSS; prefer utility classes over inline styles.
 
 ## Testing Guidelines
-- No formal test suite yet. If adding tests, prefer Vitest + React Testing Library.
-- Name tests `*.test.ts`/`*.test.tsx` colocated with the module (e.g., `ScoreProgressChart.test.tsx`).
-- Keep tests deterministic; mock Supabase and network calls.
+- **Framework**: Vitest with TypeScript support, configured in `vitest.config.ts`.
+- **Test Files**: Colocate tests with source files using `*.test.ts` or `*.test.tsx` (e.g., `x01.test.ts` next to `x01.ts`).
+- **Naming**: Use descriptive test names with `describe()` and `it()` blocks.
+- **Coverage**: Aim for high coverage on utility functions (90%+), moderate on components (70%+).
+- **Best Practices**:
+  - Keep tests deterministic; mock Supabase and network calls.
+  - Test edge cases, boundary conditions, and error scenarios.
+  - See `src/utils/x01.test.ts` for examples of comprehensive test coverage.
+- **Running Tests**: Always run `npm run test:run` before committing to ensure all tests pass.
 
 ## Commit & Pull Request Guidelines
 - **Commits**: Short, imperative, and focused (e.g., `add elo leaderboard`, `fix build error`).

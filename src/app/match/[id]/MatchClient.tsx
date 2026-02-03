@@ -2460,9 +2460,9 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         </div>
 
         {matchUrl && (
-          <div className="fixed bottom-4 left-4 z-40 flex flex-col items-center gap-2 rounded-lg bg-background/90 p-3 shadow-md ring-1 ring-border">
-            <div className="text-xs font-semibold text-muted-foreground">Join match</div>
-            <QRCode value={matchUrl} size={96} />
+          <div className="fixed bottom-4 left-4 z-40 pointer-events-none opacity-80">
+            <span className="sr-only">Join match QR code</span>
+            <QRCode value={matchUrl} size={72} />
           </div>
         )}
         

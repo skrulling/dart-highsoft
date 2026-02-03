@@ -33,6 +33,7 @@ import { useRealtime } from '@/hooks/useRealtime';
 import { updateMatchEloRatings, shouldMatchBeRated } from '@/utils/eloRating';
 import { updateMatchEloRatingsMultiplayer, shouldMatchBeRatedMultiplayer, type MultiplayerResult } from '@/utils/eloRatingMultiplayer';
 import { Home } from 'lucide-react';
+import QRCode from 'react-qr-code';
 import CommentaryDisplay from '@/components/CommentaryDisplay';
 import CommentarySettings from '@/components/CommentarySettings';
 import { resolvePersona } from '@/lib/commentary/personas';
@@ -66,6 +67,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [origin, setOrigin] = useState('');
   
   // Spectator mode state
   const [isSpectatorMode, setIsSpectatorMode] = useState(false);
@@ -231,6 +233,10 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   useEffect(() => {
     void loadAll();
   }, [loadAll]);
+
+  useEffect(() => {
+    setOrigin(window.location.origin);
+  }, []);
 
   // Load commentary settings from localStorage and TTSService
   useEffect(() => {
@@ -2329,6 +2335,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   if (loading) return <div className="p-4">Loading…</div>;
   if (error) return <div className="p-4 text-red-600">{error}</div>;
   if (!match || !currentLeg) return <div className="p-4">No leg available</div>;
+  const matchUrl = origin ? `${origin}/match/${matchId}` : '';
 
   // Spectator Mode View
   if (isSpectatorMode) {
@@ -2451,6 +2458,13 @@ export default function MatchClient({ matchId }: { matchId: string }) {
             <div className="w-3 h-3 bg-blue-500 rounded-full animate-pulse"></div>
           )}
         </div>
+
+        {matchUrl && (
+          <div className="fixed bottom-4 left-4 z-40 flex flex-col items-center gap-2 rounded-lg bg-background/90 p-3 shadow-md ring-1 ring-border">
+            <div className="text-xs font-semibold text-muted-foreground">Join match</div>
+            <QRCode value={matchUrl} size={96} />
+          </div>
+        )}
         
         {/* Cards Row - responsive layout */}
         <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">

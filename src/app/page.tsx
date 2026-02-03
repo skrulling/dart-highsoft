@@ -5,6 +5,7 @@ import Image from 'next/image';
 import { Button } from '@/components/ui/button';
 import { getSupabaseClient } from '@/lib/supabaseClient';
 import { useEffect, useState } from 'react';
+import QRCode from 'react-qr-code';
 import { getEloLeaderboard, getEloTier, type EloLeaderboardEntry } from '@/utils/eloRating';
 import { getMultiEloLeaderboard, type MultiEloLeaderboardEntry } from '@/utils/eloRatingMultiplayer';
 
@@ -14,6 +15,7 @@ export default function Home() {
   const [avgLeaders, setAvgLeaders] = useState<{ player_id: string; display_name: string; wins: number; avg_per_turn: number }[]>([]);
   const [eloLeaders, setEloLeaders] = useState<EloLeaderboardEntry[]>([]);
   const [eloMultiLeaders, setEloMultiLeaders] = useState<MultiEloLeaderboardEntry[]>([]);
+  const [origin, setOrigin] = useState('');
 
   useEffect(() => {
     (async () => {
@@ -46,6 +48,10 @@ export default function Home() {
         setEloMultiLeaders([]);
       }
     })();
+  }, []);
+
+  useEffect(() => {
+    setOrigin(window.location.origin);
   }, []);
 
   const medal = (index: number) => (index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `${index + 1}.`);
@@ -182,6 +188,12 @@ export default function Home() {
           </ul>
         </section>
       </div>
+      {origin && (
+        <div className="fixed bottom-4 left-4 z-40 flex flex-col items-center gap-2 rounded-lg bg-background/90 p-3 shadow-md ring-1 ring-border">
+          <div className="text-xs font-semibold text-muted-foreground">New match</div>
+          <QRCode value={`${origin}/new`} size={96} />
+        </div>
+      )}
     </main>
   );
 }

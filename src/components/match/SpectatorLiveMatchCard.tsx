@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ThrowSegmentBadges } from '@/components/ThrowSegmentBadges';
@@ -32,6 +33,27 @@ export function SpectatorLiveMatchCard({
   turnThrowCounts,
   getAvgForPlayer,
 }: Props) {
+  const playerRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  // Auto-scroll to the current player when they change
+  useEffect(() => {
+    if (!spectatorCurrentPlayer) return;
+
+    const currentPlayerIndex = orderPlayers.findIndex(p => p.id === spectatorCurrentPlayer.id);
+
+    // If first player, scroll to the top of the page
+    if (currentPlayerIndex === 0) {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+
+    // Otherwise, scroll the player card into view
+    const playerElement = playerRefs.current[spectatorCurrentPlayer.id];
+    if (playerElement) {
+      playerElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [spectatorCurrentPlayer?.id, orderPlayers]);
+
   return (
     <Card className="xl:col-span-2">
       <CardHeader>
@@ -130,6 +152,7 @@ export function SpectatorLiveMatchCard({
               return (
                 <div
                   key={player.id}
+                  ref={(el) => { playerRefs.current[player.id] = el; }}
                   className={`p-4 rounded-lg transition-all duration-500 ease-in-out ${
                     isCurrent ? 'border-2 border-primary bg-primary/5 shadow-lg scale-[1.02]' : 'border bg-card hover:bg-accent/30'
                   }`}

@@ -22,7 +22,105 @@ npm start
 
 # Run linter
 npm run lint
+
+# Run tests in watch mode
+npm test
+
+# Run tests once (for CI)
+npm run test:run
+
+# Run tests with visual UI
+npm run test:ui
+
+# Generate coverage report
+npm run test:coverage
+
+# Run E2E tests (requires test Supabase instance)
+npm run test:e2e
+
+# Run E2E tests with UI
+npm run test:e2e:ui
+
+# Run E2E tests in headed browser
+npm run test:e2e:headed
+
+# Start test Supabase instance (port 56XXX)
+npm run supabase:test:start
+
+# Stop test Supabase instance
+npm run supabase:test:stop
+
+# Reset test database
+npm run supabase:test:reset
 ```
+
+## Testing
+
+The project uses **Vitest** for unit testing and **Playwright** for E2E testing.
+
+### Test Structure
+- Test files are colocated with source files: `filename.test.ts`
+- Tests use Vitest's Jest-compatible API
+- Configuration in `vitest.config.ts`
+
+### Current Coverage
+- **X01 Game Logic** (`src/utils/x01.ts`): 100% coverage with 42 test cases
+  - Both single-out and double-out finish rules
+  - All bust scenarios (going below 0, landing on 1, non-double finish)
+  - Edge cases and boundary conditions
+
+### Writing Tests
+```typescript
+import { describe, it, expect } from 'vitest';
+
+describe('My Function', () => {
+  it('should handle expected case', () => {
+    const result = myFunction(input);
+    expect(result).toEqual(expectedOutput);
+  });
+});
+```
+
+### Running Tests During Development
+- Use `npm test` for watch mode - tests re-run on file changes
+- Use `npm run test:ui` for a visual interface to browse and run tests
+- Always run `npm run test:run` before committing to ensure all tests pass
+
+### E2E Testing with Playwright
+
+E2E tests use a **separate Supabase instance** on port 56XXX to avoid conflicts with the main development instance (port 554XX).
+
+**Setup:**
+1. Start the test Supabase instance: `npm run supabase:test:start`
+2. Run E2E tests: `npm run test:e2e`
+3. Stop test Supabase: `npm run supabase:test:stop`
+
+**Test Structure:**
+- E2E tests are in the `e2e/` directory
+- Fixtures in `e2e/fixtures.ts` provide Supabase client and test data helpers
+- Tests use Playwright's test API
+
+**Writing E2E Tests:**
+```typescript
+import { test, expect, TEST_PLAYERS } from './fixtures';
+
+test('can throw a dart', async ({ page, createMatch }) => {
+  const { matchId } = await createMatch({ startScore: 501 });
+  await page.goto(`/match/${matchId}`);
+
+  // Interact with the UI
+  await page.getByRole('button', { name: '20' }).click();
+
+  // Assert results
+  await expect(page.getByText('481 pts')).toBeVisible();
+});
+```
+
+**Test Supabase Configuration:**
+- Config file: `supabase-test/config.toml`
+- API port: 56421 (vs 55421 for dev)
+- DB port: 56422 (vs 55422 for dev)
+- Migrations are symlinked from `supabase/migrations`
 
 ## Database Operations
 

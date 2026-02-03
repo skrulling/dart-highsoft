@@ -61,7 +61,8 @@ A modern, real-time dart scoring application built with Next.js, Supabase, and H
    ```
 
 4. **Database Setup**
-   Run the migrations in the `supabase/migrations/` directory through your Supabase dashboard or CLI.
+   Run the migrations in the `supabase/migrations/` directory through your Supabase dashboard or CLI.  
+   For a full local Supabase stack (Docker + Supabase CLI), see [`docs/SUPABASE_LOCAL_SETUP.md`](docs/SUPABASE_LOCAL_SETUP.md).
 
 5. **Start the development server**
    ```bash
@@ -86,6 +87,56 @@ npm start
 # Run linter
 npm run lint
 ```
+
+## 🧪 Testing
+
+Rigorous unit tests ensure the game logic is accurate and reliable.
+
+### Running Tests
+
+```bash
+# Run tests in watch mode (interactive)
+npm test
+
+# Run tests once (for CI/CD)
+npm run test:run
+
+# Run tests with visual UI
+npm run test:ui
+
+# Generate coverage report
+npm run test:coverage
+```
+
+### Test Coverage
+
+The project uses **Vitest** for fast, modern testing with TypeScript support.
+
+**Current Coverage:**
+- **X01 Game Logic** (`src/utils/x01.ts`): **100% coverage**
+  - 42 comprehensive test cases
+  - Both single-out and double-out finish rules
+  - All bust scenarios (below 0, landing on 1, non-double finish)
+  - Edge cases and boundary conditions
+
+### Adding New Tests
+
+1. Create a test file next to the source file: `filename.test.ts`
+2. Import Vitest functions:
+   ```typescript
+   import { describe, it, expect } from 'vitest';
+   ```
+3. Write your tests:
+   ```typescript
+   describe('My Function', () => {
+     it('should do something', () => {
+       expect(myFunction()).toBe(expectedValue);
+     });
+   });
+   ```
+4. Run tests to verify: `npm test`
+
+See `src/utils/x01.test.ts` for comprehensive examples.
 
 ## 🏗 Architecture
 

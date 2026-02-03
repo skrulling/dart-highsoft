@@ -3,22 +3,18 @@
 import Dartboard from '@/components/Dartboard';
 import MobileKeypad from '@/components/MobileKeypad';
 import { ScoreProgressChart } from '@/components/ScoreProgressChart';
-import { ThrowSegmentBadges } from '@/components/ThrowSegmentBadges';
 import { TurnRow } from '@/components/TurnRow';
 import { TurnsHistoryCard } from '@/components/TurnsHistoryCard';
 import { computeCheckoutSuggestions } from '@/utils/checkoutSuggestions';
 import { computeHit, SegmentResult } from '@/utils/dartboard';
 import { computeRemainingScore, computeTurnTotal } from '@/lib/commentary/stats';
 import { getExcitementLevel } from '@/lib/commentary/utils';
-import { getSpectatorScore, getLegRoundStats } from '@/utils/matchStats';
-import { decorateAvg } from '@/utils/playerStats';
 import { applyThrow, FinishRule } from '@/utils/x01';
 import { getSupabaseClient } from '@/lib/supabaseClient';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import {
   Dialog,
   DialogContent,
@@ -28,64 +24,42 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
+import { EditPlayersModal } from '@/components/match/EditPlayersModal';
+import { EditThrowsModal, type EditableThrow } from '@/components/match/EditThrowsModal';
+import { MatchPlayersCard } from '@/components/match/MatchPlayersCard';
+import { SpectatorLiveMatchCard } from '@/components/match/SpectatorLiveMatchCard';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useRealtime } from '@/hooks/useRealtime';
 import { updateMatchEloRatings, shouldMatchBeRated } from '@/utils/eloRating';
 import { updateMatchEloRatingsMultiplayer, shouldMatchBeRatedMultiplayer, type MultiplayerResult } from '@/utils/eloRatingMultiplayer';
-import { Home, ChevronUp, ChevronDown } from 'lucide-react';
+import { Home } from 'lucide-react';
 import CommentaryDisplay from '@/components/CommentaryDisplay';
 import CommentarySettings from '@/components/CommentarySettings';
 import { resolvePersona } from '@/lib/commentary/personas';
 import type { CommentaryPersonaId, PlayerStats } from '@/lib/commentary/types';
 import { generateCommentary, generateMatchRecap, type CommentaryContext, CommentaryDebouncer } from '@/services/commentaryService';
 import { getTTSService, type VoiceOption } from '@/services/ttsService';
-
-type Player = { id: string; display_name: string };
-
-type MatchRecord = {
-  id: string;
-  mode: 'x01';
-  start_score: '201' | '301' | '501';
-  finish: FinishRule;
-  legs_to_win: number;
-  ended_early?: boolean;
-};
-
-type LegRecord = {
-  id: string;
-  match_id: string;
-  leg_number: number;
-  starting_player_id: string;
-  winner_player_id: string | null;
-};
-
-type TurnRecord = {
-  id: string;
-  leg_id: string;
-  player_id: string;
-  turn_number: number;
-  total_scored: number;
-  busted: boolean;
-};
-
-type MatchPlayersRow = {
-  match_id: string;
-  player_id: string;
-  play_order: number;
-  players: Player;
-};
-
-type ThrowRecord = {
-  id: string;
-  turn_id: string;
-  dart_index: number;
-  segment: string;
-  scored: number;
-};
-
-type TurnWithThrows = TurnRecord & {
-  throws: ThrowRecord[];
-};
+import type {
+  LegRecord,
+  MatchPlayersRow,
+  MatchRecord,
+  Player,
+  ThrowRecord,
+  TurnRecord,
+  TurnWithThrows,
+} from '@/lib/match/types';
+import { loadMatchData } from '@/lib/match/loadMatchData';
+import {
+  PendingThrowBuffer,
+  getRealtimePayloadLegId,
+  getRealtimePayloadTurnId,
+  shouldIgnoreRealtimePayload,
+  type RealtimePayload,
+} from '@/lib/match/realtime';
+import {
+  applyThrowChange as applySpectatorThrowChange,
+  applyTurnChange as applySpectatorTurnChange,
+} from '@/lib/match/spectatorRealtimeReducer';
 
 export default function MatchClient({ matchId }: { matchId: string }) {
   const router = useRouter();
@@ -104,6 +78,8 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     throws: { segment: string; scored: number; dart_index: number }[];
   } | null>(null);
   const celebratedTurns = useRef<Set<string>>(new Set());
+  const spectatorTurnsFetchRef = useRef<Promise<void> | null>(null);
+  const spectatorTurnsFetchQueuedRef = useRef(false);
 
   // Commentary state (persona-driven)
   const [commentaryEnabled, setCommentaryEnabled] = useState(false);
@@ -153,6 +129,8 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     knownLegIds: new Set<string>(),
     knownTurnIds: new Set<string>(),
   });
+  const pendingThrowBufferRef = useRef(new PendingThrowBuffer());
+  const pendingTurnReconcileRef = useRef(new Set<string>());
 
   const [match, setMatch] = useState<MatchRecord | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
@@ -174,7 +152,6 @@ export default function MatchClient({ matchId }: { matchId: string }) {
 
   // Edit throws modal state
   const [editOpen, setEditOpen] = useState(false);
-  type EditableThrow = { id: string; turn_id: string; dart_index: number; segment: string; scored: number; player_id: string; turn_number: number };
   const [editingThrows, setEditingThrows] = useState<EditableThrow[]>([]);
   const [selectedThrowId, setSelectedThrowId] = useState<string | null>(null);
 
@@ -190,150 +167,64 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   // Real-time connection
   const realtime = useRealtime(matchId);
   const realtimeEnabled = true; // For now, always enabled
+  const realtimeIsConnected = realtime.isConnected;
+  const realtimeConnectionStatus = realtime.connectionStatus;
+  const realtimeUpdatePresence = realtime.updatePresence;
+
+  const loadAllRequestIdRef = useRef(0);
+  const loadAllSpectatorRequestIdRef = useRef(0);
 
   const loadAll = useCallback(async () => {
+    const requestId = ++loadAllRequestIdRef.current;
     setLoading(true);
     setError(null);
     try {
       const supabase = await getSupabaseClient();
-      const { data: m } = await supabase.from('matches').select('*').eq('id', matchId).single();
-      setMatch(m as MatchRecord);
+      const result = await loadMatchData(supabase, matchId);
 
-      const { data: mp } = await supabase
-        .from('match_players')
-        .select('*, players:player_id(*)')
-        .eq('match_id', matchId)
-        .order('play_order');
-      const flatPlayers = ((mp as MatchPlayersRow[] | null) ?? []).map((r) => r.players);
-      setPlayers(flatPlayers);
+      if (requestId !== loadAllRequestIdRef.current) return;
 
-      const { data: lgs } = await supabase.from('legs').select('*').eq('match_id', matchId).order('leg_number');
-      const legsTyped = (lgs ?? []) as LegRecord[];
-      setLegs(legsTyped);
-
-      const currentLeg = legsTyped.find((l) => !l.winner_player_id) || legsTyped[legsTyped.length - 1];
-      if (currentLeg) {
-        const { data: tns } = await supabase
-          .from('turns')
-          .select(`
-            *,
-            throws:throws(id, turn_id, dart_index, segment, scored)
-          `)
-          .eq('leg_id', currentLeg.id)
-          .order('turn_number');
-        setTurns(((tns ?? []) as TurnRecord[]).sort((a, b) => a.turn_number - b.turn_number));
-      } else {
-        setTurns([]);
-      }
-
-      // Load turns for all legs to compute per-leg averages
-      if (legsTyped.length > 0) {
-        const legIds = legsTyped.map((l) => l.id);
-        const { data: allTurns } = await supabase
-          .from('turns')
-          .select('*')
-          .in('leg_id', legIds)
-          .order('turn_number');
-        const grouped: Record<string, TurnRecord[]> = {};
-        for (const t of ((allTurns ?? []) as TurnRecord[])) {
-          if (!grouped[t.leg_id]) grouped[t.leg_id] = [];
-          grouped[t.leg_id].push(t);
-        }
-        setTurnsByLeg(grouped);
-      } else {
-        setTurnsByLeg({});
-      }
+      setMatch(result.match);
+      setPlayers(result.players);
+      setLegs(result.legs);
+      setTurns(result.turns);
+      setTurnThrowCounts(result.turnThrowCounts);
+      setTurnsByLeg(result.turnsByLeg);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Unknown error';
       setError(msg);
     } finally {
-      setLoading(false);
+      if (requestId === loadAllRequestIdRef.current) {
+        setLoading(false);
+      }
     }
   }, [matchId]);
 
   // Separate loading function for spectator mode that doesn't show loading screen
   const loadAllSpectator = useCallback(async () => {
+    const requestId = ++loadAllSpectatorRequestIdRef.current;
     setSpectatorLoading(true);
     try {
       const supabase = await getSupabaseClient();
-      const { data: m } = await supabase.from('matches').select('*').eq('id', matchId).single();
-      if (m) setMatch(m as MatchRecord);
+      const result = await loadMatchData(supabase, matchId);
 
-      const { data: mp } = await supabase
-        .from('match_players')
-        .select('*, players:player_id(*)')
-        .eq('match_id', matchId)
-        .order('play_order');
-      if (mp) {
-        const flatPlayers = ((mp as MatchPlayersRow[] | null) ?? []).map((r) => r.players);
-        setPlayers(flatPlayers);
-      }
+      if (requestId !== loadAllSpectatorRequestIdRef.current) return;
 
-      const { data: lgs } = await supabase.from('legs').select('*').eq('match_id', matchId).order('leg_number');
-      const legsTyped = (lgs ?? []) as LegRecord[];
-      if (lgs) setLegs(legsTyped);
+      if (result.match) setMatch(result.match);
+      setPlayers(result.players);
+      setLegs(result.legs);
+      setTurns(result.turns);
+      setTurnThrowCounts(result.turnThrowCounts);
+      setTurnsByLeg(result.turnsByLeg);
 
-      const currentLeg = legsTyped.find((l) => !l.winner_player_id) || legsTyped[legsTyped.length - 1];
-      if (currentLeg) {
-        const { data: tns } = await supabase
-          .from('turns')
-          .select(`
-            *,
-            throws:throws(id, turn_id, dart_index, segment, scored)
-          `)
-          .eq('leg_id', currentLeg.id)
-          .order('turn_number');
-        if (tns) setTurns(((tns ?? []) as TurnRecord[]).sort((a, b) => a.turn_number - b.turn_number));
-      } else {
-        setTurns([]);
-      }
-
-      // Load turns for all legs to compute per-leg averages
-      if (legsTyped.length > 0) {
-        const legIds = legsTyped.map((l) => l.id);
-        const { data: allTurns } = await supabase
-          .from('turns')
-          .select('*')
-          .in('leg_id', legIds)
-          .order('turn_number');
-        const grouped: Record<string, TurnRecord[]> = {};
-        for (const t of ((allTurns ?? []) as TurnRecord[])) {
-          if (!grouped[t.leg_id]) grouped[t.leg_id] = [];
-          grouped[t.leg_id].push(t);
-        }
-        setTurnsByLeg(grouped);
-      } else {
-        setTurnsByLeg({});
-      }
-
-      // Count throws per turn to determine current player correctly
-      const { data: allCurrentLegThrows } = await supabase
-          .from('throws')
-          .select(`
-            turn_id,
-            turns!inner (
-              id,
-              player_id,
-              turn_number,
-              leg_id
-            )
-          `)
-          .eq('turns.leg_id', currentLeg.id)
-          .order('turn_number', { foreignTable: 'turns' });
-
-        if (allCurrentLegThrows) {
-          const throwCountsByTurn: Record<string, number> = {};
-          for (const throwData of allCurrentLegThrows as unknown as { turn_id: string; turns: { id: string; player_id: string; turn_number: number; leg_id: string; } }[]) {
-            const turnId = throwData.turns.id;
-            throwCountsByTurn[turnId] = (throwCountsByTurn[turnId] || 0) + 1;
-          }
-          setTurnThrowCounts(throwCountsByTurn);
-        }
+      // NOTE: throw counts are derived from the loaded turns above to avoid extra queries.
     } catch (e) {
       console.error('Spectator mode refresh error:', e);
       // Don't set error state in spectator mode to avoid disrupting the view
     } finally {
-      setSpectatorLoading(false);
+      if (requestId === loadAllSpectatorRequestIdRef.current) {
+        setSpectatorLoading(false);
+      }
     }
   }, [matchId]);
 
@@ -453,24 +344,64 @@ export default function MatchClient({ matchId }: { matchId: string }) {
 
   // Set up real-time event listeners
   useEffect(() => {
-    if (!realtime.isConnected || !realtimeEnabled) {
+    if (!realtimeIsConnected || !realtimeEnabled) {
       console.log('Real-time not ready:', { 
-        connected: realtime.isConnected, 
+        connected: realtimeIsConnected, 
         enabled: realtimeEnabled,
-        status: realtime.connectionStatus 
+        status: realtimeConnectionStatus 
       });
       return;
     }
 
-
     // Handle throw changes - hot update without full reload
-    const handleThrowChange = async (event: CustomEvent) => {
+    const processThrowChange = async (event: CustomEvent) => {
       // Route to appropriate handler based on mode (use ref to avoid stale closure)
       if (latestStateRef.current.isSpectatorMode) {
         await handleSpectatorThrowChange(event);
       } else {
         await handleMatchUIUpdate(event);
       }
+    };
+
+    // Realtime can deliver a throw for a freshly inserted turn before we observe the matching
+    // turn insert. We filter throw events by known turn IDs to avoid cross-match noise, so we
+    // buffer unknown turn_ids and flush once the corresponding turn becomes known.
+    const pendingThrowBuffer = pendingThrowBufferRef.current;
+
+    const handleThrowChange = async (event: CustomEvent) => {
+      const payload = event.detail as RealtimePayload;
+      const legId = getRealtimePayloadLegId(payload);
+      const turnId = getRealtimePayloadTurnId(payload);
+
+      if (!legId && turnId) {
+        const { knownTurnIds, turns } = latestStateRef.current;
+        const hasTurnInState = turns.some((turn) => turn.id === turnId);
+        const isKnownTurn = knownTurnIds.size > 0 && knownTurnIds.has(turnId);
+        if (!hasTurnInState && isKnownTurn && latestStateRef.current.isSpectatorMode) {
+          void reconcileSpectatorTurn(turnId);
+          return;
+        }
+        if (!hasTurnInState || (knownTurnIds.size > 0 && !knownTurnIds.has(turnId))) {
+          pendingThrowBuffer.set(turnId, payload);
+          if (latestStateRef.current.isSpectatorMode && !pendingTurnReconcileRef.current.has(turnId)) {
+            pendingTurnReconcileRef.current.add(turnId);
+            setTimeout(() => {
+              pendingTurnReconcileRef.current.delete(turnId);
+              if (latestStateRef.current.knownTurnIds.has(turnId)) {
+                void reconcileSpectatorTurn(turnId);
+              }
+            }, 200);
+          }
+          const payloadMatchId = (payload as { new?: { match_id?: string }; old?: { match_id?: string } })?.new?.match_id
+            ?? (payload as { new?: { match_id?: string }; old?: { match_id?: string } })?.old?.match_id;
+          if (payloadMatchId && payloadMatchId === matchId && latestStateRef.current.isSpectatorMode) {
+            void reconcileSpectatorTurn(turnId);
+          }
+          return;
+        }
+      }
+
+      await processThrowChange(event);
     };
     
     // Trigger Chad commentary for a completed turn
@@ -649,164 +580,267 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       }
     };
 
-    const shouldIgnoreRealtimePayload = (payload: { new?: { leg_id?: string; turn_id?: string }; old?: { leg_id?: string; turn_id?: string } }) => {
-      if (!payload) return false;
-      const legId = payload.new?.leg_id ?? payload.old?.leg_id ?? null;
-      if (legId) {
-        const { knownLegIds } = latestStateRef.current;
-        if (knownLegIds.size === 0) return false;
-        return !knownLegIds.has(legId);
-      }
-      const turnId = payload.new?.turn_id ?? payload.old?.turn_id ?? null;
-      if (turnId) {
-        const { knownTurnIds } = latestStateRef.current;
-        if (knownTurnIds.size === 0) return false;
-        return !knownTurnIds.has(turnId);
-      }
-      return false;
-    };
-
     // Spectator-specific throw change handler
-    const handleSpectatorThrowChange = async (event: CustomEvent) => {
-      const payload = event.detail;
-      if (shouldIgnoreRealtimePayload(payload)) {
+    const reconcileSpectatorCurrentLeg = async () => {
+      if (spectatorTurnsFetchRef.current) {
+        spectatorTurnsFetchQueuedRef.current = true;
         return;
       }
 
-      try {
+      const runFetch = async () => {
         const supabase = await getSupabaseClient();
-        
-        if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-          // Hot update: fetch latest legs to avoid stale closure
-          const { data: currentLegs } = await supabase
+        let legsSnapshot = latestStateRef.current.legs;
+        let currentLeg = legsSnapshot.find((l) => !l.winner_player_id) ?? legsSnapshot[legsSnapshot.length - 1];
+
+        if (!currentLeg) {
+          const { data: fetchedLegs } = await supabase
             .from('legs')
             .select('*')
             .eq('match_id', matchId)
             .order('leg_number', { ascending: true });
-            
-          const currentLeg = currentLegs?.find(l => !l.winner_player_id);
-          
-          if (currentLeg) {
-            const { data: updatedTurns } = await supabase
-              .from('turns')
-              .select(`
+          legsSnapshot = (fetchedLegs as LegRecord[] | null) ?? legsSnapshot;
+          currentLeg = legsSnapshot.find((l) => !l.winner_player_id) ?? legsSnapshot[legsSnapshot.length - 1];
+        }
+
+        if (!currentLeg) return;
+
+        const { data: updatedTurns } = await supabase
+          .from('turns')
+          .select(`
                 id, leg_id, player_id, turn_number, total_scored, busted, created_at,
                 throws:throws(id, turn_id, dart_index, segment, scored)
               `)
-              .eq('leg_id', currentLeg.id)
-              .order('turn_number', { ascending: true });
+          .eq('leg_id', currentLeg.id)
+          .order('turn_number', { ascending: true });
 
-            if (updatedTurns) {
-              // Check for newly completed turns and trigger celebrations (spectator mode only)
-              if (latestStateRef.current.isSpectatorMode) {
-                const newThrowCounts: Record<string, number> = {};
-                for (const turn of updatedTurns) {
-                  const throws = (turn as TurnWithThrows).throws || [];
-                  newThrowCounts[turn.id] = throws.length;
-                }
+        if (!updatedTurns) return;
 
-                // Compare with previous counts to find completed turns (use ref for latest data)
-                const prevCounts = latestStateRef.current.turnThrowCounts;
-                for (const turn of updatedTurns) {
-                  const currentCount = newThrowCounts[turn.id] || 0;
-                  const previousCount = prevCounts[turn.id] || 0;
+        setTurns((prev) => {
+          const next = updatedTurns as unknown as TurnRecord[];
+          return JSON.stringify(prev) !== JSON.stringify(next) ? next : prev;
+        });
 
-                  // Check if turn just completed (became 3 throws or busted)
-                  // Only trigger for complete rounds, not individual high darts
-                  if (previousCount < 3 && (currentCount === 3 || turn.busted) && turn.total_scored > 0) {
-                    // Check if we've already celebrated this turn
-                    if (!celebratedTurns.current.has(turn.id)) {
-                      const playerName = latestStateRef.current.playerById[turn.player_id]?.display_name || 'Player';
-                      const turnWithThrows = turn as TurnWithThrows;
-                      const throws = turnWithThrows.throws || [];
-                      const sortedThrows = throws.sort((a, b) => a.dart_index - b.dart_index);
-                      
-                      // Show all round scores with different levels of celebration
-                      celebratedTurns.current.add(turn.id);
-                      
-                      if (turn.busted) {
-                        setCelebration({
-                          score: turn.total_scored,
-                          playerName,
-                          level: 'bust',
-                          throws: sortedThrows
-                        });
-                        setTimeout(() => setCelebration(null), 3000); // 3 seconds for bust
-                      } else if (turn.total_scored === 180) {
-                        setCelebration({
-                          score: turn.total_scored,
-                          playerName,
-                          level: 'max',
-                          throws: sortedThrows
-                        });
-                        setTimeout(() => setCelebration(null), 6000); // 6 seconds for 180
-                      } else if (turn.total_scored >= 120) {
-                        setCelebration({
-                          score: turn.total_scored,
-                          playerName,
-                          level: 'godlike',
-                          throws: sortedThrows
-                        });
-                        setTimeout(() => setCelebration(null), 5500); // 5.5 seconds for godlike
-                      } else if (turn.total_scored >= 70) {
-                        setCelebration({
-                          score: turn.total_scored,
-                          playerName,
-                          level: 'excellent',
-                          throws: sortedThrows
-                        });
-                        setTimeout(() => setCelebration(null), 5000); // 5 seconds
-                      } else if (turn.total_scored >= 50) {
-                        setCelebration({
-                          score: turn.total_scored,
-                          playerName,
-                          level: 'good',
-                          throws: sortedThrows
-                        });
-                        setTimeout(() => setCelebration(null), 4000); // 4 seconds
-                      } else {
-                        setCelebration({
-                          score: turn.total_scored,
-                          playerName,
-                          level: 'info',
-                          throws: sortedThrows
-                        });
-                        setTimeout(() => setCelebration(null), 2000); // 2 seconds for basic info
-                      }
+        const throwCounts: Record<string, number> = {};
+        for (const turn of updatedTurns as TurnWithThrows[]) {
+          throwCounts[turn.id] = (turn.throws ?? []).length;
+        }
 
-                      // Trigger commentary if enabled
-                      if (commentaryEnabled && commentaryDebouncer.current.canCall()) {
-                        commentaryDebouncer.current.markCalled();
-                        const legsSnapshot = (currentLegs as LegRecord[] | null) ?? latestStateRef.current.legs;
-                        const snapshot: CommentarySnapshot = {
-                          turns: updatedTurns as TurnWithThrows[],
-                          legs: legsSnapshot,
-                          players: latestStateRef.current.players,
-                          match: latestStateRef.current.match,
-                        };
-                        triggerCommentary(turnWithThrows, playerName, sortedThrows, snapshot);
-                      }
-                    }
-                  }
-                }
-              }
-              
-              // Force React to re-render by using functional state updates
-              setTurns(prev => {
-                const newTurns = updatedTurns as unknown as TurnRecord[];
-                return JSON.stringify(prev) !== JSON.stringify(newTurns) ? newTurns : prev;
+        setTurnThrowCounts((prev) => {
+          return JSON.stringify(prev) !== JSON.stringify(throwCounts) ? throwCounts : prev;
+        });
+        latestStateRef.current = {
+          ...latestStateRef.current,
+          turns: updatedTurns as unknown as TurnRecord[],
+          turnThrowCounts: throwCounts,
+        };
+      };
+
+      spectatorTurnsFetchRef.current = runFetch();
+      await spectatorTurnsFetchRef.current;
+      spectatorTurnsFetchRef.current = null;
+
+      if (spectatorTurnsFetchQueuedRef.current) {
+        spectatorTurnsFetchQueuedRef.current = false;
+        void runFetch();
+      }
+    };
+
+    const reconcileSpectatorTurn = async (turnId: string) => {
+      try {
+        const supabase = await getSupabaseClient();
+        const { data: fetchedTurns } = await supabase
+          .from('turns')
+          .select(
+            `
+            id, leg_id, player_id, turn_number, total_scored, busted, created_at,
+            throws:throws(id, turn_id, dart_index, segment, scored)
+          `
+          )
+          .eq('id', turnId)
+          .limit(1);
+        const turn = (fetchedTurns as TurnWithThrows[] | null)?.[0];
+        if (!turn) {
+          await reconcileSpectatorCurrentLeg();
+          return;
+        }
+
+        const legsSnapshot = latestStateRef.current.legs;
+        const currentLeg = legsSnapshot.find((l) => !l.winner_player_id) ?? legsSnapshot[legsSnapshot.length - 1];
+        if (currentLeg && turn.leg_id !== currentLeg.id) return;
+
+        const existingTurns = latestStateRef.current.turns as TurnWithThrows[];
+        const existing = existingTurns.filter((t) => t.id !== turn.id);
+        let nextTurns = [...existing, turn].sort((a, b) => a.turn_number - b.turn_number);
+        let nextCounts: Record<string, number> = {
+          ...latestStateRef.current.turnThrowCounts,
+          [turn.id]: (turn.throws ?? []).length,
+        };
+
+        const pending = pendingThrowBufferRef.current.take(turnId);
+        if (pending) {
+          const result = applySpectatorThrowChange(
+            pending as {
+              eventType?: 'INSERT' | 'UPDATE' | 'DELETE';
+              new?: Partial<ThrowRecord>;
+              old?: Partial<ThrowRecord>;
+            },
+            {
+              currentLegId: currentLeg?.id,
+              turns: nextTurns as TurnWithThrows[],
+              turnThrowCounts: nextCounts,
+            }
+          );
+          nextTurns = result.turns as TurnWithThrows[];
+          nextCounts = result.turnThrowCounts;
+        }
+
+        setTurns((prev) => {
+          return JSON.stringify(prev) !== JSON.stringify(nextTurns) ? (nextTurns as unknown as TurnRecord[]) : prev;
+        });
+
+        setTurnThrowCounts((prev) => {
+          return JSON.stringify(prev) !== JSON.stringify(nextCounts) ? nextCounts : prev;
+        });
+        latestStateRef.current = {
+          ...latestStateRef.current,
+          turns: nextTurns as unknown as TurnRecord[],
+          turnThrowCounts: nextCounts,
+        };
+      } catch {
+        void reconcileSpectatorCurrentLeg();
+      }
+    };
+
+    const handleSpectatorThrowChange = async (event: CustomEvent) => {
+      const payload = event.detail;
+      const payloadTurnId =
+        (payload as { new?: { turn_id?: string }; old?: { turn_id?: string } })?.new?.turn_id ??
+        (payload as { new?: { turn_id?: string }; old?: { turn_id?: string } })?.old?.turn_id;
+      if (shouldIgnoreRealtimePayload(payload as RealtimePayload, latestStateRef.current.knownLegIds, latestStateRef.current.knownTurnIds)) {
+        if (payloadTurnId) {
+          pendingThrowBufferRef.current.set(payloadTurnId, payload);
+        }
+        return;
+      }
+
+      try {
+        const legsSnapshot = latestStateRef.current.legs;
+        const currentLeg = legsSnapshot.find((l) => !l.winner_player_id) ?? legsSnapshot[legsSnapshot.length - 1];
+        const currentLegId = currentLeg?.id;
+
+        const result = applySpectatorThrowChange(
+          payload as {
+            eventType?: 'INSERT' | 'UPDATE' | 'DELETE';
+            new?: Partial<ThrowRecord>;
+            old?: Partial<ThrowRecord>;
+          },
+          {
+            currentLegId,
+            turns: latestStateRef.current.turns as TurnWithThrows[],
+            turnThrowCounts: latestStateRef.current.turnThrowCounts,
+          }
+        );
+
+        if (result.effects.needsReconcile) {
+          if (payloadTurnId) {
+            pendingThrowBufferRef.current.set(payloadTurnId, payload);
+            if (latestStateRef.current.knownTurnIds.has(payloadTurnId)) {
+              await reconcileSpectatorTurn(payloadTurnId);
+            }
+          }
+          return;
+        }
+
+        setTurns((prev) => {
+          const next = result.turns as unknown as TurnRecord[];
+          return JSON.stringify(prev) !== JSON.stringify(next) ? next : prev;
+        });
+        setTurnThrowCounts((prev) => {
+          return JSON.stringify(prev) !== JSON.stringify(result.turnThrowCounts) ? result.turnThrowCounts : prev;
+        });
+        latestStateRef.current = {
+          ...latestStateRef.current,
+          turns: result.turns as unknown as TurnRecord[],
+          turnThrowCounts: result.turnThrowCounts,
+        };
+
+        const prevTurns = latestStateRef.current.turns as TurnWithThrows[];
+        const prevCounts = latestStateRef.current.turnThrowCounts;
+        const turnsChanged = JSON.stringify(prevTurns) !== JSON.stringify(result.turns);
+        const countsChanged = JSON.stringify(prevCounts) !== JSON.stringify(result.turnThrowCounts);
+        if (!turnsChanged && !countsChanged && payloadTurnId && latestStateRef.current.knownTurnIds.has(payloadTurnId)) {
+          await reconcileSpectatorTurn(payloadTurnId);
+        }
+
+        if (result.effects.completedTurnId) {
+          const completed = result.turns.find((t) => t.id === result.effects.completedTurnId) as TurnWithThrows | undefined;
+          if (completed && !celebratedTurns.current.has(completed.id)) {
+            const playerName = latestStateRef.current.playerById[completed.player_id]?.display_name || 'Player';
+            const throws = (completed.throws || []).slice().sort((a, b) => a.dart_index - b.dart_index);
+            const computedTotal = throws.reduce((sum, thr) => sum + thr.scored, 0);
+            const total = completed.total_scored > 0 ? completed.total_scored : computedTotal;
+
+            celebratedTurns.current.add(completed.id);
+
+            if (completed.busted) {
+              setCelebration({
+                score: total,
+                playerName,
+                level: 'bust',
+                throws,
               });
-              
-              // Update throw counts for current turn visualization
-              const throwCounts: Record<string, number> = {};
-              for (const turn of updatedTurns) {
-                const throws = (turn as TurnWithThrows).throws || [];
-                throwCounts[turn.id] = throws.length;
-              }
-              
-              setTurnThrowCounts(prev => {
-                return JSON.stringify(prev) !== JSON.stringify(throwCounts) ? throwCounts : prev;
+              setTimeout(() => setCelebration(null), 3000);
+            } else if (total === 180) {
+              setCelebration({
+                score: total,
+                playerName,
+                level: 'max',
+                throws,
               });
+              setTimeout(() => setCelebration(null), 6000);
+            } else if (total >= 120) {
+              setCelebration({
+                score: total,
+                playerName,
+                level: 'godlike',
+                throws,
+              });
+              setTimeout(() => setCelebration(null), 5500);
+            } else if (total >= 70) {
+              setCelebration({
+                score: total,
+                playerName,
+                level: 'excellent',
+                throws,
+              });
+              setTimeout(() => setCelebration(null), 5000);
+            } else if (total >= 50) {
+              setCelebration({
+                score: total,
+                playerName,
+                level: 'good',
+                throws,
+              });
+              setTimeout(() => setCelebration(null), 4000);
+            } else if (total > 0) {
+              setCelebration({
+                score: total,
+                playerName,
+                level: 'info',
+                throws,
+              });
+              setTimeout(() => setCelebration(null), 2000);
+            }
+
+            if (commentaryEnabled && commentaryDebouncer.current.canCall()) {
+              commentaryDebouncer.current.markCalled();
+              const snapshot: CommentarySnapshot = {
+                turns: result.turns as TurnWithThrows[],
+                legs: latestStateRef.current.legs,
+                players: latestStateRef.current.players,
+                match: latestStateRef.current.match,
+              };
+              triggerCommentary(completed, playerName, throws, snapshot);
             }
           }
         }
@@ -821,7 +855,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       if (latestStateRef.current.isSpectatorMode) return; // Only for normal match UI
       
       const payload = event.detail;
-      if (shouldIgnoreRealtimePayload(payload)) {
+      if (shouldIgnoreRealtimePayload(payload as RealtimePayload, latestStateRef.current.knownLegIds, latestStateRef.current.knownTurnIds)) {
         return;
       }
       
@@ -829,14 +863,20 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         const supabase = await getSupabaseClient();
         
         if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-          // Get fresh data for current leg
-          const { data: currentLegs } = await supabase
-            .from('legs')
-            .select('*')
-            .eq('match_id', matchId)
-            .order('leg_number', { ascending: true });
-            
-          const currentLeg = currentLegs?.find(l => !l.winner_player_id);
+          // Prefer local state (ref) to avoid extra round-trips on every throw.
+          let legsSnapshot = latestStateRef.current.legs;
+          let currentLeg = legsSnapshot.find((l) => !l.winner_player_id) ?? legsSnapshot[legsSnapshot.length - 1];
+
+          // Fallback if we don't have legs yet.
+          if (!currentLeg) {
+            const { data: fetchedLegs } = await supabase
+              .from('legs')
+              .select('*')
+              .eq('match_id', matchId)
+              .order('leg_number', { ascending: true });
+            legsSnapshot = (fetchedLegs as LegRecord[] | null) ?? legsSnapshot;
+            currentLeg = legsSnapshot.find((l) => !l.winner_player_id) ?? legsSnapshot[legsSnapshot.length - 1];
+          }
           
           if (currentLeg) {
             const { data: updatedTurns } = await supabase
@@ -900,10 +940,152 @@ export default function MatchClient({ matchId }: { matchId: string }) {
 
     // Handle turn changes - hot update
     const handleTurnChange = async (event: CustomEvent) => {
+      // Race guard: throws can arrive immediately after a new turn is inserted.
+      // Add this turn id to our known set early so subsequent throw events for the same turn
+      // are not ignored before state catches up.
+      const payload = event.detail as {
+        eventType?: 'INSERT' | 'UPDATE' | 'DELETE';
+        new?: Partial<TurnRecord>;
+        old?: Partial<TurnRecord>;
+      };
+      const legId = payload?.new?.leg_id ?? payload?.old?.leg_id ?? null;
+      const turnId = payload?.new?.id ?? payload?.old?.id ?? null;
+      const { knownLegIds, knownTurnIds } = latestStateRef.current;
+      if (legId && knownLegIds.size > 0 && !knownLegIds.has(legId)) {
+        return;
+      }
+      if (legId) {
+        if (turnId) {
+          knownTurnIds.add(turnId);
+        }
+      }
+
       // Use spectator logic for spectator mode, match UI logic for normal mode (use ref)
       if (latestStateRef.current.isSpectatorMode) {
-        await handleThrowChange(event);
+        const legsSnapshot = latestStateRef.current.legs;
+        const currentLeg = legsSnapshot.find((l) => !l.winner_player_id) ?? legsSnapshot[legsSnapshot.length - 1];
+        const currentLegId = currentLeg?.id;
+
+        let result = applySpectatorTurnChange(payload, {
+          currentLegId,
+          turns: latestStateRef.current.turns as TurnWithThrows[],
+          turnThrowCounts: latestStateRef.current.turnThrowCounts,
+        });
+
+        if (turnId && (!currentLegId || (legId && legId === currentLegId))) {
+          const pending = pendingThrowBuffer.take(turnId);
+          if (pending) {
+            result = applySpectatorThrowChange(
+              pending as {
+                eventType?: 'INSERT' | 'UPDATE' | 'DELETE';
+                new?: Partial<ThrowRecord>;
+                old?: Partial<ThrowRecord>;
+              },
+              {
+                currentLegId,
+                turns: result.turns as TurnWithThrows[],
+                turnThrowCounts: result.turnThrowCounts,
+              }
+            );
+          }
+        }
+
+        if (result.effects.needsReconcile) {
+          await reconcileSpectatorCurrentLeg();
+          return;
+        }
+
+        setTurns((prev) => {
+          const next = result.turns as unknown as TurnRecord[];
+          return JSON.stringify(prev) !== JSON.stringify(next) ? next : prev;
+        });
+        setTurnThrowCounts((prev) => {
+          return JSON.stringify(prev) !== JSON.stringify(result.turnThrowCounts) ? result.turnThrowCounts : prev;
+        });
+        latestStateRef.current = {
+          ...latestStateRef.current,
+          turns: result.turns as unknown as TurnRecord[],
+          turnThrowCounts: result.turnThrowCounts,
+        };
+
+        if (result.effects.completedTurnId) {
+          const completed = result.turns.find((t) => t.id === result.effects.completedTurnId) as TurnWithThrows | undefined;
+          if (completed && !celebratedTurns.current.has(completed.id)) {
+            const playerName = latestStateRef.current.playerById[completed.player_id]?.display_name || 'Player';
+            const throws = (completed.throws || []).slice().sort((a, b) => a.dart_index - b.dart_index);
+            const total = completed.total_scored > 0 ? completed.total_scored : throws.reduce((sum, thr) => sum + thr.scored, 0);
+
+            celebratedTurns.current.add(completed.id);
+
+            if (completed.busted) {
+              setCelebration({
+                score: total,
+                playerName,
+                level: 'bust',
+                throws,
+              });
+              setTimeout(() => setCelebration(null), 3000);
+            } else if (total === 180) {
+              setCelebration({
+                score: total,
+                playerName,
+                level: 'max',
+                throws,
+              });
+              setTimeout(() => setCelebration(null), 6000);
+            } else if (total >= 120) {
+              setCelebration({
+                score: total,
+                playerName,
+                level: 'godlike',
+                throws,
+              });
+              setTimeout(() => setCelebration(null), 5500);
+            } else if (total >= 70) {
+              setCelebration({
+                score: total,
+                playerName,
+                level: 'excellent',
+                throws,
+              });
+              setTimeout(() => setCelebration(null), 5000);
+            } else if (total >= 50) {
+              setCelebration({
+                score: total,
+                playerName,
+                level: 'good',
+                throws,
+              });
+              setTimeout(() => setCelebration(null), 4000);
+            } else if (total > 0) {
+              setCelebration({
+                score: total,
+                playerName,
+                level: 'info',
+                throws,
+              });
+              setTimeout(() => setCelebration(null), 2000);
+            }
+
+            if (commentaryEnabled && commentaryDebouncer.current.canCall()) {
+              commentaryDebouncer.current.markCalled();
+              const snapshot: CommentarySnapshot = {
+                turns: result.turns as TurnWithThrows[],
+                legs: latestStateRef.current.legs,
+                players: latestStateRef.current.players,
+                match: latestStateRef.current.match,
+              };
+              triggerCommentary(completed, playerName, throws, snapshot);
+            }
+          }
+        }
       } else {
+        if (turnId) {
+          const pending = pendingThrowBuffer.take(turnId);
+          if (pending) {
+            await processThrowChange({ detail: pending } as unknown as CustomEvent);
+          }
+        }
         await handleMatchUIUpdate(event);
       }
     };
@@ -944,10 +1126,13 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     window.addEventListener('supabase-match-players-change', handleMatchPlayersChange as unknown as EventListener);
 
     // Update presence to indicate we're viewing this match (use ref)
-    realtime.updatePresence(latestStateRef.current.isSpectatorMode);
+    realtimeUpdatePresence(latestStateRef.current.isSpectatorMode);
 
     // Cleanup function
     return () => {
+      pendingThrowBuffer.clear();
+      pendingTurnReconcileRef.current.clear();
+
       window.removeEventListener('supabase-throws-change', handleThrowChange as unknown as EventListener);
       window.removeEventListener('supabase-turns-change', handleTurnChange as unknown as EventListener);
       window.removeEventListener('supabase-legs-change', handleLegChange as unknown as EventListener);
@@ -956,8 +1141,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     };
 
   }, [
-    realtime,
-    realtime.isConnected,
+    realtimeIsConnected,
     realtimeEnabled,
     matchId,
     isSpectatorMode,
@@ -965,6 +1149,8 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     loadAllSpectator,
     commentaryEnabled,
     personaId,
+    realtimeConnectionStatus,
+    realtimeUpdatePresence,
   ]);
 
   // Check for spectator mode from URL params
@@ -980,7 +1166,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     if (!isSpectatorMode) return;
     
     // Only use polling if real-time is not connected or disabled
-    if (realtime.isConnected && realtimeEnabled) return;
+    if (realtimeIsConnected && realtimeEnabled) return;
     
     const interval = setInterval(() => {
       // Only reload if not currently loading to prevent flickering
@@ -990,20 +1176,22 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     }, 2000); // Refresh every 2 seconds as fallback
     
     return () => clearInterval(interval);
-  }, [isSpectatorMode, loadAllSpectator, spectatorLoading, realtime.isConnected, realtimeEnabled]);
+  }, [isSpectatorMode, loadAllSpectator, spectatorLoading, realtimeIsConnected, realtimeEnabled]);
 
-  const currentLeg = useMemo(() => {
-    const newCurrentLeg = (legs ?? []).find((l) => !l.winner_player_id) ?? legs[legs.length - 1];
-    // Clear celebrated turns when moving to a new leg
-    if (newCurrentLeg && celebratedTurns.current.size > 0) {
-      celebratedTurns.current.clear();
-    }
-    return newCurrentLeg;
-  }, [legs]);
+  const currentLeg = useMemo(
+    () => (legs ?? []).find((l) => !l.winner_player_id) ?? legs[legs.length - 1],
+    [legs]
+  );
+
+  useEffect(() => {
+    // Reset per-leg celebration tracking only when the active leg changes.
+    celebratedTurns.current.clear();
+  }, [currentLeg?.id]);
 
   const orderPlayers = useMemo(() => {
     if (!match || players.length === 0 || !currentLeg) return [] as Player[];
     const startIdx = players.findIndex((p) => p.id === currentLeg.starting_player_id);
+    if (startIdx < 0) return players;
     const rotated = [...players.slice(startIdx), ...players.slice(0, startIdx)];
     return rotated;
   }, [match, players, currentLeg]);
@@ -1137,7 +1325,16 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     // Check for local turn first (our client's active turn)
     if (localTurn.playerId === playerId) {
       const sub = localTurn.darts.reduce((s, d) => s + d.scored, 0);
-      return Math.max(0, current - sub);
+      const lastTurn = playerStats.lastTurns[playerId];
+      const throwCount = lastTurn ? turnThrowCounts[lastTurn.id] || 0 : 0;
+      const isCurrentTurn = lastTurn && lastTurn.id === ongoingTurnRef.current?.turnId;
+      const hasSubtotalInTurn =
+        isCurrentTurn &&
+        throwCount > 0 &&
+        throwCount < 3 &&
+        typeof lastTurn.total_scored === 'number' &&
+        lastTurn.total_scored > 0;
+      return Math.max(0, current - (hasSubtotalInTurn ? 0 : sub));
     }
 
     // Check for incomplete turns from other clients
@@ -1148,7 +1345,10 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         // This player has an incomplete turn with throws from another client
         const currentThrows = (lastTurn as TurnWithThrows).throws || [];
         const incompleteTotal = currentThrows.reduce((sum: number, thr: ThrowRecord) => sum + thr.scored, 0);
-        current -= incompleteTotal;
+        // `playerStats.baseScores` already subtracts `turn.total_scored`. During undo/edit flows, we may
+        // persist the partial subtotal on the turn row, so only subtract the delta to reach `sum(throws)`.
+        const persistedSubtotal = typeof lastTurn.total_scored === 'number' ? lastTurn.total_scored : 0;
+        current -= incompleteTotal - persistedSubtotal;
       }
     }
 
@@ -1459,6 +1659,28 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   async function undoLastThrow() {
     if (!currentLeg) return;
     const supabase = await getSupabaseClient();
+    // If we have an empty local turn (no darts), remove it before undoing previous throws
+    if (ongoingTurnRef.current && ongoingTurnRef.current.darts.length === 0) {
+      const emptyTurnId = ongoingTurnRef.current.turnId;
+      const { data: existingThrows, error: emptyErr } = await supabase
+        .from('throws')
+        .select('id')
+        .eq('turn_id', emptyTurnId)
+        .limit(1);
+      if (emptyErr) {
+        alert(`Failed to check empty turn: ${emptyErr.message}`);
+        return;
+      }
+      if (!existingThrows || existingThrows.length === 0) {
+        const { error: delTurnErr } = await supabase.from('turns').delete().eq('id', emptyTurnId);
+        if (delTurnErr) {
+          alert(`Failed to remove empty turn: ${delTurnErr.message}`);
+          return;
+        }
+        ongoingTurnRef.current = null;
+        setLocalTurn({ playerId: null, darts: [] });
+      }
+    }
     // If we have local darts in the ongoing turn, remove last one
     if (ongoingTurnRef.current && ongoingTurnRef.current.darts.length > 0) {
       const turnId = ongoingTurnRef.current.turnId;
@@ -1474,24 +1696,45 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       }
       ongoingTurnRef.current.darts.pop();
       setLocalTurn((prev) => ({ playerId: prev.playerId, darts: prev.darts.slice(0, -1) }));
+      const newTotal = ongoingTurnRef.current.darts.reduce((sum, dart) => sum + dart.scored, 0);
+      await supabase.from('turns').update({ total_scored: newTotal, busted: false }).eq('id', turnId);
+      await loadAll();
       return;
     }
 
     // Otherwise, remove the last persisted throw in the current leg
-    const { data: lastList, error: qErr } = await supabase
-      .from('throws')
-      .select('id, turn_id, dart_index, segment, scored, turns:turn_id!inner(leg_id, player_id, turn_number)')
-      .eq('turns.leg_id', currentLeg.id)
-      .order('turn_number', { ascending: false, foreignTable: 'turns' })
-      .order('dart_index', { ascending: false })
-      .limit(1);
-    if (qErr) {
-      alert(`Failed to query last throw: ${qErr.message}`);
+    const { data: legTurns, error: turnsErr } = await supabase
+      .from('turns')
+      .select('id, player_id, turn_number')
+      .eq('leg_id', currentLeg.id)
+      .order('turn_number', { ascending: false });
+    if (turnsErr) {
+      alert(`Failed to query turns: ${turnsErr.message}`);
       return;
     }
-    const last = ((lastList ?? [])[0] as unknown) as
+    let last:
       | { id: string; turn_id: string; dart_index: number; segment: string; scored: number; turns: { leg_id: string; player_id: string; turn_number: number } }
       | undefined;
+    for (const t of legTurns ?? []) {
+      const { data: thrRows, error: thrErr } = await supabase
+        .from('throws')
+        .select('id, turn_id, dart_index, segment, scored')
+        .eq('turn_id', t.id)
+        .order('dart_index', { ascending: false })
+        .limit(1);
+      if (thrErr) {
+        alert(`Failed to query last throw: ${thrErr.message}`);
+        return;
+      }
+      if (thrRows && thrRows.length > 0) {
+        const thr = thrRows[0];
+        last = {
+          ...thr,
+          turns: { leg_id: currentLeg.id, player_id: t.player_id, turn_number: t.turn_number },
+        };
+        break;
+      }
+    }
     if (!last) return; // nothing to undo
 
     const { error: delErr2 } = await supabase.from('throws').delete().eq('id', last.id);
@@ -1513,9 +1756,22 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     }));
 
     if (darts.length === 0) {
-      // Delete empty turn
+      // If undoing the current player's only throw, keep the turn open with 0 darts
+      if (currentPlayer?.id === last.turns.player_id) {
+        await supabase.from('turns').update({ total_scored: 0, busted: false }).eq('id', last.turn_id);
+        ongoingTurnRef.current = {
+          turnId: last.turn_id,
+          playerId: last.turns.player_id,
+          darts: [],
+          startScore: getScoreForPlayer(last.turns.player_id),
+        };
+        setLocalTurn({ playerId: last.turns.player_id, darts: [] });
+        await loadAll();
+        return;
+      }
+
+      // Otherwise delete empty turn and reopen previous player's turn
       await supabase.from('turns').delete().eq('id', last.turn_id);
-      // After removing an entire turn, compute whose turn it should be and reopen if it's the previous player's turn
       await loadAll();
       const prevLeg = (legs ?? []).find((l) => !l.winner_player_id) ?? legs[legs.length - 1];
       if (!prevLeg) return;
@@ -1577,7 +1833,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     // Load turns for leg
     const { data: tData, error: tErr } = await supabase
       .from('turns')
-      .select('id, player_id, turn_number')
+      .select('id, player_id, turn_number, total_scored, busted')
       .eq('leg_id', currentLeg.id)
       .order('turn_number');
     if (tErr) {
@@ -1596,9 +1852,9 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       return;
     }
 
-    const legTurns = ((tData ?? []) as { id: string; player_id: string; turn_number: number }[]).sort(
-      (a, b) => a.turn_number - b.turn_number
-    );
+    const legTurns = (
+      (tData ?? []) as { id: string; player_id: string; turn_number: number; total_scored: number | null; busted: boolean }[]
+    ).sort((a, b) => a.turn_number - b.turn_number);
     const throwsByTurn = new Map<string, { segment: string; scored: number; dart_index: number }[]>();
     for (const thr of ((thrData ?? []) as { id: string; turn_id: string; dart_index: number; segment: string; scored: number }[])) {
       if (!throwsByTurn.has(thr.turn_id)) throwsByTurn.set(thr.turn_id, []);
@@ -1652,10 +1908,12 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       if (!busted) {
         perPlayerScore.set(t.player_id, current);
       }
-      turnUpdates.push({ id: t.id, total_scored: total, busted });
+      if (t.total_scored !== total || t.busted !== busted) {
+        turnUpdates.push({ id: t.id, total_scored: total, busted });
+      }
     }
 
-    // Persist only changed values
+    // Persist only changed values (can be many turns if editing historical throws).
     await Promise.all(
       turnUpdates.map((u) => supabase.from('turns').update({ total_scored: u.total_scored, busted: u.busted }).eq('id', u.id))
     );
@@ -2196,166 +2454,17 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         
         {/* Cards Row - responsive layout */}
         <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
-          {/* Live Match Card */}
-          <Card className="xl:col-span-2">
-          <CardHeader>
-            <CardTitle>Live Match</CardTitle>
-            <CardDescription>
-              {match.start_score} • {match.finish.replace('_', ' ')} • Legs to win {match.legs_to_win}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {/* Current player indicator */}
-              {spectatorCurrentPlayer && (
-                <div className="text-center">
-                  <div className="text-lg font-semibold text-muted-foreground">Current Turn</div>
-                  <div className="text-3xl font-bold text-primary">{spectatorCurrentPlayer.display_name}</div>
-                </div>
-              )}
-              
-              {/* Checkout suggestions - with space reservation */}
-              <div className="min-h-8 flex justify-center">
-                {(() => {
-                  if (!spectatorCurrentPlayer) return <div className="invisible">-</div>;
-                  
-                  const currentScore = getSpectatorScore(
-                    turns,
-                    currentLeg?.id,
-                    startScore,
-                    turnThrowCounts,
-                    spectatorCurrentPlayer.id
-                  );
-                  const playerTurns = turns.filter(turn => turn.player_id === spectatorCurrentPlayer.id);
-                  const lastTurn = playerTurns.length > 0 ? playerTurns[playerTurns.length - 1] : null;
-                  const throwCount = lastTurn ? turnThrowCounts[lastTurn.id] || 0 : 0;
-                  
-                  // Determine if this is a new turn starting or continuing an incomplete turn
-                  // New turn if: no turns yet, last turn was busted, or last turn completed (3 throws)
-                  const isNewTurnStarting = !lastTurn || lastTurn.busted || throwCount === 3;
-                  const dartsLeft = isNewTurnStarting ? 3 : Math.max(0, 3 - throwCount);
-                  
-                  const paths = computeCheckoutSuggestions(currentScore, dartsLeft, finishRule);
-                  
-                  // Only show checkout suggestions if we're actually in a checkout scenario
-                  const shouldShowCheckout = currentScore > 0 && currentScore <= 170 && dartsLeft > 0;
-                  
-                  return (
-                    <div className="flex flex-wrap items-center justify-center gap-2">
-                      {shouldShowCheckout && paths.length > 0
-                        ? paths.map((p, i) => (
-                            <Badge key={i} variant="outline" className="text-xs">
-                              {p.join(', ')}
-                            </Badge>
-                          ))
-                        : shouldShowCheckout ? (
-                            <Badge variant="outline" className="text-xs text-muted-foreground">
-                              No checkout available
-                            </Badge>
-                          ) : (
-                            <div className="invisible">-</div>
-                          )}
-                    </div>
-                  );
-                })()}
-              </div>
-              
-              {/* Player scores with inline throw indicators */}
-              <div className="grid gap-3">
-                {orderPlayers.map((player) => {
-                  const score = getSpectatorScore(
-                    turns,
-                    currentLeg?.id,
-                    startScore,
-                    turnThrowCounts,
-                    player.id
-                  );
-                  const avg = getAvgForPlayer(player.id);
-                  const deco = decorateAvg(avg);
-                  const isCurrent = spectatorCurrentPlayer?.id === player.id;
-                  
-                  // Get throws to display for this player
-                  let displayThrows: ThrowRecord[] = [];
-                  const playerTurns = turns.filter(turn => turn.player_id === player.id);
-                  const lastTurn = playerTurns.length > 0 ? playerTurns[playerTurns.length - 1] : null;
-                  
-                  if (lastTurn) {
-                    const throwCount = turnThrowCounts[lastTurn.id] || 0;
-                    const isPlayerNewTurnStarting = lastTurn.busted || throwCount === 3;
-                    
-                    if (isCurrent && isPlayerNewTurnStarting) {
-                      // Current player starting new turn - don't show any throws yet
-                      displayThrows = [];
-                    } else if (isCurrent && throwCount > 0 && throwCount < 3) {
-                      // Current player with incomplete turn - show current throws
-                      displayThrows = (lastTurn as TurnWithThrows).throws || [];
-                    } else if (!isCurrent && (throwCount === 3 || lastTurn.busted)) {
-                      // Show last completed turn for non-current players
-                      displayThrows = (lastTurn as TurnWithThrows).throws || [];
-                    }
-                    
-                    displayThrows.sort((a, b) => a.dart_index - b.dart_index);
-                  }
-                  
-                  return (
-                    <div
-                      key={player.id}
-                      className={`p-4 rounded-lg transition-all duration-500 ease-in-out ${
-                        isCurrent 
-                          ? 'border-2 border-primary bg-primary/5 shadow-lg scale-[1.02]' 
-                          : 'border bg-card hover:bg-accent/30'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          {isCurrent && <Badge variant="default">Playing</Badge>}
-                          <div className="font-semibold text-lg">{player.display_name}</div>
-                          
-                          {/* Inline throw indicators */}
-                          {displayThrows.length > 0 && (
-                            <ThrowSegmentBadges
-                              throws={displayThrows}
-                              highlightIncomplete={isCurrent}
-                              showCount
-                              placeholder="—"
-                              className="ml-2"
-                            />
-                          )}
-                        </div>
-                        <div className="text-right">
-                          <div className="text-3xl font-mono font-bold">{score}</div>
-                          <div className="flex flex-col items-end gap-1">
-                            <div className={`text-sm font-medium ${deco.cls}`}>
-                              {deco.emoji} {avg.toFixed(1)} avg
-                            </div>
-                            {(() => {
-                              const { lastRoundScore, bestRoundScore } = getLegRoundStats(
-                                turns,
-                                currentLeg?.id,
-                                player.id
-                              );
-                              
-                              return (
-                                <div className="space-y-0.5">
-                                  <div className="text-xs text-muted-foreground">
-                                    Last: {lastRoundScore}
-                                  </div>
-                                  <div className="text-xs text-muted-foreground">
-                                    Best: {bestRoundScore}
-                                  </div>
-                                </div>
-                              );
-                            })()}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </CardContent>
-          </Card>
+          <SpectatorLiveMatchCard
+            match={match}
+            orderPlayers={orderPlayers}
+            spectatorCurrentPlayer={spectatorCurrentPlayer}
+            turns={turns}
+            currentLegId={currentLeg?.id}
+            startScore={startScore}
+            finishRule={finishRule}
+            turnThrowCounts={turnThrowCounts}
+            getAvgForPlayer={getAvgForPlayer}
+          />
 
           {/* Legs Summary */}
           {legs.length > 0 && (
@@ -2754,269 +2863,43 @@ export default function MatchClient({ matchId }: { matchId: string }) {
             )}
           </div>
           {/* Match info and summaries */}
-        {/* Edit throws modal */}
-        {editOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center">
-            <div className="absolute inset-0 bg-black/50" onClick={() => setEditOpen(false)} />
-            <div className="relative w-[min(700px,95vw)] max-h-[90vh] overflow-auto rounded-lg border bg-background p-4 shadow-xl">
-              <div className="flex items-center justify-between mb-3">
-                <div className="text-lg font-semibold">Edit throws</div>
-                <Button variant="ghost" onClick={() => setEditOpen(false)}>Close</Button>
-              </div>
-              <div className="space-y-3">
-                <div className="text-sm text-muted-foreground">Tap a throw, then use the keypad to set a new value.</div>
-                <div className="max-h-64 overflow-auto rounded border divide-y">
-                  {(() => {
-                    const byTurn = new Map<number, EditableThrow[]>();
-                    for (const r of editingThrows) {
-                      if (!byTurn.has(r.turn_number)) byTurn.set(r.turn_number, [] as EditableThrow[]);
-                      byTurn.get(r.turn_number)!.push(r);
-                    }
-                    const ordered = Array.from(byTurn.entries()).sort((a, b) => a[0] - b[0]);
-                    return ordered.length > 0 ? (
-                      <div>
-                        {ordered.map(([tn, list]) => (
-                          <div key={tn} className="p-2">
-                            <div className="mb-2 flex items-center justify-between text-sm">
-                              <div className="font-medium">Turn {tn}</div>
-                              <div className="text-muted-foreground">
-                                {playerById[list[0].player_id]?.display_name ?? 'Player'}
-                              </div>
-                            </div>
-                            <div className="grid grid-cols-3 gap-2">
-                              {list
-                                .sort((a, b) => a.dart_index - b.dart_index)
-                                .map((thr) => {
-                                  const isSel = selectedThrowId === thr.id;
-                                  return (
-                                    <button
-                                      key={thr.id}
-                                      className={`rounded border px-3 py-2 text-left ${
-                                        isSel ? 'bg-primary/10 border-primary' : 'hover:bg-accent'
-                                      }`}
-                                      onClick={() => setSelectedThrowId(thr.id)}
-                                    >
-                                      <div className="text-xs text-muted-foreground">Dart {thr.dart_index}</div>
-                                      <div className="font-mono">{thr.segment}</div>
-                                    </button>
-                                  );
-                                })}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="p-4 text-center text-sm text-muted-foreground">No throws yet.</div>
-                    );
-                  })()}
-                </div>
-                <div className="mt-3">
-                  {selectedThrowId ? (
-                    <div className="space-y-2">
-                      <div className="text-sm text-muted-foreground">Select a new segment:</div>
-                      <MobileKeypad onHit={(seg) => { void updateSelectedThrow(seg); }} />
-                    </div>
-                  ) : (
-                    <div className="rounded border p-4 text-center text-sm text-muted-foreground">Select a throw above to edit</div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+        <EditThrowsModal
+          open={editOpen}
+          onClose={() => setEditOpen(false)}
+          throws={editingThrows}
+          playerById={playerById}
+          selectedThrowId={selectedThrowId}
+          onSelectThrow={(throwId) => setSelectedThrowId(throwId)}
+          onUpdateThrow={updateSelectedThrow}
+        />
         
-        {/* Edit players modal */}
-        {editPlayersOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/50" onClick={() => setEditPlayersOpen(false)} />
-            <div className="relative w-full max-w-[600px] max-h-[90vh] overflow-auto rounded-lg border bg-background p-4 shadow-xl">
-              <div className="flex items-center justify-between mb-3">
-                <div className="text-lg font-semibold">Edit Players</div>
-                <Button variant="ghost" onClick={() => setEditPlayersOpen(false)}>Close</Button>
-              </div>
-              
-              <div className="space-y-4">
-                <div className="text-sm text-muted-foreground">
-                  {canEditPlayers 
-                    ? 'You can add or remove players before the first round is completed.' 
-                    : 'Players cannot be edited after the first round is completed.'}
-                </div>
-                
-                {/* Current players */}
-                <div>
-                  <div className="font-medium mb-2">
-                    Current Players ({players.length})
-                    {canReorderPlayers && <span className="ml-2 text-xs text-muted-foreground">(reorder enabled)</span>}
-                  </div>
-                  <div className="space-y-2 max-h-48 overflow-auto border rounded p-2">
-                    {players.map((player, index) => (
-                      <div key={player.id} className="flex items-center gap-2 py-2 px-3 bg-accent/30 rounded">
-                        {/* Reorder buttons - only visible when no turns exist */}
-                        {canReorderPlayers && (
-                          <div className="flex flex-col gap-0.5 shrink-0">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => movePlayerUp(index)}
-                              disabled={index === 0}
-                              className="h-5 w-6 p-0"
-                            >
-                              <ChevronUp className="h-3 w-3" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => movePlayerDown(index)}
-                              disabled={index === players.length - 1}
-                              className="h-5 w-6 p-0"
-                            >
-                              <ChevronDown className="h-3 w-3" />
-                            </Button>
-                          </div>
-                        )}
-                        <div className="flex items-center gap-2 flex-1 min-w-0">
-                          <span className="text-sm text-muted-foreground">#{index + 1}</span>
-                          <span className="truncate">{player.display_name}</span>
-                        </div>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => removePlayerFromMatch(player.id)}
-                          disabled={players.length <= 2}
-                          className="shrink-0 min-w-[70px]"
-                        >
-                          Remove
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                
-                {/* Add new player */}
-                <div>
-                  <div className="font-medium mb-2">Add New Player</div>
-                  <div className="flex gap-2">
-                    <Input
-                      placeholder="Player name"
-                      value={newPlayerName}
-                      onChange={(e) => setNewPlayerName(e.target.value)}
-                    />
-                    <Button onClick={addNewPlayer} disabled={!newPlayerName.trim()}>
-                      Add New
-                    </Button>
-                  </div>
-                </div>
-                
-                {/* Add existing players */}
-                <div>
-                  <div className="font-medium mb-2">Add Existing Player</div>
-                  <div className="space-y-2 max-h-48 overflow-auto border rounded p-2">
-                    {availablePlayers
-                      .filter(player => !players.some(p => p.id === player.id))
-                      .map(player => (
-                        <div key={player.id} className="flex items-center gap-2 py-2 px-3 hover:bg-accent/30 rounded">
-                          <span className="flex-1 min-w-0 truncate">{player.display_name}</span>
-                          <Button 
-                            variant="outline" 
-                            size="sm"
-                            onClick={() => addPlayerToMatch(player.id)}
-                            className="shrink-0 min-w-[50px]"
-                          >
-                            Add
-                          </Button>
-                        </div>
-                      ))}
-                    {availablePlayers.filter(player => !players.some(p => p.id === player.id)).length === 0 && (
-                      <div className="text-center text-sm text-muted-foreground py-4">
-                        No additional players available
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+        <EditPlayersModal
+          open={editPlayersOpen}
+          onClose={() => setEditPlayersOpen(false)}
+          canEditPlayers={canEditPlayers}
+          canReorderPlayers={canReorderPlayers}
+          players={players}
+          availablePlayers={availablePlayers}
+          newPlayerName={newPlayerName}
+          onNewPlayerNameChange={setNewPlayerName}
+          onAddNewPlayer={addNewPlayer}
+          onAddExistingPlayer={addPlayerToMatch}
+          onRemovePlayer={removePlayerFromMatch}
+          onMovePlayerUp={movePlayerUp}
+          onMovePlayerDown={movePlayerDown}
+        />
         
-        <Card>
-          <CardHeader>
-            <CardTitle>Match</CardTitle>
-            <CardDescription>
-              Start {match.start_score} • {match.finish.replace('_', ' ')} • Legs to win {match.legs_to_win}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 gap-2">
-              {orderPlayers.map((p) => {
-                const score = getScoreForPlayer(p.id);
-                const avg = getAvgForPlayer(p.id);
-                const deco = decorateAvg(avg);
-                const isCurrent = currentPlayer?.id === p.id;
-                const isLocalActiveTurn = localTurn.playerId === p.id && localTurn.darts.length > 0;
-                
-                // Check for throws from any client (including other clients)
-                let currentThrows: ThrowRecord[] = [];
-                let isRemoteActiveTurn = false;
-                const playerTurns = turns.filter(turn => turn.player_id === p.id);
-                const lastTurn = playerTurns.length > 0 ? playerTurns[playerTurns.length - 1] : null;
-                if (lastTurn && !lastTurn.busted && localTurn.playerId !== p.id) {
-                  const throwCount = turnThrowCounts[lastTurn.id] || 0;
-                  if (throwCount > 0 && throwCount < 3) {
-                    isRemoteActiveTurn = true;
-                    currentThrows = (lastTurn as TurnWithThrows).throws || [];
-                    currentThrows.sort((a, b) => a.dart_index - b.dart_index);
-                  }
-                }
-                
-                const isActiveTurn = isLocalActiveTurn || isRemoteActiveTurn;
-                return (
-                  <div
-                    key={p.id}
-                    className={`flex items-center justify-between rounded px-3 py-2 transition-colors ${
-                      isCurrent ? 'border-2 border-yellow-500 bg-yellow-500/10' : 'border'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      {isCurrent && !matchWinnerId && <Badge>Up</Badge>}
-                      <div className="font-medium">{p.display_name}</div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      {isActiveTurn && (
-                        <div className="flex gap-1">
-                          {isLocalActiveTurn ? (
-                            // Show local client's throws
-                            <>
-                              {localTurn.darts.map((d, idx) => (
-                                <Badge key={idx} variant="secondary">{d.label}</Badge>
-                              ))}
-                              {Array.from({ length: 3 - localTurn.darts.length }).map((_, idx) => (
-                                <Badge key={`p${idx}`} variant="outline">–</Badge>
-                              ))}
-                            </>
-                          ) : (
-                            // Show remote client's throws
-                            <>
-                              {currentThrows.map((thr, idx) => (
-                                <Badge key={idx} variant="default" className="bg-blue-500">{thr.segment}</Badge>
-                              ))}
-                              {Array.from({ length: 3 - currentThrows.length }).map((_, idx) => (
-                                <Badge key={`r${idx}`} variant="outline">–</Badge>
-                              ))}
-                            </>
-                          )}
-                        </div>
-                      )}
-                      <div className="flex flex-col items-end">
-                        <div className="text-2xl font-mono min-w-[3ch] text-right">{score}</div>
-                        <div className={`text-xs ${deco.cls}`}>{deco.emoji} {avg.toFixed(2)} avg</div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
+        <MatchPlayersCard
+          match={match}
+          orderPlayers={orderPlayers}
+          currentPlayerId={currentPlayer?.id ?? null}
+          matchWinnerId={matchWinnerId}
+          localTurn={localTurn}
+          turns={turns}
+          turnThrowCounts={turnThrowCounts}
+          getScoreForPlayer={getScoreForPlayer}
+          getAvgForPlayer={getAvgForPlayer}
+        />
         {match && match.legs_to_win > 1 && legs.length > 0 && (
           <Card>
             <CardHeader>

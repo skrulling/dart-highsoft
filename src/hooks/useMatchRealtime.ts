@@ -152,6 +152,13 @@ export function useMatchRealtime({
       const payload = event.detail as RealtimePayload;
       const legId = getRealtimePayloadLegId(payload);
       const turnId = getRealtimePayloadTurnId(payload);
+      const { knownLegIds } = latestStateRef.current;
+
+      // Until initial match state is loaded, ignore throw events entirely.
+      // This prevents cross-match contamination when multiple matches are active.
+      if (knownLegIds.size === 0) {
+        return;
+      }
 
       if (!legId && turnId) {
         const { knownTurnIds, turns } = latestStateRef.current;
@@ -736,10 +743,15 @@ export function useMatchRealtime({
       const legId = payload?.new?.leg_id ?? payload?.old?.leg_id ?? null;
       const turnId = payload?.new?.id ?? payload?.old?.id ?? null;
       const { knownLegIds, knownTurnIds } = latestStateRef.current;
-      if (legId && knownLegIds.size > 0 && !knownLegIds.has(legId)) {
-        return;
-      }
       if (legId) {
+        // Until initial match state is loaded, ignore turn events entirely.
+        // This prevents unknown turns from other matches being added as known.
+        if (knownLegIds.size === 0) {
+          return;
+        }
+        if (!knownLegIds.has(legId)) {
+          return;
+        }
         if (turnId) {
           knownTurnIds.add(turnId);
         }

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { getSupabaseClient } from '@/lib/supabaseClient';
+import { apiRequest } from '@/lib/apiClient';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
@@ -25,14 +26,15 @@ export default function PlayersPage() {
     e.preventDefault();
     if (!name.trim()) return;
     setLoading(true);
-    const supabase = await getSupabaseClient();
-    const { error } = await supabase.from('players').insert({ display_name: name.trim() });
-    setLoading(false);
-    if (!error) {
+    try {
+      await apiRequest('/api/players', { body: { displayName: name.trim() } });
       setName('');
       load();
-    } else {
-      alert(error.message);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to create player';
+      alert(message);
+    } finally {
+      setLoading(false);
     }
   }
 

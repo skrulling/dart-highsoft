@@ -128,6 +128,12 @@ vi.mock('@/utils/eloRatingMultiplayer', () => ({
 }));
 
 window.alert = vi.fn();
+const createJsonResponse = (data: unknown, ok: boolean = true, status: number = 200) =>
+  Promise.resolve({
+    ok,
+    status,
+    json: () => Promise.resolve(data),
+  } as Response);
 
 describe('MatchClient', () => {
   beforeAll(async () => {
@@ -143,6 +149,41 @@ describe('MatchClient', () => {
     // Reset mockRealtime to default connected state
     mockRealtime.connectionStatus = 'connected';
     mockRealtime.isConnected = true;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      const method = (init?.method ?? 'POST').toUpperCase();
+      const body = init?.body ? JSON.parse(init.body as string) : undefined;
+
+      if (url.includes('/api/matches/') && url.includes('/throws') && method === 'DELETE' && body?.turnId) {
+        mockDb.throws = mockDb.throws.filter(
+          (t) => !(t.turn_id === body.turnId && t.dart_index === body.dartIndex)
+        );
+        return createJsonResponse({ ok: true });
+      }
+
+      if (url.includes('/api/matches/') && url.includes('/throws/') && method === 'DELETE') {
+        const throwId = url.split('/throws/')[1]!;
+        mockDb.throws = mockDb.throws.filter((t) => t.id !== throwId);
+        return createJsonResponse({ ok: true });
+      }
+
+      if (url.includes('/api/matches/') && url.includes('/turns/') && method === 'PATCH') {
+        const turnId = url.split('/turns/')[1]!;
+        mockDb.turns = mockDb.turns.map((t) =>
+          t.id === turnId ? { ...t, total_scored: body.totalScored, busted: body.busted } : t
+        );
+        return createJsonResponse({ ok: true });
+      }
+
+      if (url.includes('/api/matches/') && url.includes('/turns/') && method === 'DELETE') {
+        const turnId = url.split('/turns/')[1]!;
+        mockDb.turns = mockDb.turns.filter((t) => t.id !== turnId);
+        mockDb.throws = mockDb.throws.filter((t) => t.turn_id !== turnId);
+        return createJsonResponse({ ok: true });
+      }
+
+      return createJsonResponse({ ok: true });
+    }));
   });
 
   describe('basic rendering', () => {

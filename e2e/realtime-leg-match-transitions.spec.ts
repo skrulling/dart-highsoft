@@ -45,20 +45,33 @@ async function expectCurrentPlayer(page: import('@playwright/test').Page, name: 
   await expect(upContainer.getByText(name, { exact: true })).toBeVisible({ timeout: 15000 });
 }
 
-async function click20AndWaitPts(page: import('@playwright/test').Page, pts: number) {
+async function expectMatchScore(
+  page: import('@playwright/test').Page,
+  name: string,
+  score: number,
+  options?: { timeout?: number }
+) {
+  const matchCard = page.getByText('Match', { exact: true }).locator('..').locator('..');
+  const row = matchCard.getByText(name, { exact: true }).locator('..').locator('..');
+  await expect(row.locator('div.text-2xl')).toHaveText(String(score), options);
+}
+
+async function click20AndWaitPts(page: import('@playwright/test').Page, playerName: string, pts: number) {
   await page.getByRole('button', { name: '20', exact: true }).click();
-  // Wait for the current-player header badge to reflect the new score before sending the next click.
-  await expect(page.getByText(`${pts} pts`, { exact: true }).first()).toBeVisible({ timeout: 15000 });
+  await expectMatchScore(page, playerName, pts, { timeout: 15000 });
 }
 
 async function click20AndWaitTurnChange(
   page: import('@playwright/test').Page,
   nextPlayerName: string,
+  nextPlayerScore: number,
+  previousPlayerName: string,
   nextPts: number
 ) {
   await page.getByRole('button', { name: '20', exact: true }).click();
   await expectCurrentPlayer(page, nextPlayerName);
-  await expect(page.getByText(`${nextPts} pts`, { exact: true }).first()).toBeVisible({ timeout: 15000 });
+  await expectMatchScore(page, nextPlayerName, nextPlayerScore, { timeout: 15000 });
+  await expectMatchScore(page, previousPlayerName, nextPts, { timeout: 15000 });
 }
 
 test.describe('Realtime leg/match transitions + multiplayer rotation', () => {
@@ -172,18 +185,18 @@ test.describe('Realtime leg/match transitions + multiplayer rotation', () => {
     await expectCurrentPlayer(page, PLAYER_NAMES.ONE);
 
     // Player 1: 3 darts
-    await click20AndWaitPts(page, 281);
-    await click20AndWaitPts(page, 261);
-    await click20AndWaitTurnChange(page, PLAYER_NAMES.TWO, 301);
+    await click20AndWaitPts(page, PLAYER_NAMES.ONE, 281);
+    await click20AndWaitPts(page, PLAYER_NAMES.ONE, 261);
+    await click20AndWaitTurnChange(page, PLAYER_NAMES.TWO, 301, PLAYER_NAMES.ONE, 241);
 
     // Player 2: 3 darts
-    await click20AndWaitPts(page, 281);
-    await click20AndWaitPts(page, 261);
-    await click20AndWaitTurnChange(page, PLAYER_NAMES.THREE, 301);
+    await click20AndWaitPts(page, PLAYER_NAMES.TWO, 281);
+    await click20AndWaitPts(page, PLAYER_NAMES.TWO, 261);
+    await click20AndWaitTurnChange(page, PLAYER_NAMES.THREE, 301, PLAYER_NAMES.TWO, 241);
 
     // Player 3: 3 darts -> wraps back to Player 1
-    await click20AndWaitPts(page, 281);
-    await click20AndWaitPts(page, 261);
-    await click20AndWaitTurnChange(page, PLAYER_NAMES.ONE, 241);
+    await click20AndWaitPts(page, PLAYER_NAMES.THREE, 281);
+    await click20AndWaitPts(page, PLAYER_NAMES.THREE, 261);
+    await click20AndWaitTurnChange(page, PLAYER_NAMES.ONE, 241, PLAYER_NAMES.THREE, 241);
   });
 });

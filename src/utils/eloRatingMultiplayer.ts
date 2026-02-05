@@ -1,4 +1,5 @@
 import { getSupabaseClient } from '@/lib/supabaseClient';
+import { apiRequest } from '@/lib/apiClient';
 
 export type MultiEloRating = {
   id: string;
@@ -68,25 +69,14 @@ export async function updateMatchEloRatingsMultiplayer(
   results: MultiplayerResult[],
   kFactor: number = 32
 ): Promise<void> {
-  const supabase = await getSupabaseClient();
-
   if (!results || results.length < 2) return;
 
   const sorted = [...results].sort((a, b) => a.rank - b.rank);
   const playerIds = sorted.map(r => r.playerId);
   const ranks = sorted.map(r => r.rank);
-
-  const { error } = await supabase.rpc('update_elo_ratings_multiplayer', {
-    p_match_id: matchId,
-    p_player_ids: playerIds,
-    p_ranks: ranks,
-    p_k_factor: kFactor,
+  await apiRequest('/api/elo-multi/update', {
+    body: { matchId, playerIds, ranks, kFactor },
   });
-
-  if (error) {
-    console.error('Error updating multiplayer Elo ratings:', error);
-    throw error;
-  }
 }
 
 export async function getPlayerMultiEloStats(playerId: string): Promise<PlayerMultiEloStats | null> {
@@ -152,4 +142,3 @@ export async function getRecentMultiEloChanges(limit: number = 20): Promise<Rece
 export function shouldMatchBeRatedMultiplayer(playerCount: number): boolean {
   return playerCount > 2;
 }
-

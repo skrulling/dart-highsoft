@@ -1,4 +1,5 @@
 import { getSupabaseClient } from '@/lib/supabaseClient';
+import { apiRequest } from '@/lib/apiClient';
 
 export type AroundWorldVariant = 'single' | 'double';
 
@@ -42,55 +43,23 @@ export async function createAroundWorldSession(
   playerId: string, 
   variant: AroundWorldVariant
 ): Promise<AroundWorldSession> {
-  const supabase = await getSupabaseClient();
-  
-  const { data, error } = await supabase
-    .from('around_world_sessions')
-    .insert({
-      player_id: playerId,
-      variant: variant,
-      started_at: new Date().toISOString()
-    })
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data;
+  const result = await apiRequest<{ session: AroundWorldSession }>('/api/around-world/sessions', {
+    body: { playerId, variant },
+  });
+  return result.session;
 }
 
 // Complete an Around the World session
 export async function completeAroundWorldSession(sessionId: string): Promise<AroundWorldSession> {
+  await apiRequest(`/api/around-world/sessions/${sessionId}/complete`, { method: 'PATCH' });
   const supabase = await getSupabaseClient();
-  
-  const completedAt = new Date().toISOString();
-  
-  // First get the session to calculate duration
-  const { data: session, error: fetchError } = await supabase
-    .from('around_world_sessions')
-    .select('started_at')
-    .eq('id', sessionId)
-    .single();
-    
-  if (fetchError) throw fetchError;
-  
-  // Calculate duration in seconds
-  const startTime = new Date(session.started_at).getTime();
-  const endTime = new Date(completedAt).getTime();
-  const durationSeconds = Math.round((endTime - startTime) / 1000);
-  
   const { data, error } = await supabase
     .from('around_world_sessions')
-    .update({
-      completed_at: completedAt,
-      duration_seconds: durationSeconds,
-      is_completed: true
-    })
+    .select('*')
     .eq('id', sessionId)
-    .select()
     .single();
-
   if (error) throw error;
-  return data;
+  return data as AroundWorldSession;
 }
 
 // Get current active session for player
@@ -102,6 +71,7 @@ export async function getActiveAroundWorldSession(playerId: string): Promise<Aro
     .select('*')
     .eq('player_id', playerId)
     .eq('is_completed', false)
+    .eq('is_cancelled', false)
     .order('started_at', { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -166,15 +136,7 @@ export async function getPlayerAroundWorldStats(playerId: string): Promise<Playe
 
 // Delete incomplete session (if user navigates away)
 export async function cancelAroundWorldSession(sessionId: string): Promise<void> {
-  const supabase = await getSupabaseClient();
-  
-  const { error } = await supabase
-    .from('around_world_sessions')
-    .delete()
-    .eq('id', sessionId)
-    .eq('is_completed', false);
-
-  if (error) throw error;
+  await apiRequest(`/api/around-world/sessions/${sessionId}/cancel`, { method: 'PATCH' });
 }
 
 // Format duration in a human readable way

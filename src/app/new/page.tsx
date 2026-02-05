@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { getSupabaseClient } from '@/lib/supabaseClient';
+import { apiRequest } from '@/lib/apiClient';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -33,12 +34,15 @@ export default function NewMatchPage() {
   async function createPlayer() {
     const name = newName.trim();
     if (!name) return;
-    const supabase = await getSupabaseClient();
-    const { data, error } = await supabase.from('players').insert({ display_name: name }).select('*').single();
-    if (error) return alert(error.message);
-    setPlayers((prev) => [...prev, data as Player]);
-    setSelectedIds((prev) => [...prev, (data as Player).id]);
-    setNewName('');
+    try {
+      const result = await apiRequest<{ player: Player }>('/api/players', { body: { displayName: name } });
+      setPlayers((prev) => [...prev, result.player]);
+      setSelectedIds((prev) => [...prev, result.player.id]);
+      setNewName('');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to create player';
+      alert(message);
+    }
   }
 
   function toggle(id: string) {
@@ -47,27 +51,20 @@ export default function NewMatchPage() {
 
   async function onStart() {
     if (selectedIds.length < 2) return alert('Select at least 2 players');
-    const order = [...selectedIds].sort(() => Math.random() - 0.5);
-
-    const supabase = await getSupabaseClient();
-    const { data: match, error: mErr } = await supabase
-      .from('matches')
-      .insert({ mode: 'x01', start_score: startScore, finish, legs_to_win: legsToWin })
-      .select('*')
-      .single();
-    if (mErr || !match) return alert(mErr?.message ?? 'Failed to create match');
-
-    const matchId = (match as { id: string }).id;
-    const mp = order.map((id, idx) => ({ match_id: matchId, player_id: id, play_order: idx }));
-    const { error: mpErr } = await supabase.from('match_players').insert(mp);
-    if (mpErr) return alert(mpErr.message);
-
-    const { error: lErr } = await supabase
-      .from('legs')
-      .insert({ match_id: matchId, leg_number: 1, starting_player_id: order[0] });
-    if (lErr) return alert(lErr.message);
-
-    router.push(`/match/${matchId}`);
+    try {
+      const result = await apiRequest<{ matchId: string }>('/api/matches', {
+        body: {
+          startScore: parseInt(startScore, 10),
+          finishRule: finish,
+          legsToWin,
+          playerIds: selectedIds,
+        },
+      });
+      router.push(`/match/${result.matchId}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to create match';
+      alert(message);
+    }
   }
 
   return (

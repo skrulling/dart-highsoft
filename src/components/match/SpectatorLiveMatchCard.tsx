@@ -8,6 +8,7 @@ import { getLegRoundStats, getSpectatorScore } from '@/utils/matchStats';
 import { decorateAvg } from '@/utils/playerStats';
 import type { Player, ThrowRecord, TurnRecord, TurnWithThrows } from '@/lib/match/types';
 import type { FinishRule } from '@/utils/x01';
+import { useEffect, useMemo, useRef } from 'react';
 
 type Props = {
   match: { start_score: string; finish: string; legs_to_win: number };
@@ -32,6 +33,27 @@ export function SpectatorLiveMatchCard({
   turnThrowCounts,
   getAvgForPlayer,
 }: Props) {
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const itemRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const reducedMotion = useMemo(() => {
+    if (typeof window === 'undefined') return false;
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  }, []);
+
+  useEffect(() => {
+    if (!spectatorCurrentPlayer) return;
+    const el = itemRefs.current[spectatorCurrentPlayer.id];
+    const container = listRef.current;
+    if (el && container) {
+      const containerRect = container.getBoundingClientRect();
+      const elRect = el.getBoundingClientRect();
+      const offsetTop = elRect.top - containerRect.top + container.scrollTop;
+      const target = offsetTop - container.clientHeight / 2 + el.clientHeight / 2;
+      container.scrollTo({ top: Math.max(0, target), behavior: reducedMotion ? 'auto' : 'smooth' });
+    }
+    return;
+  }, [spectatorCurrentPlayer?.id, reducedMotion]);
+
   return (
     <Card className="xl:col-span-2">
       <CardHeader>
@@ -97,7 +119,10 @@ export function SpectatorLiveMatchCard({
           </div>
 
           {/* Player scores with inline throw indicators */}
-          <div className="grid gap-3">
+          <div
+            ref={listRef}
+            className="grid gap-3 max-h-[70vh] min-h-[40vh] overflow-y-auto overflow-x-hidden pr-1"
+          >
             {orderPlayers.map((player) => {
               const score = getSpectatorScore(turns, currentLegId, startScore, turnThrowCounts, player.id);
               const avg = getAvgForPlayer(player.id);
@@ -130,8 +155,13 @@ export function SpectatorLiveMatchCard({
               return (
                 <div
                   key={player.id}
+                  ref={(el) => {
+                    itemRefs.current[player.id] = el;
+                  }}
                   className={`p-4 rounded-lg transition-all duration-500 ease-in-out ${
-                    isCurrent ? 'border-2 border-primary bg-primary/5 shadow-lg scale-[1.02]' : 'border bg-card hover:bg-accent/30'
+                    isCurrent
+                      ? 'border-2 border-emerald-400/80 bg-emerald-500/5 shadow-lg ring-2 ring-emerald-400/40'
+                      : 'border bg-card hover:bg-accent/30'
                   }`}
                 >
                   <div className="flex items-center justify-between">
@@ -178,4 +208,3 @@ export function SpectatorLiveMatchCard({
     </Card>
   );
 }
-

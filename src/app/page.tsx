@@ -189,7 +189,7 @@ export default function Home() {
         </section>
       </div>
       {origin && (
-        <div className="fixed bottom-4 left-4 z-40 flex flex-col items-center gap-2 rounded-lg bg-background/90 p-3 shadow-md ring-1 ring-border">
+        <div className="fixed bottom-4 left-4 z-40 hidden flex-col items-center gap-2 rounded-lg bg-background/90 p-3 shadow-md ring-1 ring-border sm:flex">
           <div className="text-xs font-semibold text-muted-foreground">New match</div>
           <QRCode value={`${origin}/new`} size={96} />
         </div>

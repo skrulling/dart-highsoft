@@ -183,12 +183,7 @@ export default function PracticeClient({ player }: Props) {
     if (!session) return;
 
     try {
-      const result = await addPracticeThrow(
-        session.id,
-        segment,
-        dartIndex,
-        ongoingTurnRef.current || undefined
-      );
+      const result = await addPracticeThrow(session.id, segment, dartIndex);
 
       if (result.turnCompleted) {
         // Turn completed, ready for new turn

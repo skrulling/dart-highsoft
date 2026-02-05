@@ -1,4 +1,5 @@
 import { getSupabaseClient } from '@/lib/supabaseClient';
+import { apiRequest } from '@/lib/apiClient';
 
 export type EloRating = {
   id: string;
@@ -94,20 +95,9 @@ export async function updateMatchEloRatings(
   loserId: string,
   kFactor: number = 32
 ): Promise<void> {
-  const supabase = await getSupabaseClient();
-  
-  // Call the database function to update ratings
-  const { error } = await supabase.rpc('update_elo_ratings', {
-    p_match_id: matchId,
-    p_winner_id: winnerId,
-    p_loser_id: loserId,
-    p_k_factor: kFactor
+  await apiRequest('/api/elo/update', {
+    body: { matchId, winnerId, loserId, kFactor },
   });
-  
-  if (error) {
-    console.error('Error updating ELO ratings:', error);
-    throw error;
-  }
 }
 
 /**

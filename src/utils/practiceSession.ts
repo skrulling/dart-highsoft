@@ -1,4 +1,5 @@
 import { getSupabaseClient } from '@/lib/supabaseClient';
+import { apiRequest } from '@/lib/apiClient';
 import { SegmentResult } from './dartboard';
 
 export type PracticeSession = {
@@ -54,21 +55,10 @@ export async function createPracticeSession(
   finishRule: 'single_out' | 'double_out' = 'double_out',
   sessionGoal?: string
 ): Promise<string> {
-  const supabase = await getSupabaseClient();
-  
-  const { data, error } = await supabase
-    .from('practice_sessions')
-    .insert({
-      player_id: playerId,
-      start_score: startScore,
-      finish_rule: finishRule,
-      session_goal: sessionGoal,
-    })
-    .select('id')
-    .single();
-
-  if (error) throw error;
-  return data.id;
+  const result = await apiRequest<{ sessionId: string }>('/api/practice/sessions', {
+    body: { playerId, startScore, finishRule, sessionGoal },
+  });
+  return result.sessionId;
 }
 
 export async function getActivePracticeSession(playerId: string): Promise<PracticeSession | null> {
@@ -79,6 +69,7 @@ export async function getActivePracticeSession(playerId: string): Promise<Practi
     .select('*')
     .eq('player_id', playerId)
     .eq('is_active', true)
+    .eq('is_cancelled', false)
     .order('started_at', { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -88,101 +79,19 @@ export async function getActivePracticeSession(playerId: string): Promise<Practi
 }
 
 export async function endPracticeSession(sessionId: string, notes?: string): Promise<void> {
-  const supabase = await getSupabaseClient();
-  
-  const { error } = await supabase
-    .from('practice_sessions')
-    .update({
-      ended_at: new Date().toISOString(),
-      is_active: false,
-      notes,
-    })
-    .eq('id', sessionId);
-
-  if (error) throw error;
+  await apiRequest('/api/practice/sessions/' + sessionId + '/end', { method: 'PATCH', body: { notes } });
 }
 
 export async function addPracticeThrow(
   sessionId: string,
   segment: SegmentResult,
-  dartIndex: number,
-  currentTurn?: PracticeTurn
+  dartIndex: number
 ): Promise<{ turn: PracticeTurn; throw: PracticeThrow; turnCompleted: boolean }> {
-  const supabase = await getSupabaseClient();
-  
-  // Get current turn or create new one
-  let turn = currentTurn;
-  if (!turn) {
-    // Get next turn number
-    const { data: lastTurn } = await supabase
-      .from('practice_turns')
-      .select('turn_number')
-      .eq('session_id', sessionId)
-      .order('turn_number', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    
-    const nextTurnNumber = (lastTurn?.turn_number || 0) + 1;
-    
-    // Create new turn - no score tracking, just turn metrics
-    const { data: newTurn, error: turnError } = await supabase
-      .from('practice_turns')
-      .insert({
-        session_id: sessionId,
-        turn_number: nextTurnNumber,
-        score_before: 0, // Not used in practice mode
-        total_scored: 0,
-        score_after: 0, // Not used in practice mode  
-        busted: false, // Not used in practice mode
-        finished: false, // Not used in practice mode
-      })
-      .select()
-      .single();
-    
-    if (turnError) throw turnError;
-    turn = newTurn;
-  }
-
-  if (!turn) {
-    throw new Error('Failed to create or find turn for practice throw');
-  }
-
-  // Add throw
-  const { data: practiceThrow, error: throwError } = await supabase
-    .from('practice_throws')
-    .insert({
-      turn_id: turn.id,
-      dart_index: dartIndex,
-      segment: segment.label,
-      scored: segment.scored,
-    })
-    .select()
-    .single();
-
-  if (throwError) throw throwError;
-
-  // Calculate new turn totals
-  const newTotalScored = turn.total_scored + segment.scored;
-  const turnCompleted = dartIndex === 3; // Turn completed after 3rd dart
-
-  // Update turn
-  const { data: updatedTurn, error: updateError } = await supabase
-    .from('practice_turns')
-    .update({
-      total_scored: newTotalScored,
-      finished: turnCompleted,
-    })
-    .eq('id', turn.id)
-    .select()
-    .single();
-
-  if (updateError) throw updateError;
-
-  return {
-    turn: updatedTurn,
-    throw: practiceThrow,
-    turnCompleted,
-  };
+  const result = await apiRequest<{ turn: PracticeTurn; throw: PracticeThrow; turnCompleted: boolean }>(
+    `/api/practice/sessions/${sessionId}/throws`,
+    { body: { segment: segment.label, scored: segment.scored, dartIndex } }
+  );
+  return result;
 }
 
 export async function getPracticeSessionTurns(sessionId: string): Promise<PracticeTurn[]> {
@@ -238,4 +147,3 @@ export async function getPlayerOverallPracticeStats(playerId: string) {
   if (error && error.code !== 'PGRST116') throw error;
   return data;
 }
-

@@ -56,6 +56,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     setCurrentCommentary,
     setCommentaryLoading,
     setCommentaryPlaying,
+    setAudioEnabled,
     setVoice,
     handleCommentaryEnabledChange,
     handleAudioEnabledChange,

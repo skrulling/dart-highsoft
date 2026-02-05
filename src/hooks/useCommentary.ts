@@ -21,6 +21,7 @@ type UseCommentaryResult = {
   setCurrentCommentary: (value: string | null) => void;
   setCommentaryLoading: (value: boolean) => void;
   setCommentaryPlaying: (value: boolean) => void;
+  setAudioEnabled: (value: boolean) => void;
   setVoice: (value: VoiceOption) => void;
   setPersonaId: (value: CommentaryPersonaId) => void;
   handleCommentaryEnabledChange: (enabled: boolean) => void;
@@ -159,6 +160,7 @@ export function useCommentary(): UseCommentaryResult {
     setCurrentCommentary,
     setCommentaryLoading,
     setCommentaryPlaying,
+    setAudioEnabled,
     setVoice,
     setPersonaId,
     handleCommentaryEnabledChange,

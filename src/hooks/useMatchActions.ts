@@ -1062,7 +1062,7 @@ export function useMatchActions(args: UseMatchActionsArgs): UseMatchActionsResul
         setRematchLoading(false);
         return;
       }
-      const winnerId = matchWinnerId ?? match?.winner_player_id ?? null;
+      const winnerId = matchWinnerId ?? null;
       const eligibleStarters = winnerId ? playerIds.filter((id) => id !== winnerId) : [...playerIds];
       const starter =
         eligibleStarters.length > 0

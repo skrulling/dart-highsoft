@@ -528,6 +528,11 @@ export function useMatchRealtime({
           return;
         }
 
+        const prevTurns = latestStateRef.current.turns as TurnWithThrows[];
+        const prevCounts = latestStateRef.current.turnThrowCounts;
+        const turnsChanged = JSON.stringify(prevTurns) !== JSON.stringify(result.turns);
+        const countsChanged = JSON.stringify(prevCounts) !== JSON.stringify(result.turnThrowCounts);
+
         setTurns((prev) => {
           const next = result.turns as unknown as TurnRecord[];
           return JSON.stringify(prev) !== JSON.stringify(next) ? next : prev;
@@ -540,11 +545,6 @@ export function useMatchRealtime({
           turns: result.turns as unknown as TurnRecord[],
           turnThrowCounts: result.turnThrowCounts,
         };
-
-        const prevTurns = latestStateRef.current.turns as TurnWithThrows[];
-        const prevCounts = latestStateRef.current.turnThrowCounts;
-        const turnsChanged = JSON.stringify(prevTurns) !== JSON.stringify(result.turns);
-        const countsChanged = JSON.stringify(prevCounts) !== JSON.stringify(result.turnThrowCounts);
         if (!turnsChanged && !countsChanged && payloadTurnId && latestStateRef.current.knownTurnIds.has(payloadTurnId)) {
           await reconcileSpectatorTurn(payloadTurnId);
         }

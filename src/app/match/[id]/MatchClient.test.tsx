@@ -108,6 +108,8 @@ const mockTts = {
   unlock: vi.fn(),
   queueCommentary: vi.fn().mockResolvedValue(undefined),
   getIsPlaying: () => false,
+  getQueueLength: () => 0,
+  skipCurrent: vi.fn(),
 };
 
 vi.mock('@/services/ttsService', () => ({

@@ -25,6 +25,9 @@ export function useRealtime(matchId: string) {
             },
           },
         })
+        .on('broadcast', { event: 'rematch-created' }, (payload) => {
+          window.dispatchEvent(new CustomEvent('supabase-rematch-created', { detail: payload?.payload }));
+        })
         // Add database change listeners directly here
         .on(
           'postgres_changes',
@@ -129,6 +132,19 @@ export function useRealtime(matchId: string) {
     }
   }, [channel, connectionStatus]);
 
+  const broadcastRematch = useCallback(
+    async (newMatchId: string) => {
+      if (channel && connectionStatus === 'connected') {
+        await channel.send({
+          type: 'broadcast',
+          event: 'rematch-created',
+          payload: { newMatchId },
+        });
+      }
+    },
+    [channel, connectionStatus]
+  );
+
   // Auto-connect on mount
   useEffect(() => {
     connect();
@@ -142,6 +158,7 @@ export function useRealtime(matchId: string) {
     connect,
     disconnect,
     updatePresence,
+    broadcastRematch,
     isConnected: connectionStatus === 'connected',
   };
 }

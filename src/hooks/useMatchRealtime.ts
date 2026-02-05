@@ -156,29 +156,25 @@ export function useMatchRealtime({
       if (!legId && turnId) {
         const { knownTurnIds, turns } = latestStateRef.current;
         const hasTurnInState = turns.some((turn) => turn.id === turnId);
-        const isKnownTurn = knownTurnIds.size > 0 && knownTurnIds.has(turnId);
+        const hasKnownTurns = knownTurnIds.size > 0;
+        const isKnownTurn = hasKnownTurns && knownTurnIds.has(turnId);
         if (!hasTurnInState && isKnownTurn && latestStateRef.current.isSpectatorMode) {
           void reconcileSpectatorTurn(turnId);
           return;
         }
-        if (!hasTurnInState || (knownTurnIds.size > 0 && !knownTurnIds.has(turnId))) {
+        if (!hasTurnInState && hasKnownTurns && !knownTurnIds.has(turnId)) {
+          pendingThrowBuffer.set(turnId, payload);
+          return;
+        }
+        if (!hasTurnInState && !hasKnownTurns) {
           pendingThrowBuffer.set(turnId, payload);
           if (latestStateRef.current.isSpectatorMode && !pendingTurnReconcileRef.current.has(turnId)) {
             pendingTurnReconcileRef.current.add(turnId);
             setTimeout(() => {
               pendingTurnReconcileRef.current.delete(turnId);
-              if (latestStateRef.current.knownTurnIds.has(turnId)) {
-                void reconcileSpectatorTurn(turnId);
-              }
+              void reconcileSpectatorTurn(turnId);
             }, 200);
           }
-          const payloadMatchId =
-            (payload as { new?: { match_id?: string }; old?: { match_id?: string } })?.new?.match_id ??
-            (payload as { new?: { match_id?: string }; old?: { match_id?: string } })?.old?.match_id;
-          if (payloadMatchId && payloadMatchId === matchId && latestStateRef.current.isSpectatorMode) {
-            void reconcileSpectatorTurn(turnId);
-          }
-          return;
         }
       }
 
@@ -523,6 +519,12 @@ export function useMatchRealtime({
             pendingThrowBufferRef.current.set(payloadTurnId, payload);
             if (latestStateRef.current.knownTurnIds.has(payloadTurnId)) {
               await reconcileSpectatorTurn(payloadTurnId);
+            } else if (!pendingTurnReconcileRef.current.has(payloadTurnId)) {
+              pendingTurnReconcileRef.current.add(payloadTurnId);
+              setTimeout(() => {
+                pendingTurnReconcileRef.current.delete(payloadTurnId);
+                void reconcileSpectatorTurn(payloadTurnId);
+              }, 200);
             }
           }
           return;

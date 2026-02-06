@@ -54,3 +54,5 @@
 
 ## Supabase Migration Rule
 - Do not use `ALTER FUNCTION` in Supabase migrations. For function changes, use drop + recreate.
+- Never modify existing Supabase migration files after they are created/committed.
+- Any schema/function/policy change must be done by adding a new migration that supersedes earlier ones.

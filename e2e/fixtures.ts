@@ -169,6 +169,26 @@ async function ensurePlayersExist(supabase: SupabaseClient, playerIds: string[])
     display_name: TEST_PLAYER_NAMES[playerId] ?? `E2E Player ${index + 1}`,
   }));
 
+  // Guard against stale local data where these canonical E2E names exist on different UUIDs.
+  // We need deterministic UUIDs for tests, so remove conflicting rows first.
+  const desiredByName = new Map(rows.map((row) => [row.display_name, row.id]));
+  const { data: existingByName, error: existingError } = await supabase
+    .from('players')
+    .select('id, display_name')
+    .in('display_name', rows.map((row) => row.display_name));
+  if (existingError) {
+    throw new Error(`Failed to query existing test players: ${existingError.message}`);
+  }
+  for (const existing of existingByName ?? []) {
+    const desiredId = desiredByName.get(existing.display_name);
+    if (desiredId && existing.id !== desiredId) {
+      const { error: deleteError } = await supabase.from('players').delete().eq('id', existing.id);
+      if (deleteError) {
+        throw new Error(`Failed to remove conflicting player ${existing.display_name}: ${deleteError.message}`);
+      }
+    }
+  }
+
   const { error } = await supabase.from('players').upsert(rows, { onConflict: 'id' });
   if (error) {
     throw new Error(`Failed to ensure test players: ${error.message}`);

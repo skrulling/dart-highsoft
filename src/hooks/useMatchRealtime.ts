@@ -25,6 +25,7 @@ import {
   applyThrowChange as applySpectatorThrowChange,
   applyTurnChange as applySpectatorTurnChange,
 } from '@/lib/match/spectatorRealtimeReducer';
+import { incrementRealtimeMetric } from '@/lib/match/realtimeMetrics';
 import type { CommentaryDebouncer } from '@/services/commentaryService';
 import type { CommentaryPersonaId } from '@/lib/commentary/types';
 import type { SegmentResult } from '@/utils/dartboard';
@@ -426,6 +427,7 @@ export function useMatchRealtime({
 
     // Spectator-specific throw change handler
     const reconcileSpectatorCurrentLeg = async () => {
+      incrementRealtimeMetric(matchId, 'reconcileCurrentLegCalls');
       if (spectatorTurnsFetchRef.current) {
         spectatorTurnsFetchQueuedRef.current = true;
         return;
@@ -490,6 +492,7 @@ export function useMatchRealtime({
     };
 
     const reconcileSpectatorTurn = async (turnId: string) => {
+      incrementRealtimeMetric(matchId, 'reconcileTurnCalls');
       try {
         const supabase = await getSupabaseClient();
         const { data: fetchedTurns } = await supabase
@@ -774,12 +777,16 @@ export function useMatchRealtime({
                     label: thr.segment,
                     kind: segmentLabelToKind(thr.segment),
                   }));
+                  // Avoid regressing local optimistic darts while a throw request is in flight.
+                  // Reconcile only when server has at least as many darts as local.
+                  const canReconcileFromServer = persistedDarts.length >= ongoing.darts.length;
                   const drifted =
-                    persistedDarts.length !== ongoing.darts.length ||
-                    persistedDarts.some((dart, idx) => {
-                      const local = ongoing.darts[idx];
-                      return !local || local.scored !== dart.scored || local.label !== dart.label;
-                    });
+                    canReconcileFromServer &&
+                    (persistedDarts.length !== ongoing.darts.length ||
+                      persistedDarts.some((dart, idx) => {
+                        const local = ongoing.darts[idx];
+                        return !local || local.scored !== dart.scored || local.label !== dart.label;
+                      }));
 
                   // Keep local in-memory turn fully aligned with server throws so score math stays consistent.
                   if (drifted) {
@@ -846,11 +853,12 @@ export function useMatchRealtime({
         }
 
         const run = async () => {
-          await runMatchUIRefresh();
-          if (matchTurnsFetchQueuedRef.current) {
+          let remaining = 6;
+          do {
             matchTurnsFetchQueuedRef.current = false;
             await runMatchUIRefresh();
-          }
+            remaining -= 1;
+          } while (matchTurnsFetchQueuedRef.current && remaining > 0);
         };
 
         matchTurnsFetchRef.current = run().finally(() => {

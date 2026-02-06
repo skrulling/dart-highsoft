@@ -52,12 +52,13 @@ function createSupabaseMock({
       }
 
       if (table === 'turns') {
+        const state: { filters: Record<string, string> } = { filters: {} };
         return {
           select() {
             return this;
           },
           eq(column: string, value: string) {
-            if (column === 'leg_id') expect(value).toBe('leg-1');
+            state.filters[column] = value;
             return this;
           },
           order() {
@@ -67,6 +68,20 @@ function createSupabaseMock({
             return this;
           },
           async maybeSingle() {
+            if (state.filters.id) {
+              return {
+                data: {
+                  id: state.filters.id,
+                  leg_id: 'leg-1',
+                  player_id: 'player-1',
+                  turn_number: 6,
+                  total_scored: 0,
+                  busted: false,
+                },
+                error: null,
+              };
+            }
+            expect(state.filters.leg_id).toBe('leg-1');
             return { data: latestTurns.shift() ?? null, error: null };
           },
           insert(payload: Record<string, unknown>) {
@@ -130,6 +145,8 @@ describe('POST /api/matches/[matchId]/turns', () => {
 
     expect(response.status).toBe(200);
     expect(json.turn.id).toBe('turn-existing');
+    expect(json.turn.leg_id).toBe('leg-1');
+    expect(json.turn).toHaveProperty('total_scored');
   });
 
   it('retries on unique conflict and returns concurrently created incomplete turn', async () => {
@@ -176,6 +193,8 @@ describe('POST /api/matches/[matchId]/turns', () => {
 
     expect(response.status).toBe(200);
     expect(json.turn.id).toBe('turn-raced');
+    expect(json.turn.leg_id).toBe('leg-1');
+    expect(json.turn).toHaveProperty('total_scored');
     expect(insertMock).toHaveBeenCalledTimes(1);
   });
 

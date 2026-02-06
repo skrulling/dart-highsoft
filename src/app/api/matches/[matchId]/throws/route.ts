@@ -20,7 +20,12 @@ async function ensureTurnInMatch(
 export async function POST(request: Request, { params }: { params: Promise<{ matchId: string }> }) {
   try {
     const { matchId } = await params;
-    const body = (await request.json()) as { turnId?: string; dartIndex?: number; segment?: string; scored?: number };
+    let body: { turnId?: string; dartIndex?: number; segment?: string; scored?: number } | null = null;
+    try {
+      body = (await request.json()) as { turnId?: string; dartIndex?: number; segment?: string; scored?: number };
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    }
     if (!body.turnId || typeof body.dartIndex !== 'number' || !body.segment || typeof body.scored !== 'number') {
       return NextResponse.json({ error: 'turnId, dartIndex, segment, scored are required' }, { status: 400 });
     }
@@ -56,7 +61,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ mat
 export async function DELETE(request: Request, { params }: { params: Promise<{ matchId: string }> }) {
   try {
     const { matchId } = await params;
-    const body = (await request.json()) as { turnId?: string; dartIndex?: number };
+    let body: { turnId?: string; dartIndex?: number } | null = null;
+    try {
+      body = (await request.json()) as { turnId?: string; dartIndex?: number };
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    }
     if (!body.turnId || typeof body.dartIndex !== 'number') {
       return NextResponse.json({ error: 'turnId and dartIndex are required' }, { status: 400 });
     }

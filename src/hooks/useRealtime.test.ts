@@ -75,7 +75,7 @@ describe('useRealtime', () => {
     );
   });
 
-  it('keeps connection when postgres_changes system warning is emitted', async () => {
+  it('marks connection as error when postgres_changes subscription fails', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     const { result } = renderHook(() => useRealtime('match-123'));
@@ -98,7 +98,7 @@ describe('useRealtime', () => {
 
     expect(warnSpy).toHaveBeenCalled();
     await waitFor(() => {
-      expect(result.current.connectionStatus).toBe('connected');
+      expect(result.current.connectionStatus).toBe('error');
     });
     warnSpy.mockRestore();
   });

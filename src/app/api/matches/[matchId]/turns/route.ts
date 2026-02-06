@@ -10,6 +10,17 @@ type TurnSnapshot = {
   throws?: { dart_index: number }[];
 };
 
+type TurnRow = {
+  id: string;
+  leg_id: string;
+  player_id: string;
+  turn_number: number;
+  total_scored: number;
+  busted: boolean;
+  created_at?: string;
+  match_id?: string;
+};
+
 function isUniqueViolation(error: { code?: string; message?: string } | null | undefined): boolean {
   if (!error) return false;
   if (error.code === '23505') return true;
@@ -46,6 +57,14 @@ async function getLatestTurnForLeg(
   return (data as TurnSnapshot | null) ?? null;
 }
 
+async function getTurnById(
+  supabase: ReturnType<typeof getSupabaseServerClient>,
+  turnId: string
+): Promise<TurnRow | null> {
+  const { data } = await supabase.from('turns').select('*').eq('id', turnId).maybeSingle();
+  return (data as TurnRow | null) ?? null;
+}
+
 export async function POST(request: Request, { params }: { params: Promise<{ matchId: string }> }) {
   try {
     const { matchId } = await params;
@@ -66,6 +85,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ mat
     // Idempotency guard: if the latest turn is still incomplete for this player, return it.
     const latest = await getLatestTurnForLeg(supabase, body.legId);
     if (latest && latest.player_id === body.playerId && isIncomplete(latest)) {
+      const fullTurn = await getTurnById(supabase, latest.id);
+      if (fullTurn) {
+        return NextResponse.json({ turn: fullTurn });
+      }
       return NextResponse.json({ turn: latest });
     }
 
@@ -96,6 +119,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ mat
 
       const latestAfterConflict = await getLatestTurnForLeg(supabase, body.legId);
       if (latestAfterConflict && latestAfterConflict.player_id === body.playerId && isIncomplete(latestAfterConflict)) {
+        const fullTurn = await getTurnById(supabase, latestAfterConflict.id);
+        if (fullTurn) {
+          return NextResponse.json({ turn: fullTurn });
+        }
         return NextResponse.json({ turn: latestAfterConflict });
       }
     }

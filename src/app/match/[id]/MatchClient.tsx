@@ -2,6 +2,7 @@
 
 import { MatchSpectatorView } from '@/components/match/MatchSpectatorView';
 import { MatchScoringView } from '@/components/match/MatchScoringView';
+import { RealtimeDebugPanel } from '@/components/match/RealtimeDebugPanel';
 import { SegmentResult } from '@/utils/dartboard';
 import { FinishRule } from '@/utils/x01';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -13,6 +14,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useRealtime } from '@/hooks/useRealtime';
 import type { LegRecord, MatchRecord, Player, TurnRecord } from '@/lib/match/types';
 import { PendingThrowBuffer } from '@/lib/match/realtime';
+import { incrementRealtimeMetric } from '@/lib/match/realtimeMetrics';
 import {
   selectCurrentLeg,
   selectOrderPlayers,
@@ -118,6 +120,9 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   const realtimeIsConnected = realtime.isConnected;
   const realtimeConnectionStatus = realtime.connectionStatus;
   const realtimeUpdatePresence = realtime.updatePresence;
+  const debugRealtime =
+    process.env.NODE_ENV !== 'production' &&
+    (searchParams.get('debugRealtime') === '1' || searchParams.get('debug') === 'realtime');
 
   useEffect(() => {
     void loadAll();
@@ -222,6 +227,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     const interval = setInterval(() => {
       // Only reload if not currently loading to prevent flickering
       if (!spectatorLoading) {
+        incrementRealtimeMetric(matchId, 'fallbackPollTicks');
         void loadAllSpectator();
       }
     }, 2000); // Refresh every 2 seconds as fallback
@@ -386,93 +392,109 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   // Spectator Mode View
   if (isSpectatorMode) {
     return (
-      <MatchSpectatorView
-        celebration={celebration}
-        realtimeConnectionStatus={realtime.connectionStatus}
-        realtimeIsConnected={realtime.isConnected}
-        spectatorLoading={spectatorLoading}
-        matchUrl={matchUrl}
-        match={match}
-        orderPlayers={orderPlayers}
-        spectatorCurrentPlayer={spectatorCurrentPlayer}
-        turns={turns}
-        currentLegId={currentLeg?.id}
-        startScore={startScore}
-        finishRule={finishRule}
-        turnThrowCounts={turnThrowCounts}
-        getAvgForPlayer={getAvgForPlayer}
-        legs={legs}
-        players={players}
-        playerById={playerById}
-        matchWinnerId={matchWinnerId}
-        onHome={() => router.push('/')}
-        onToggleSpectatorMode={toggleSpectatorMode}
-        commentaryEnabled={commentaryEnabled}
-        audioEnabled={audioEnabled}
-        voice={voice}
-        personaId={personaId}
-        onCommentaryEnabledChange={handleCommentaryEnabledChange}
-        onAudioEnabledChange={handleAudioEnabledChange}
-        onVoiceChange={setVoice}
-        onPersonaChange={handlePersonaChange}
-        currentCommentary={currentCommentary}
-        commentaryLoading={commentaryLoading}
-        commentaryPlaying={commentaryPlaying}
-        onSkipCommentary={() => ttsServiceRef.current.skipCurrent()}
-        onToggleMute={() => setAudioEnabled(!audioEnabled)}
-        queueLength={ttsServiceRef.current.getQueueLength()}
-        activePersona={activePersona}
-      />
+      <>
+        <MatchSpectatorView
+          celebration={celebration}
+          realtimeConnectionStatus={realtime.connectionStatus}
+          realtimeIsConnected={realtime.isConnected}
+          spectatorLoading={spectatorLoading}
+          matchUrl={matchUrl}
+          match={match}
+          orderPlayers={orderPlayers}
+          spectatorCurrentPlayer={spectatorCurrentPlayer}
+          turns={turns}
+          currentLegId={currentLeg?.id}
+          startScore={startScore}
+          finishRule={finishRule}
+          turnThrowCounts={turnThrowCounts}
+          getAvgForPlayer={getAvgForPlayer}
+          legs={legs}
+          players={players}
+          playerById={playerById}
+          matchWinnerId={matchWinnerId}
+          onHome={() => router.push('/')}
+          onToggleSpectatorMode={toggleSpectatorMode}
+          commentaryEnabled={commentaryEnabled}
+          audioEnabled={audioEnabled}
+          voice={voice}
+          personaId={personaId}
+          onCommentaryEnabledChange={handleCommentaryEnabledChange}
+          onAudioEnabledChange={handleAudioEnabledChange}
+          onVoiceChange={setVoice}
+          onPersonaChange={handlePersonaChange}
+          currentCommentary={currentCommentary}
+          commentaryLoading={commentaryLoading}
+          commentaryPlaying={commentaryPlaying}
+          onSkipCommentary={() => ttsServiceRef.current.skipCurrent()}
+          onToggleMute={() => setAudioEnabled(!audioEnabled)}
+          queueLength={ttsServiceRef.current.getQueueLength()}
+          activePersona={activePersona}
+        />
+        <RealtimeDebugPanel
+          matchId={matchId}
+          connectionStatus={realtime.connectionStatus}
+          isSpectatorMode={true}
+          enabled={debugRealtime}
+        />
+      </>
     );
   }
 
   return (
-    <MatchScoringView
-      realtimeConnectionStatus={realtime.connectionStatus}
-      currentPlayer={currentPlayer}
-      getScoreForPlayer={getScoreForPlayer}
-      localTurn={localTurn}
-      turns={turns}
-      turnThrowCounts={turnThrowCounts}
-      matchWinnerId={matchWinnerId}
-      onBoardClick={handleBoardClick}
-      onUndoLastThrow={undoLastThrow}
-      onOpenEditModal={openEditModal}
-      onOpenEditPlayersModal={openEditPlayersModal}
-      onToggleSpectatorMode={toggleSpectatorMode}
-      endGameDialogOpen={endGameDialogOpen}
-      onEndGameDialogOpenChange={setEndGameDialogOpen}
-      endGameLoading={endGameLoading}
-      onEndGameEarly={endGameEarly}
-      rematchLoading={rematchLoading}
-      onStartRematch={startRematch}
-      editOpen={editOpen}
-      onEditOpenChange={setEditOpen}
-      editingThrows={editingThrows}
-      playerById={playerById}
-      selectedThrowId={selectedThrowId}
-      onSelectThrow={(throwId) => setSelectedThrowId(throwId)}
-      onUpdateThrow={updateSelectedThrow}
-      editPlayersOpen={editPlayersOpen}
-      onEditPlayersOpenChange={setEditPlayersOpen}
-      canEditPlayers={canEditPlayers}
-      canReorderPlayers={canReorderPlayers}
-      players={players}
-      availablePlayers={availablePlayers}
-      newPlayerName={newPlayerName}
-      onNewPlayerNameChange={setNewPlayerName}
-      onAddNewPlayer={addNewPlayer}
-      onAddExistingPlayer={addPlayerToMatch}
-      onRemovePlayer={removePlayerFromMatch}
-      onMovePlayerUp={movePlayerUp}
-      onMovePlayerDown={movePlayerDown}
-      match={match}
-      orderPlayers={orderPlayers}
-      turnsByLeg={turnsByLeg}
-      legs={legs}
-      currentLeg={currentLeg}
-      getAvgForPlayer={getAvgForPlayer}
-      finishRule={finishRule}
-    />
+    <>
+      <MatchScoringView
+        realtimeConnectionStatus={realtime.connectionStatus}
+        currentPlayer={currentPlayer}
+        getScoreForPlayer={getScoreForPlayer}
+        localTurn={localTurn}
+        turns={turns}
+        turnThrowCounts={turnThrowCounts}
+        matchWinnerId={matchWinnerId}
+        onBoardClick={handleBoardClick}
+        onUndoLastThrow={undoLastThrow}
+        onOpenEditModal={openEditModal}
+        onOpenEditPlayersModal={openEditPlayersModal}
+        onToggleSpectatorMode={toggleSpectatorMode}
+        endGameDialogOpen={endGameDialogOpen}
+        onEndGameDialogOpenChange={setEndGameDialogOpen}
+        endGameLoading={endGameLoading}
+        onEndGameEarly={endGameEarly}
+        rematchLoading={rematchLoading}
+        onStartRematch={startRematch}
+        editOpen={editOpen}
+        onEditOpenChange={setEditOpen}
+        editingThrows={editingThrows}
+        playerById={playerById}
+        selectedThrowId={selectedThrowId}
+        onSelectThrow={(throwId) => setSelectedThrowId(throwId)}
+        onUpdateThrow={updateSelectedThrow}
+        editPlayersOpen={editPlayersOpen}
+        onEditPlayersOpenChange={setEditPlayersOpen}
+        canEditPlayers={canEditPlayers}
+        canReorderPlayers={canReorderPlayers}
+        players={players}
+        availablePlayers={availablePlayers}
+        newPlayerName={newPlayerName}
+        onNewPlayerNameChange={setNewPlayerName}
+        onAddNewPlayer={addNewPlayer}
+        onAddExistingPlayer={addPlayerToMatch}
+        onRemovePlayer={removePlayerFromMatch}
+        onMovePlayerUp={movePlayerUp}
+        onMovePlayerDown={movePlayerDown}
+        match={match}
+        orderPlayers={orderPlayers}
+        turnsByLeg={turnsByLeg}
+        legs={legs}
+        currentLeg={currentLeg}
+        getAvgForPlayer={getAvgForPlayer}
+        finishRule={finishRule}
+      />
+      <RealtimeDebugPanel
+        matchId={matchId}
+        connectionStatus={realtime.connectionStatus}
+        isSpectatorMode={false}
+        enabled={debugRealtime}
+      />
+    </>
   );
 }

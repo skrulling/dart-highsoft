@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { getSupabaseClient } from '@/lib/supabaseClient';
 import { apiRequest } from '@/lib/apiClient';
 import { applyThrow, type FinishRule } from '@/utils/x01';
@@ -130,6 +130,7 @@ export function useMatchActions(args: UseMatchActionsArgs): UseMatchActionsResul
   const [endGameDialogOpen, setEndGameDialogOpen] = useState(false);
   const [endGameLoading, setEndGameLoading] = useState(false);
   const [rematchLoading, setRematchLoading] = useState(false);
+  const scoringQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   const startTurnIfNeeded = useCallback(async () => {
     if (!currentLeg || !currentPlayer) return null as string | null;
@@ -387,7 +388,7 @@ export function useMatchActions(args: UseMatchActionsArgs): UseMatchActionsResul
     [currentLeg, match, matchId, players, loadAll, commentaryEnabled, triggerMatchRecap]
   );
 
-  const handleBoardClick = useCallback(
+  const processBoardClick = useCallback(
     async (_x: number, _y: number, result: SegmentResult) => {
       if (matchWinnerId) return; // match over
       if (!currentLeg || !currentPlayer) return;
@@ -454,6 +455,18 @@ export function useMatchActions(args: UseMatchActionsArgs): UseMatchActionsResul
       endLegAndMaybeMatch,
       matchId,
     ]
+  );
+
+  const handleBoardClick = useCallback(
+    async (_x: number, _y: number, result: SegmentResult) => {
+      const run = async () => {
+        await processBoardClick(_x, _y, result);
+      };
+      const next = scoringQueueRef.current.then(run, run);
+      scoringQueueRef.current = next.catch(() => {});
+      await next;
+    },
+    [processBoardClick]
   );
 
   const undoLastThrow = useCallback(async () => {

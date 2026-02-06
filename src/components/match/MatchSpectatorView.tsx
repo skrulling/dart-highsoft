@@ -12,7 +12,7 @@ import type { CommentaryPersona, CommentaryPersonaId } from '@/lib/commentary/ty
 import type { LegRecord, MatchRecord, Player, TurnRecord } from '@/lib/match/types';
 import type { VoiceOption } from '@/services/ttsService';
 import type { FinishRule } from '@/utils/x01';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 type CelebrationState = {
   score: number;
@@ -152,6 +152,12 @@ export function MatchSpectatorView({
   queueLength,
   activePersona,
 }: Props) {
+  const [winnerModalOpen, setWinnerModalOpen] = useState(false);
+
+  useEffect(() => {
+    setWinnerModalOpen(Boolean(matchWinnerId));
+  }, [matchWinnerId]);
+
   const topThreeTurns = useMemo(
     () =>
       turns
@@ -429,7 +435,7 @@ export function MatchSpectatorView({
         </Card>
 
         {/* Match winner modal */}
-        <Dialog open={!!matchWinnerId} onOpenChange={() => {}}>
+        <Dialog open={winnerModalOpen && !!matchWinnerId} onOpenChange={setWinnerModalOpen}>
           <DialogContent className="sm:max-w-md [&>button]:hidden">
             <DialogTitle className="sr-only">Match Winner</DialogTitle>
             <ConfettiOverlay />

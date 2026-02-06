@@ -3,13 +3,11 @@ import { getSupabaseServerClient } from '@/lib/supabaseServer';
 import { isMatchActive, loadMatch } from '@/lib/server/matchGuards';
 import { recomputeLegTurns } from '@/lib/server/recomputeLegTurns';
 
-async function getLegIdForThrow(
+async function getLegIdForTurn(
   supabase: ReturnType<typeof getSupabaseServerClient>,
-  throwId: string
+  turnId: string
 ): Promise<string | null> {
-  const { data: thr } = await supabase.from('throws').select('id, turn_id').eq('id', throwId).single();
-  if (!thr) return null;
-  const { data: turn } = await supabase.from('turns').select('id, leg_id').eq('id', thr.turn_id).single();
+  const { data: turn } = await supabase.from('turns').select('id, leg_id').eq('id', turnId).single();
   if (!turn) return null;
   return turn.leg_id as string;
 }
@@ -19,11 +17,14 @@ async function ensureThrowInMatch(
   matchId: string,
   throwId: string
 ): Promise<string | null> {
-  const legId = await getLegIdForThrow(supabase, throwId);
-  if (!legId) return null;
-  const { data: leg } = await supabase.from('legs').select('id, match_id').eq('id', legId).single();
-  if (!leg || leg.match_id !== matchId) return null;
-  return legId;
+  const { data: thr } = await supabase
+    .from('throws')
+    .select('id, turn_id, turns!inner(legs!inner(match_id))')
+    .eq('id', throwId)
+    .eq('turns.legs.match_id', matchId)
+    .single();
+  if (!thr) return null;
+  return getLegIdForTurn(supabase, thr.turn_id as string);
 }
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ matchId: string; throwId: string }> }) {

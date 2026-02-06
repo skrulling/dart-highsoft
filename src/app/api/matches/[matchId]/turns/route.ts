@@ -14,8 +14,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ mat
     if (!match) return NextResponse.json({ error: 'Match not found' }, { status: 404 });
     if (!isMatchActive(match)) return NextResponse.json({ error: 'Match is not active' }, { status: 409 });
 
-    const { data: leg } = await supabase.from('legs').select('id, match_id').eq('id', body.legId).single();
-    if (!leg || leg.match_id !== matchId) {
+    const { data: leg } = await supabase.from('legs').select('id').eq('id', body.legId).eq('match_id', matchId).single();
+    if (!leg) {
       return NextResponse.json({ error: 'Leg not found for match' }, { status: 404 });
     }
 
@@ -39,6 +39,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ mat
       })
       .select('*')
       .single();
+
     if (error || !data) {
       return NextResponse.json({ error: error?.message ?? 'Failed to create turn' }, { status: 500 });
     }

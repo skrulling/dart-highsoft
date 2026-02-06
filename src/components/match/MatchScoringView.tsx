@@ -20,6 +20,7 @@ import { computeCheckoutSuggestions } from '@/utils/checkoutSuggestions';
 import { computeHit, type SegmentResult } from '@/utils/dartboard';
 import type { LegRecord, MatchRecord, Player, TurnRecord, TurnWithThrows } from '@/lib/match/types';
 import type { FinishRule } from '@/utils/x01';
+import { useMemo } from 'react';
 
 type Props = {
   realtimeConnectionStatus: string;
@@ -116,6 +117,38 @@ export function MatchScoringView({
   getAvgForPlayer,
   finishRule,
 }: Props) {
+  const currentPlayerLastTurn = useMemo(() => {
+    if (!currentPlayer) return null;
+    for (let i = turns.length - 1; i >= 0; i--) {
+      if (turns[i].player_id === currentPlayer.id) {
+        return turns[i] as TurnWithThrows;
+      }
+    }
+    return null;
+  }, [currentPlayer, turns]);
+
+  const currentPlayerRemoteThrows = useMemo(() => {
+    if (!currentPlayer || localTurn.playerId === currentPlayer.id) return [] as TurnWithThrows['throws'];
+    if (!currentPlayerLastTurn || currentPlayerLastTurn.busted) return [] as TurnWithThrows['throws'];
+    const throwCount = turnThrowCounts[currentPlayerLastTurn.id] || 0;
+    if (throwCount <= 0 || throwCount >= 3) return [] as TurnWithThrows['throws'];
+    return (currentPlayerLastTurn.throws ?? []).slice().sort((a, b) => a.dart_index - b.dart_index);
+  }, [currentPlayer, localTurn.playerId, currentPlayerLastTurn, turnThrowCounts]);
+
+  const currentPlayerDartsLeft = useMemo(() => {
+    if (!currentPlayer) return 3;
+    if (localTurn.playerId === currentPlayer.id) {
+      return 3 - localTurn.darts.length;
+    }
+    if (currentPlayerLastTurn && !currentPlayerLastTurn.busted) {
+      const throwCount = turnThrowCounts[currentPlayerLastTurn.id] || 0;
+      if (throwCount > 0 && throwCount < 3) {
+        return 3 - throwCount;
+      }
+    }
+    return 3;
+  }, [currentPlayer, localTurn.playerId, localTurn.darts.length, currentPlayerLastTurn, turnThrowCounts]);
+
   return (
     <div className="w-full space-y-3 md:space-y-6 md:-ml-[calc(50vw-50%)] md:-mr-6 md:pl-4 md:pr-4 lg:pr-6 md:max-w-none relative">
       {/* Connection status indicator */}
@@ -178,28 +211,21 @@ export function MatchScoringView({
                     );
                   } else if (currentPlayer) {
                     // Remote turn - show remote throws
-                    const playerTurns = turns.filter((turn) => turn.player_id === currentPlayer.id);
-                    const lastTurn = playerTurns.length > 0 ? playerTurns[playerTurns.length - 1] : null;
-                    if (lastTurn && !lastTurn.busted) {
-                      const throwCount = turnThrowCounts[lastTurn.id] || 0;
-                      if (throwCount > 0 && throwCount < 3) {
-                        const currentThrows = (lastTurn as TurnWithThrows).throws || [];
-                        currentThrows.sort((a, b) => a.dart_index - b.dart_index);
-                        return (
-                          <>
-                            {currentThrows.map((thr, idx) => (
-                              <Badge key={idx} variant="default" className="bg-blue-500">
-                                {thr.scored}
-                              </Badge>
-                            ))}
-                            {Array.from({ length: 3 - currentThrows.length }).map((_, idx) => (
-                              <Badge key={`r${idx}`} variant="outline">
-                                –
-                              </Badge>
-                            ))}
-                          </>
-                        );
-                      }
+                    if (currentPlayerRemoteThrows.length > 0) {
+                      return (
+                        <>
+                          {currentPlayerRemoteThrows.map((thr, idx) => (
+                            <Badge key={idx} variant="default" className="bg-blue-500">
+                              {thr.scored}
+                            </Badge>
+                          ))}
+                          {Array.from({ length: 3 - currentPlayerRemoteThrows.length }).map((_, idx) => (
+                            <Badge key={`r${idx}`} variant="outline">
+                              –
+                            </Badge>
+                          ))}
+                        </>
+                      );
                     }
                     // No active turn - show empty darts
                     return (
@@ -221,23 +247,7 @@ export function MatchScoringView({
           <div className="text-xs text-muted-foreground">
             {(() => {
               const rem = currentPlayer ? getScoreForPlayer(currentPlayer.id) : 0;
-
-              // Calculate darts left - could be from local or remote turn
-              let dartsLeft = 3;
-              if (currentPlayer && localTurn.playerId === currentPlayer.id) {
-                dartsLeft = 3 - localTurn.darts.length;
-              } else if (currentPlayer) {
-                const playerTurns = turns.filter((turn) => turn.player_id === currentPlayer.id);
-                const lastTurn = playerTurns.length > 0 ? playerTurns[playerTurns.length - 1] : null;
-                if (lastTurn && !lastTurn.busted) {
-                  const throwCount = turnThrowCounts[lastTurn.id] || 0;
-                  if (throwCount > 0 && throwCount < 3) {
-                    dartsLeft = 3 - throwCount;
-                  }
-                }
-              }
-
-              const paths = computeCheckoutSuggestions(rem, dartsLeft, finishRule);
+              const paths = computeCheckoutSuggestions(rem, currentPlayerDartsLeft, finishRule);
               return (
                 <div className="flex flex-wrap items-center gap-2 min-h-6">
                   {paths.length > 0 && rem !== 0 ? (

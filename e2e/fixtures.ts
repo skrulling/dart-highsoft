@@ -2,9 +2,10 @@ import { test as base, expect } from '@playwright/test';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 // Test Supabase instance configuration (port 56XXX)
-const TEST_SUPABASE_URL = 'http://127.0.0.1:56421';
-const TEST_SUPABASE_ANON_KEY =
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0';
+const TEST_SUPABASE_URL = process.env.E2E_SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'http://127.0.0.1:56421';
+const TEST_SUPABASE_SERVICE_ROLE_KEY =
+  process.env.E2E_SUPABASE_SERVICE_ROLE_KEY ??
+  process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 // Test player IDs (from seed.sql) - must be valid UUIDs
 export const TEST_PLAYERS = {
@@ -30,7 +31,12 @@ type TestFixtures = {
  */
 export const test = base.extend<TestFixtures>({
   supabase: async ({}, use) => {
-    const client = createClient(TEST_SUPABASE_URL, TEST_SUPABASE_ANON_KEY);
+    if (!TEST_SUPABASE_SERVICE_ROLE_KEY) {
+      throw new Error('Missing SUPABASE_SERVICE_ROLE_KEY for e2e fixtures');
+    }
+    const client = createClient(TEST_SUPABASE_URL, TEST_SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
     await use(client);
   },
 

@@ -33,6 +33,7 @@ export default defineConfig({
     // Match TypeScript path aliases from tsconfig.json
     alias: {
       '@': path.resolve(__dirname, './src'),
+      'server-only': path.resolve(__dirname, './src/test-utils/server-only-stub.ts'),
     },
   },
 });

@@ -7,11 +7,14 @@ async function ensureTurnInMatch(
   matchId: string,
   turnId: string
 ) {
-  const { data: turn } = await supabase.from('turns').select('id, leg_id').eq('id', turnId).single();
+  const { data: turn } = await supabase
+    .from('turns')
+    .select('id, legs!inner(match_id)')
+    .eq('id', turnId)
+    .eq('legs.match_id', matchId)
+    .single();
   if (!turn) return null;
-  const { data: leg } = await supabase.from('legs').select('id, match_id').eq('id', turn.leg_id).single();
-  if (!leg || leg.match_id !== matchId) return null;
-  return { turn, leg };
+  return { turn };
 }
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ matchId: string; turnId: string }> }) {

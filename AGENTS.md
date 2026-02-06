@@ -51,3 +51,6 @@
 ## Architecture Notes
 - Real-time and persistence via Supabase; charts via Highcharts React.
 - Core game logic lives in `src/utils` and is shared across app routes and components.
+
+## Supabase Migration Rule
+- Do not use `ALTER FUNCTION` in Supabase migrations. For function changes, use drop + recreate.

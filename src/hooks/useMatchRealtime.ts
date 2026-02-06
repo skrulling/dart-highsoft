@@ -29,6 +29,15 @@ import type { CommentaryDebouncer } from '@/services/commentaryService';
 import type { CommentaryPersonaId } from '@/lib/commentary/types';
 import type { SegmentResult } from '@/utils/dartboard';
 
+function segmentLabelToKind(label: string): SegmentResult['kind'] {
+  if (label === 'Miss') return 'Miss';
+  if (label === 'SB') return 'OuterBull';
+  if (label === 'DB') return 'InnerBull';
+  if (label.startsWith('D')) return 'Double';
+  if (label.startsWith('T')) return 'Triple';
+  return 'Single';
+}
+
 function areThrowCountsEqual(a: Record<string, number>, b: Record<string, number>): boolean {
   if (a === b) return true;
   const aKeys = Object.keys(a);
@@ -551,15 +560,27 @@ export function useMatchRealtime({
       const payloadTurnId =
         (payload as { new?: { turn_id?: string }; old?: { turn_id?: string } })?.new?.turn_id ??
         (payload as { new?: { turn_id?: string }; old?: { turn_id?: string } })?.old?.turn_id;
+      const hasTurnInState =
+        payloadTurnId != null && latestStateRef.current.turns.some((turn) => turn.id === payloadTurnId);
       if (
         shouldIgnoreRealtimePayload(
           payload as RealtimePayload,
           latestStateRef.current.knownLegIds,
           latestStateRef.current.knownTurnIds
-        )
+        ) &&
+        !hasTurnInState
       ) {
         if (payloadTurnId) {
           pendingThrowBufferRef.current.set(payloadTurnId, payload);
+          if (latestStateRef.current.knownTurnIds.has(payloadTurnId)) {
+            await reconcileSpectatorTurn(payloadTurnId);
+          } else if (!pendingTurnReconcileRef.current.has(payloadTurnId)) {
+            pendingTurnReconcileRef.current.add(payloadTurnId);
+            setTimeout(() => {
+              pendingTurnReconcileRef.current.delete(payloadTurnId);
+              void reconcileSpectatorTurn(payloadTurnId);
+            }, 200);
+          }
         }
         return;
       }
@@ -731,25 +752,59 @@ export function useMatchRealtime({
             // Check if our ongoing turn is still valid/current
             const ongoing = ongoingTurnRef.current;
             let shouldClearOngoing = false;
+            let nextLocalTurn:
+              | { playerId: string | null; darts: { scored: number; label: string; kind: SegmentResult['kind'] }[] }
+              | null = null;
 
             if (ongoing) {
               // Check if someone else finished this turn or if there's a newer turn
-              const ourTurn = updatedTurns.find((t) => t.id === ongoing.turnId);
+              const ourTurn = updatedTurns.find((t) => t.id === ongoing.turnId) as TurnWithThrows | undefined;
               if (!ourTurn) {
                 // Our turn was deleted (probably by another client)
                 shouldClearOngoing = true;
               } else {
                 // Check if our turn was completed by another client
-                const throwCount = (ourTurn as TurnWithThrows).throws?.length || 0;
-                if (throwCount === 3 || ourTurn.busted) {
+                const persistedThrows = (ourTurn.throws ?? []).slice().sort((a, b) => a.dart_index - b.dart_index);
+                const throwCount = persistedThrows.length;
+                if (throwCount >= 3 || ourTurn.busted) {
                   shouldClearOngoing = true;
+                } else {
+                  const persistedDarts = persistedThrows.map((thr) => ({
+                    scored: thr.scored,
+                    label: thr.segment,
+                    kind: segmentLabelToKind(thr.segment),
+                  }));
+                  const drifted =
+                    persistedDarts.length !== ongoing.darts.length ||
+                    persistedDarts.some((dart, idx) => {
+                      const local = ongoing.darts[idx];
+                      return !local || local.scored !== dart.scored || local.label !== dart.label;
+                    });
+
+                  // Keep local in-memory turn fully aligned with server throws so score math stays consistent.
+                  if (drifted) {
+                    const syncedOngoingDarts = persistedDarts.map((dart) => ({ ...dart }));
+                    const syncedLocalDarts = persistedDarts.map((dart) => ({ ...dart }));
+                    ongoingTurnRef.current = {
+                      ...ongoing,
+                      darts: syncedOngoingDarts,
+                    };
+                    nextLocalTurn = {
+                      playerId: ongoing.playerId,
+                      darts: syncedLocalDarts,
+                    };
+                  }
                 }
               }
             }
 
             if (shouldClearOngoing) {
               ongoingTurnRef.current = null;
-              setLocalTurn({ playerId: '', darts: [] });
+              nextLocalTurn = { playerId: null, darts: [] };
+            }
+
+            if (nextLocalTurn) {
+              setLocalTurn(nextLocalTurn);
             }
 
             // Update state with functional updates

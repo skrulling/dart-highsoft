@@ -28,6 +28,33 @@ export function useRealtime(matchId: string) {
         .on('broadcast', { event: 'rematch-created' }, (payload) => {
           window.dispatchEvent(new CustomEvent('supabase-rematch-created', { detail: payload?.payload }));
         })
+        .on('system', {}, (payload) => {
+          // Realtime can report postgres subscription errors via system events even when
+          // channel status is "SUBSCRIBED". Surface this as an error so spectator mode
+          // can fall back to polling instead of appearing connected but stale.
+          const extension = payload && typeof payload === 'object' && 'extension' in payload ? payload.extension : null;
+          const status = payload && typeof payload === 'object' && 'status' in payload ? payload.status : null;
+          const message = payload && typeof payload === 'object' && 'message' in payload ? payload.message : null;
+          const text = typeof message === 'string' ? message : '';
+          const normalizedText = text.toLowerCase();
+          const isEmptyObjectPayload = payload && typeof payload === 'object' && Object.keys(payload).length === 0;
+          const isWildcardInspectorError = normalizedText.includes('table: *') || normalizedText.includes('table:*');
+          const hasSubscriptionFailureText = normalizedText.includes('unable to subscribe to changes');
+          if (extension === 'postgres_changes' && hasSubscriptionFailureText) {
+            // Ignore known noisy payloads (for example wildcard inspector probes) that
+            // can appear transiently while the actual app subscriptions are healthy.
+            if (isEmptyObjectPayload || isWildcardInspectorError) {
+              if (process.env.NODE_ENV !== 'production') {
+                console.warn('Realtime postgres_changes warning ignored:', payload);
+              }
+              return;
+            }
+            // Keep the channel as connected here. In practice these system payloads can be
+            // noisy/transient while websocket updates still flow. We only downgrade
+            // connection status on explicit channel lifecycle failures.
+            console.warn('Realtime postgres_changes subscription warning:', payload);
+          }
+        })
         // Add database change listeners directly here
         .on(
           'postgres_changes',

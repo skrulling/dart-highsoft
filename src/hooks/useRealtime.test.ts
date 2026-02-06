@@ -74,4 +74,77 @@ describe('useRealtime', () => {
       })
     );
   });
+
+  it('keeps connection when postgres_changes system warning is emitted', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const { result } = renderHook(() => useRealtime('match-123'));
+
+    await waitFor(() => {
+      expect(result.current.connectionStatus).toBe('connected');
+    });
+
+    const systemCall = onMock.mock.calls.find(([eventName]) => eventName === 'system');
+    expect(systemCall).toBeDefined();
+
+    const systemHandler = systemCall?.[2] as ((payload: unknown) => void) | undefined;
+    expect(systemHandler).toBeDefined();
+
+    systemHandler?.({
+      extension: 'postgres_changes',
+      status: 'error',
+      message: 'Unable to subscribe to changes with given parameters',
+    });
+
+    expect(warnSpy).toHaveBeenCalled();
+    await waitFor(() => {
+      expect(result.current.connectionStatus).toBe('connected');
+    });
+    warnSpy.mockRestore();
+  });
+
+  it('ignores empty prototype-only postgres_changes system payload noise', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const { result } = renderHook(() => useRealtime('match-123'));
+
+    await waitFor(() => {
+      expect(result.current.connectionStatus).toBe('connected');
+    });
+
+    const systemCall = onMock.mock.calls.find(([eventName]) => eventName === 'system');
+    expect(systemCall).toBeDefined();
+
+    const systemHandler = systemCall?.[2] as ((payload: unknown) => void) | undefined;
+    expect(systemHandler).toBeDefined();
+
+    // Simulates payloads where properties live on prototype (keys() is empty).
+    const prototypeOnlyPayload = Object.create({
+      extension: 'postgres_changes',
+      status: 'error',
+      message: 'Unable to subscribe to changes with given parameters',
+    });
+
+    systemHandler?.(prototypeOnlyPayload);
+
+    await waitFor(() => {
+      expect(result.current.connectionStatus).toBe('connected');
+    });
+
+    expect(warnSpy).toHaveBeenCalledWith('Realtime postgres_changes warning ignored:', prototypeOnlyPayload);
+    warnSpy.mockRestore();
+  });
+
+  it('sets error status on explicit channel error lifecycle status', async () => {
+    subscribeMock.mockImplementation((callback?: (status: string) => void) => {
+      callback?.('CHANNEL_ERROR');
+      return mockChannel;
+    });
+
+    const { result } = renderHook(() => useRealtime('match-123'));
+
+    await waitFor(() => {
+      expect(result.current.connectionStatus).toBe('error');
+    });
+  });
 });

@@ -20,7 +20,12 @@ async function ensureTurnInMatch(
 export async function PATCH(request: Request, { params }: { params: Promise<{ matchId: string; turnId: string }> }) {
   try {
     const { matchId, turnId } = await params;
-    const body = (await request.json()) as { totalScored?: number; busted?: boolean };
+    let body: { totalScored?: number; busted?: boolean } | null = null;
+    try {
+      body = (await request.json()) as { totalScored?: number; busted?: boolean };
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    }
     if (typeof body.totalScored !== 'number' || typeof body.busted !== 'boolean') {
       return NextResponse.json({ error: 'totalScored and busted are required' }, { status: 400 });
     }

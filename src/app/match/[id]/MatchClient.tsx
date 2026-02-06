@@ -339,6 +339,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     players,
     legs,
     turns,
+    turnThrowCounts,
     currentLeg,
     currentPlayer,
     orderPlayers,

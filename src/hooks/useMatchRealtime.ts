@@ -25,9 +25,70 @@ import {
   applyThrowChange as applySpectatorThrowChange,
   applyTurnChange as applySpectatorTurnChange,
 } from '@/lib/match/spectatorRealtimeReducer';
+import { incrementRealtimeMetric } from '@/lib/match/realtimeMetrics';
 import type { CommentaryDebouncer } from '@/services/commentaryService';
 import type { CommentaryPersonaId } from '@/lib/commentary/types';
 import type { SegmentResult } from '@/utils/dartboard';
+
+function segmentLabelToKind(label: string): SegmentResult['kind'] {
+  if (label === 'Miss') return 'Miss';
+  if (label === 'SB') return 'OuterBull';
+  if (label === 'DB') return 'InnerBull';
+  if (label.startsWith('D')) return 'Double';
+  if (label.startsWith('T')) return 'Triple';
+  return 'Single';
+}
+
+function areThrowCountsEqual(a: Record<string, number>, b: Record<string, number>): boolean {
+  if (a === b) return true;
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  for (const key of aKeys) {
+    if (a[key] !== b[key]) return false;
+  }
+  return true;
+}
+
+function areTurnsEqual(a: TurnRecord[], b: TurnRecord[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+
+  for (let i = 0; i < a.length; i++) {
+    const left = a[i] as TurnWithThrows;
+    const right = b[i] as TurnWithThrows;
+    if (
+      left.id !== right.id ||
+      left.leg_id !== right.leg_id ||
+      left.player_id !== right.player_id ||
+      left.turn_number !== right.turn_number ||
+      left.total_scored !== right.total_scored ||
+      left.busted !== right.busted
+    ) {
+      return false;
+    }
+
+    const leftThrows = left.throws ?? [];
+    const rightThrows = right.throws ?? [];
+    if (leftThrows.length !== rightThrows.length) return false;
+
+    for (let j = 0; j < leftThrows.length; j++) {
+      const leftThrow = leftThrows[j];
+      const rightThrow = rightThrows[j];
+      if (
+        leftThrow.id !== rightThrow.id ||
+        leftThrow.turn_id !== rightThrow.turn_id ||
+        leftThrow.dart_index !== rightThrow.dart_index ||
+        leftThrow.segment !== rightThrow.segment ||
+        leftThrow.scored !== rightThrow.scored
+      ) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
 
 type CelebrationState = {
   score: number;
@@ -122,14 +183,17 @@ export function useMatchRealtime({
 }: UseMatchRealtimeArgs) {
   const spectatorTurnsFetchRef = useRef<Promise<void> | null>(null);
   const spectatorTurnsFetchQueuedRef = useRef(false);
+  const matchTurnsFetchRef = useRef<Promise<void> | null>(null);
+  const matchTurnsFetchQueuedRef = useRef(false);
+  const matchTurnsDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!realtime.isConnected || !realtimeEnabled) return;
+    realtime.updatePresence(latestStateRef.current.isSpectatorMode);
+  }, [realtime.isConnected, realtime.updatePresence, realtimeEnabled, isSpectatorMode, latestStateRef]);
 
   useEffect(() => {
     if (!realtime.isConnected || !realtimeEnabled) {
-      console.log('Real-time not ready:', {
-        connected: realtime.isConnected,
-        enabled: realtimeEnabled,
-        status: realtime.connectionStatus,
-      });
       return;
     }
 
@@ -171,6 +235,13 @@ export function useMatchRealtime({
         }
         if (!hasTurnInState && hasKnownTurns && !knownTurnIds.has(turnId)) {
           pendingThrowBuffer.set(turnId, payload);
+          if (latestStateRef.current.isSpectatorMode && !pendingTurnReconcileRef.current.has(turnId)) {
+            pendingTurnReconcileRef.current.add(turnId);
+            setTimeout(() => {
+              pendingTurnReconcileRef.current.delete(turnId);
+              void reconcileSpectatorTurn(turnId);
+            }, 200);
+          }
           return;
         }
         if (!hasTurnInState && !hasKnownTurns) {
@@ -356,6 +427,7 @@ export function useMatchRealtime({
 
     // Spectator-specific throw change handler
     const reconcileSpectatorCurrentLeg = async () => {
+      incrementRealtimeMetric(matchId, 'reconcileCurrentLegCalls');
       if (spectatorTurnsFetchRef.current) {
         spectatorTurnsFetchQueuedRef.current = true;
         return;
@@ -391,7 +463,7 @@ export function useMatchRealtime({
 
         setTurns((prev) => {
           const next = updatedTurns as unknown as TurnRecord[];
-          return JSON.stringify(prev) !== JSON.stringify(next) ? next : prev;
+          return areTurnsEqual(prev, next) ? prev : next;
         });
 
         const throwCounts: Record<string, number> = {};
@@ -400,7 +472,7 @@ export function useMatchRealtime({
         }
 
         setTurnThrowCounts((prev) => {
-          return JSON.stringify(prev) !== JSON.stringify(throwCounts) ? throwCounts : prev;
+          return areThrowCountsEqual(prev, throwCounts) ? prev : throwCounts;
         });
         latestStateRef.current = {
           ...latestStateRef.current,
@@ -420,6 +492,7 @@ export function useMatchRealtime({
     };
 
     const reconcileSpectatorTurn = async (turnId: string) => {
+      incrementRealtimeMetric(matchId, 'reconcileTurnCalls');
       try {
         const supabase = await getSupabaseClient();
         const { data: fetchedTurns } = await supabase
@@ -469,11 +542,11 @@ export function useMatchRealtime({
         }
 
         setTurns((prev) => {
-          return JSON.stringify(prev) !== JSON.stringify(nextTurns) ? (nextTurns as unknown as TurnRecord[]) : prev;
+          return areTurnsEqual(prev, nextTurns as unknown as TurnRecord[]) ? prev : (nextTurns as unknown as TurnRecord[]);
         });
 
         setTurnThrowCounts((prev) => {
-          return JSON.stringify(prev) !== JSON.stringify(nextCounts) ? nextCounts : prev;
+          return areThrowCountsEqual(prev, nextCounts) ? prev : nextCounts;
         });
         latestStateRef.current = {
           ...latestStateRef.current,
@@ -490,15 +563,27 @@ export function useMatchRealtime({
       const payloadTurnId =
         (payload as { new?: { turn_id?: string }; old?: { turn_id?: string } })?.new?.turn_id ??
         (payload as { new?: { turn_id?: string }; old?: { turn_id?: string } })?.old?.turn_id;
+      const hasTurnInState =
+        payloadTurnId != null && latestStateRef.current.turns.some((turn) => turn.id === payloadTurnId);
       if (
         shouldIgnoreRealtimePayload(
           payload as RealtimePayload,
           latestStateRef.current.knownLegIds,
           latestStateRef.current.knownTurnIds
-        )
+        ) &&
+        !hasTurnInState
       ) {
         if (payloadTurnId) {
           pendingThrowBufferRef.current.set(payloadTurnId, payload);
+          if (latestStateRef.current.knownTurnIds.has(payloadTurnId)) {
+            await reconcileSpectatorTurn(payloadTurnId);
+          } else if (!pendingTurnReconcileRef.current.has(payloadTurnId)) {
+            pendingTurnReconcileRef.current.add(payloadTurnId);
+            setTimeout(() => {
+              pendingTurnReconcileRef.current.delete(payloadTurnId);
+              void reconcileSpectatorTurn(payloadTurnId);
+            }, 200);
+          }
         }
         return;
       }
@@ -539,15 +624,15 @@ export function useMatchRealtime({
 
         const prevTurns = latestStateRef.current.turns as TurnWithThrows[];
         const prevCounts = latestStateRef.current.turnThrowCounts;
-        const turnsChanged = JSON.stringify(prevTurns) !== JSON.stringify(result.turns);
-        const countsChanged = JSON.stringify(prevCounts) !== JSON.stringify(result.turnThrowCounts);
+        const turnsChanged = !areTurnsEqual(prevTurns, result.turns as unknown as TurnRecord[]);
+        const countsChanged = !areThrowCountsEqual(prevCounts, result.turnThrowCounts);
 
         setTurns((prev) => {
           const next = result.turns as unknown as TurnRecord[];
-          return JSON.stringify(prev) !== JSON.stringify(next) ? next : prev;
+          return areTurnsEqual(prev, next) ? prev : next;
         });
         setTurnThrowCounts((prev) => {
-          return JSON.stringify(prev) !== JSON.stringify(result.turnThrowCounts) ? result.turnThrowCounts : prev;
+          return areThrowCountsEqual(prev, result.turnThrowCounts) ? prev : result.turnThrowCounts;
         });
         latestStateRef.current = {
           ...latestStateRef.current,
@@ -636,8 +721,154 @@ export function useMatchRealtime({
       }
     };
 
+    const runMatchUIRefresh = async () => {
+      try {
+        if (latestStateRef.current.isSpectatorMode) return;
+
+        const supabase = await getSupabaseClient();
+        // Prefer local state (ref) to avoid extra round-trips on every throw.
+        let legsSnapshot = latestStateRef.current.legs;
+        let currentLeg = legsSnapshot.find((l) => !l.winner_player_id) ?? legsSnapshot[legsSnapshot.length - 1];
+
+        // Fallback if we don't have legs yet.
+        if (!currentLeg) {
+          const { data: fetchedLegs } = await supabase
+            .from('legs')
+            .select('*')
+            .eq('match_id', matchId)
+            .order('leg_number', { ascending: true });
+          legsSnapshot = (fetchedLegs as LegRecord[] | null) ?? legsSnapshot;
+          currentLeg = legsSnapshot.find((l) => !l.winner_player_id) ?? legsSnapshot[legsSnapshot.length - 1];
+        }
+
+        if (currentLeg) {
+          const { data: updatedTurns } = await supabase
+            .from('turns')
+            .select(`
+                id, leg_id, player_id, turn_number, total_scored, busted, created_at,
+                throws:throws(id, turn_id, dart_index, segment, scored)
+              `)
+            .eq('leg_id', currentLeg.id)
+            .order('turn_number', { ascending: true });
+
+          if (updatedTurns) {
+            // Check if our ongoing turn is still valid/current
+            const ongoing = ongoingTurnRef.current;
+            let shouldClearOngoing = false;
+            let nextLocalTurn:
+              | { playerId: string | null; darts: { scored: number; label: string; kind: SegmentResult['kind'] }[] }
+              | null = null;
+
+            if (ongoing) {
+              // Check if someone else finished this turn or if there's a newer turn
+              const ourTurn = updatedTurns.find((t) => t.id === ongoing.turnId) as TurnWithThrows | undefined;
+              if (!ourTurn) {
+                // Our turn was deleted (probably by another client)
+                shouldClearOngoing = true;
+              } else {
+                // Check if our turn was completed by another client
+                const persistedThrows = (ourTurn.throws ?? []).slice().sort((a, b) => a.dart_index - b.dart_index);
+                const throwCount = persistedThrows.length;
+                if (throwCount >= 3 || ourTurn.busted) {
+                  shouldClearOngoing = true;
+                } else {
+                  const persistedDarts = persistedThrows.map((thr) => ({
+                    scored: thr.scored,
+                    label: thr.segment,
+                    kind: segmentLabelToKind(thr.segment),
+                  }));
+                  // Avoid regressing local optimistic darts while a throw request is in flight.
+                  // Reconcile only when server has at least as many darts as local.
+                  const canReconcileFromServer = persistedDarts.length >= ongoing.darts.length;
+                  const drifted =
+                    canReconcileFromServer &&
+                    (persistedDarts.length !== ongoing.darts.length ||
+                      persistedDarts.some((dart, idx) => {
+                        const local = ongoing.darts[idx];
+                        return !local || local.scored !== dart.scored || local.label !== dart.label;
+                      }));
+
+                  // Keep local in-memory turn fully aligned with server throws so score math stays consistent.
+                  if (drifted) {
+                    const syncedOngoingDarts = persistedDarts.map((dart) => ({ ...dart }));
+                    const syncedLocalDarts = persistedDarts.map((dart) => ({ ...dart }));
+                    ongoingTurnRef.current = {
+                      ...ongoing,
+                      darts: syncedOngoingDarts,
+                    };
+                    nextLocalTurn = {
+                      playerId: ongoing.playerId,
+                      darts: syncedLocalDarts,
+                    };
+                  }
+                }
+              }
+            }
+
+            if (shouldClearOngoing) {
+              ongoingTurnRef.current = null;
+              nextLocalTurn = { playerId: null, darts: [] };
+            }
+
+            if (nextLocalTurn) {
+              setLocalTurn(nextLocalTurn);
+            }
+
+            // Update state with functional updates
+            setTurns((prev) => {
+              const newTurns = updatedTurns as unknown as TurnRecord[];
+              return areTurnsEqual(prev, newTurns) ? prev : newTurns;
+            });
+
+            // Update throw counts
+            const throwCounts: Record<string, number> = {};
+            for (const turn of updatedTurns) {
+              const throws = (turn as TurnWithThrows).throws || [];
+              throwCounts[turn.id] = throws.length;
+            }
+
+            setTurnThrowCounts((prev) => {
+              return areThrowCountsEqual(prev, throwCounts) ? prev : throwCounts;
+            });
+          }
+        }
+      } catch {
+        // Fallback to full reload
+        void loadAll();
+      }
+    };
+
+    const scheduleMatchUIRefresh = () => {
+      if (matchTurnsDebounceTimerRef.current) {
+        matchTurnsFetchQueuedRef.current = true;
+        return;
+      }
+
+      matchTurnsDebounceTimerRef.current = setTimeout(() => {
+        matchTurnsDebounceTimerRef.current = null;
+
+        if (matchTurnsFetchRef.current) {
+          matchTurnsFetchQueuedRef.current = true;
+          return;
+        }
+
+        const run = async () => {
+          let remaining = 6;
+          do {
+            matchTurnsFetchQueuedRef.current = false;
+            await runMatchUIRefresh();
+            remaining -= 1;
+          } while (matchTurnsFetchQueuedRef.current && remaining > 0);
+        };
+
+        matchTurnsFetchRef.current = run().finally(() => {
+          matchTurnsFetchRef.current = null;
+        });
+      }, 60);
+    };
+
     // Handle real-time updates for normal match UI (non-spectator)
-    const handleMatchUIUpdate = async (event: CustomEvent) => {
+    const handleMatchUIUpdate = (event: CustomEvent) => {
       if (latestStateRef.current.isSpectatorMode) return; // Only for normal match UI
 
       const payload = event.detail;
@@ -651,83 +882,7 @@ export function useMatchRealtime({
         return;
       }
 
-      try {
-        const supabase = await getSupabaseClient();
-
-        if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-          // Prefer local state (ref) to avoid extra round-trips on every throw.
-          let legsSnapshot = latestStateRef.current.legs;
-          let currentLeg = legsSnapshot.find((l) => !l.winner_player_id) ?? legsSnapshot[legsSnapshot.length - 1];
-
-          // Fallback if we don't have legs yet.
-          if (!currentLeg) {
-            const { data: fetchedLegs } = await supabase
-              .from('legs')
-              .select('*')
-              .eq('match_id', matchId)
-              .order('leg_number', { ascending: true });
-            legsSnapshot = (fetchedLegs as LegRecord[] | null) ?? legsSnapshot;
-            currentLeg = legsSnapshot.find((l) => !l.winner_player_id) ?? legsSnapshot[legsSnapshot.length - 1];
-          }
-
-          if (currentLeg) {
-            const { data: updatedTurns } = await supabase
-              .from('turns')
-              .select(`
-                id, leg_id, player_id, turn_number, total_scored, busted, created_at,
-                throws:throws(id, turn_id, dart_index, segment, scored)
-              `)
-              .eq('leg_id', currentLeg.id)
-              .order('turn_number', { ascending: true });
-
-            if (updatedTurns) {
-              // Check if our ongoing turn is still valid/current
-              const ongoing = ongoingTurnRef.current;
-              let shouldClearOngoing = false;
-
-              if (ongoing) {
-                // Check if someone else finished this turn or if there's a newer turn
-                const ourTurn = updatedTurns.find((t) => t.id === ongoing.turnId);
-                if (!ourTurn) {
-                  // Our turn was deleted (probably by another client)
-                  shouldClearOngoing = true;
-                } else {
-                  // Check if our turn was completed by another client
-                  const throwCount = (ourTurn as TurnWithThrows).throws?.length || 0;
-                  if (throwCount === 3 || ourTurn.busted) {
-                    shouldClearOngoing = true;
-                  }
-                }
-              }
-
-              if (shouldClearOngoing) {
-                ongoingTurnRef.current = null;
-                setLocalTurn({ playerId: '', darts: [] });
-              }
-
-              // Update state with functional updates
-              setTurns((prev) => {
-                const newTurns = updatedTurns as unknown as TurnRecord[];
-                return JSON.stringify(prev) !== JSON.stringify(newTurns) ? newTurns : prev;
-              });
-
-              // Update throw counts
-              const throwCounts: Record<string, number> = {};
-              for (const turn of updatedTurns) {
-                const throws = (turn as TurnWithThrows).throws || [];
-                throwCounts[turn.id] = throws.length;
-              }
-
-              setTurnThrowCounts((prev) => {
-                return JSON.stringify(prev) !== JSON.stringify(throwCounts) ? throwCounts : prev;
-              });
-            }
-          }
-        }
-      } catch {
-        // Fallback to full reload
-        void loadAll();
-      }
+      scheduleMatchUIRefresh();
     };
 
     // Handle turn changes - hot update
@@ -794,10 +949,10 @@ export function useMatchRealtime({
 
         setTurns((prev) => {
           const next = result.turns as unknown as TurnRecord[];
-          return JSON.stringify(prev) !== JSON.stringify(next) ? next : prev;
+          return areTurnsEqual(prev, next) ? prev : next;
         });
         setTurnThrowCounts((prev) => {
-          return JSON.stringify(prev) !== JSON.stringify(result.turnThrowCounts) ? result.turnThrowCounts : prev;
+          return areThrowCountsEqual(prev, result.turnThrowCounts) ? prev : result.turnThrowCounts;
         });
         latestStateRef.current = {
           ...latestStateRef.current,
@@ -883,7 +1038,7 @@ export function useMatchRealtime({
             await processThrowChange({ detail: pending } as unknown as CustomEvent);
           }
         }
-        await handleMatchUIUpdate(event);
+        handleMatchUIUpdate(event);
       }
     };
 
@@ -947,6 +1102,10 @@ export function useMatchRealtime({
     return () => {
       pendingThrowBuffer.clear();
       pendingTurnReconcileRef.current.clear();
+      if (matchTurnsDebounceTimerRef.current) {
+        clearTimeout(matchTurnsDebounceTimerRef.current);
+        matchTurnsDebounceTimerRef.current = null;
+      }
 
       window.removeEventListener('supabase-throws-change', handleThrowChange as unknown as EventListener);
       window.removeEventListener('supabase-turns-change', handleTurnChange as unknown as EventListener);
@@ -956,11 +1115,8 @@ export function useMatchRealtime({
     };
   }, [
     realtime.isConnected,
-    realtime.connectionStatus,
-    realtime.updatePresence,
     realtimeEnabled,
     matchId,
-    isSpectatorMode,
     loadAll,
     loadAllSpectator,
     loadMatchOnly,

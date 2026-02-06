@@ -12,6 +12,7 @@ import type { CommentaryPersona, CommentaryPersonaId } from '@/lib/commentary/ty
 import type { LegRecord, MatchRecord, Player, TurnRecord } from '@/lib/match/types';
 import type { VoiceOption } from '@/services/ttsService';
 import type { FinishRule } from '@/utils/x01';
+import { useMemo } from 'react';
 
 type CelebrationState = {
   score: number;
@@ -151,6 +152,24 @@ export function MatchSpectatorView({
   queueLength,
   activePersona,
 }: Props) {
+  const topThreeTurns = useMemo(
+    () =>
+      turns
+        .filter((t) => t.leg_id === currentLegId && !t.busted && t.total_scored > 0)
+        .sort((a, b) => b.total_scored - a.total_scored)
+        .slice(0, 3),
+    [turns, currentLegId]
+  );
+
+  const recentThreeTurns = useMemo(
+    () =>
+      turns
+        .filter((t) => t.leg_id === currentLegId && !t.busted)
+        .sort((a, b) => b.turn_number - a.turn_number)
+        .slice(0, 3),
+    [turns, currentLegId]
+  );
+
   return (
     <div className="fixed inset-0 overflow-y-auto bg-background">
       <div className="w-full space-y-3 md:space-y-6 px-4 md:px-6 xl:px-8 py-6 pb-24 md:pb-6 relative">
@@ -308,7 +327,7 @@ export function MatchSpectatorView({
               </CardHeader>
               <CardContent className="space-y-2">
                 {legs.map((leg) => {
-                  const winner = players.find((p) => p.id === leg.winner_player_id);
+                  const winner = leg.winner_player_id ? playerById[leg.winner_player_id] : undefined;
                   return (
                     <div
                       key={leg.id}
@@ -338,35 +357,28 @@ export function MatchSpectatorView({
                 <div>
                   <h4 className="font-semibold mb-3">Top 3 Rounds</h4>
                   <div className="space-y-1">
-                    {(() => {
-                      const allTurns = turns
-                        .filter((t) => t.leg_id === currentLegId && !t.busted && t.total_scored > 0)
-                        .sort((a, b) => b.total_scored - a.total_scored)
-                        .slice(0, 3);
-
-                      return allTurns.length > 0 ? (
-                        allTurns.map((turn, index) => {
-                          const medal = ['🥇', '🥈', '🥉'][index] || '🏆';
-                          return (
-                            <TurnRow
-                              key={turn.id}
-                              turn={turn}
-                              playerName={playerById[turn.player_id]?.display_name}
-                              playersCount={players.length}
-                              leading={<span className="text-xl">{medal}</span>}
-                              placeholder="—"
-                              className="p-3 rounded-md bg-muted/30 hover:bg-muted/50 transition-colors"
-                              totalClassName="text-primary text-lg"
-                              throwBadgeClassName="text-[10px]"
-                            />
-                          );
-                        })
-                      ) : (
-                        <div className="text-center py-4 text-muted-foreground">
-                          <div className="text-sm">No completed rounds yet</div>
-                        </div>
-                      );
-                    })()}
+                    {topThreeTurns.length > 0 ? (
+                      topThreeTurns.map((turn, index) => {
+                        const medal = ['🥇', '🥈', '🥉'][index] || '🏆';
+                        return (
+                          <TurnRow
+                            key={turn.id}
+                            turn={turn}
+                            playerName={playerById[turn.player_id]?.display_name}
+                            playersCount={players.length}
+                            leading={<span className="text-xl">{medal}</span>}
+                            placeholder="—"
+                            className="p-3 rounded-md bg-muted/30 hover:bg-muted/50 transition-colors"
+                            totalClassName="text-primary text-lg"
+                            throwBadgeClassName="text-[10px]"
+                          />
+                        );
+                      })
+                    ) : (
+                      <div className="text-center py-4 text-muted-foreground">
+                        <div className="text-sm">No completed rounds yet</div>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -374,29 +386,23 @@ export function MatchSpectatorView({
                 <div>
                   <h4 className="font-semibold mb-3">Recent Rounds</h4>
                   <div className="space-y-1">
-                    {(() => {
-                      const recentTurns = turns
-                        .filter((t) => t.leg_id === currentLegId && !t.busted)
-                        .sort((a, b) => b.turn_number - a.turn_number);
-
-                      return recentTurns.length > 0 ? (
-                        recentTurns.map((turn) => (
-                          <TurnRow
-                            key={turn.id}
-                            turn={turn}
-                            playerName={playerById[turn.player_id]?.display_name}
-                            playersCount={players.length}
-                            placeholder="—"
-                            className="p-3 rounded-md bg-muted/30 hover:bg-muted/50 transition-colors"
-                            throwBadgeClassName="text-[10px]"
-                          />
-                        ))
-                      ) : (
-                        <div className="text-center py-4 text-muted-foreground">
-                          <div className="text-sm">No recent rounds yet</div>
-                        </div>
-                      );
-                    })()}
+                    {recentThreeTurns.length > 0 ? (
+                      recentThreeTurns.map((turn) => (
+                        <TurnRow
+                          key={turn.id}
+                          turn={turn}
+                          playerName={playerById[turn.player_id]?.display_name}
+                          playersCount={players.length}
+                          placeholder="—"
+                          className="p-3 rounded-md bg-muted/30 hover:bg-muted/50 transition-colors"
+                          throwBadgeClassName="text-[10px]"
+                        />
+                      ))
+                    ) : (
+                      <div className="text-center py-4 text-muted-foreground">
+                        <div className="text-sm">No recent rounds yet</div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -430,7 +436,7 @@ export function MatchSpectatorView({
             <div className="text-center space-y-4">
               <div className="text-5xl md:text-6xl">🏆</div>
               <div className="text-3xl md:text-4xl font-extrabold text-green-600 dark:text-green-400">
-                {players.find((p) => p.id === matchWinnerId)?.display_name} Wins!
+                {(matchWinnerId ? playerById[matchWinnerId] : undefined)?.display_name} Wins!
               </div>
               <div className="text-base md:text-lg text-muted-foreground">
                 Match complete

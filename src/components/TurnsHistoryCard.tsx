@@ -1,5 +1,6 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { TurnRow, type TurnRowTurn } from '@/components/TurnRow';
+import { useMemo } from 'react';
 
 type TurnsHistoryCardProps = {
   turns: TurnRowTurn[];
@@ -9,6 +10,8 @@ type TurnsHistoryCardProps = {
 };
 
 export function TurnsHistoryCard({ turns, playerById, playersCount, placeholder = '-' }: TurnsHistoryCardProps) {
+  const reverseTurns = useMemo(() => turns.slice().reverse(), [turns]);
+
   return (
     <Card>
       <CardHeader>
@@ -17,7 +20,7 @@ export function TurnsHistoryCard({ turns, playerById, playersCount, placeholder 
       </CardHeader>
       <CardContent>
         <div className="max-h-72 overflow-auto divide-y">
-          {[...turns].reverse().map((turn) => {
+          {reverseTurns.map((turn) => {
             return (
               <TurnRow
                 key={turn.id}

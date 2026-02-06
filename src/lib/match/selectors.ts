@@ -61,7 +61,13 @@ export function selectPlayerStats(
     }
 
     if (turn.leg_id === currentLegId && !turn.busted) {
-      const scored = turn.total_scored || 0;
+      const turnWithThrows = turn as TurnWithThrows;
+      const throwCount = turnWithThrows.throws?.length ?? 0;
+      const throwsTotal = (turnWithThrows.throws ?? []).reduce((sum, thr) => sum + thr.scored, 0);
+      const scored =
+        throwCount >= 3
+          ? throwsTotal
+          : turn.total_scored || 0;
       baseScores[playerId] -= scored;
       avgData[playerId].sum += scored;
       avgData[playerId].count += 1;

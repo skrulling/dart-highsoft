@@ -42,8 +42,8 @@ enabled = true
 schema_paths = []
 
 [db.seed]
-enabled = false
-sql_paths = []
+enabled = true
+sql_paths = ["./seed.sql"]
 
 [db.network_restrictions]
 enabled = false

@@ -7,17 +7,25 @@ async function ensureTurnInMatch(
   matchId: string,
   turnId: string
 ) {
-  const { data: turn } = await supabase.from('turns').select('id, leg_id').eq('id', turnId).single();
+  const { data: turn } = await supabase
+    .from('turns')
+    .select('id, legs!inner(match_id)')
+    .eq('id', turnId)
+    .eq('legs.match_id', matchId)
+    .single();
   if (!turn) return null;
-  const { data: leg } = await supabase.from('legs').select('id, match_id').eq('id', turn.leg_id).single();
-  if (!leg || leg.match_id !== matchId) return null;
-  return { turn, leg };
+  return { turn };
 }
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ matchId: string; turnId: string }> }) {
   try {
     const { matchId, turnId } = await params;
-    const body = (await request.json()) as { totalScored?: number; busted?: boolean };
+    let body: { totalScored?: number; busted?: boolean } | null = null;
+    try {
+      body = (await request.json()) as { totalScored?: number; busted?: boolean };
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    }
     if (typeof body.totalScored !== 'number' || typeof body.busted !== 'boolean') {
       return NextResponse.json({ error: 'totalScored and busted are required' }, { status: 400 });
     }

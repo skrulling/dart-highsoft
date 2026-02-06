@@ -1,23 +1,58 @@
 -- Harden function execution context and remove lingering permissive RLS policies.
 
 -- 1) Pin search_path for functions flagged as mutable by Supabase linter.
-alter function if exists public.calculate_expected_score(int, int)
-  set search_path = public, pg_temp;
+do $$
+declare
+  fn_signature text;
+  fn_reg regprocedure;
+  fn_def text;
+begin
+  foreach fn_signature in array array[
+    'public.calculate_expected_score(int, int)',
+    'public.update_elo_ratings(uuid, uuid, uuid, integer)',
+    'public.update_elo_ratings_multiplayer(uuid, uuid[], integer[], integer)',
+    'public.backfill_historical_elo_ratings()',
+    'public.backfill_historical_elo_ratings_multiplayer()',
+    'public.cascade_delete_player_matches()'
+  ]
+  loop
+    fn_reg := to_regprocedure(fn_signature);
+    if fn_reg is null then
+      continue;
+    end if;
 
-alter function if exists public.update_elo_ratings(uuid, uuid, uuid, integer)
-  set search_path = public, pg_temp;
+    select pg_get_functiondef(fn_reg) into fn_def;
+    if fn_def is null then
+      continue;
+    end if;
 
-alter function if exists public.update_elo_ratings_multiplayer(uuid, uuid[], integer[], integer)
-  set search_path = public, pg_temp;
+    if fn_signature = 'public.cascade_delete_player_matches()' then
+      execute 'drop trigger if exists trg_cascade_player_delete on public.players';
+    end if;
 
-alter function if exists public.backfill_historical_elo_ratings()
-  set search_path = public, pg_temp;
+    execute format('drop function if exists %s', fn_reg::text);
 
-alter function if exists public.backfill_historical_elo_ratings_multiplayer()
-  set search_path = public, pg_temp;
+    if position('SET search_path' in fn_def) = 0 then
+      fn_def := regexp_replace(
+        fn_def,
+        E'\\nAS\\s+',
+        E'\nSET search_path = public, pg_temp\nAS ',
+        ''
+      );
+    end if;
 
-alter function if exists public.cascade_delete_player_matches()
-  set search_path = public, pg_temp;
+    execute fn_def;
+
+    if fn_signature = 'public.cascade_delete_player_matches()' then
+      execute '
+        create trigger trg_cascade_player_delete
+        after delete on public.players
+        for each row execute function public.cascade_delete_player_matches()
+      ';
+    end if;
+  end loop;
+end;
+$$;
 
 -- 2) Remove permissive write policies that may still exist in production.
 drop policy if exists "public update" on public.matches;

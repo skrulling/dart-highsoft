@@ -7,17 +7,25 @@ async function ensureTurnInMatch(
   matchId: string,
   turnId: string
 ) {
-  const { data: turn } = await supabase.from('turns').select('id, leg_id').eq('id', turnId).single();
+  const { data: turn } = await supabase
+    .from('turns')
+    .select('id, legs!inner(match_id)')
+    .eq('id', turnId)
+    .eq('legs.match_id', matchId)
+    .single();
   if (!turn) return null;
-  const { data: leg } = await supabase.from('legs').select('id, match_id').eq('id', turn.leg_id).single();
-  if (!leg || leg.match_id !== matchId) return null;
-  return { turn, leg };
+  return { turn };
 }
 
 export async function POST(request: Request, { params }: { params: Promise<{ matchId: string }> }) {
   try {
     const { matchId } = await params;
-    const body = (await request.json()) as { turnId?: string; dartIndex?: number; segment?: string; scored?: number };
+    let body: { turnId?: string; dartIndex?: number; segment?: string; scored?: number } | null = null;
+    try {
+      body = (await request.json()) as { turnId?: string; dartIndex?: number; segment?: string; scored?: number };
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    }
     if (!body.turnId || typeof body.dartIndex !== 'number' || !body.segment || typeof body.scored !== 'number') {
       return NextResponse.json({ error: 'turnId, dartIndex, segment, scored are required' }, { status: 400 });
     }
@@ -31,9 +39,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ mat
 
     const { data, error } = await supabase
       .from('throws')
-      .insert({ turn_id: body.turnId, dart_index: body.dartIndex, segment: body.segment, scored: body.scored })
+      .insert({
+        turn_id: body.turnId,
+        dart_index: body.dartIndex,
+        segment: body.segment,
+        scored: body.scored,
+      })
       .select('*')
       .single();
+
     if (error || !data) {
       return NextResponse.json({ error: error?.message ?? 'Failed to create throw' }, { status: 500 });
     }
@@ -47,7 +61,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ mat
 export async function DELETE(request: Request, { params }: { params: Promise<{ matchId: string }> }) {
   try {
     const { matchId } = await params;
-    const body = (await request.json()) as { turnId?: string; dartIndex?: number };
+    let body: { turnId?: string; dartIndex?: number } | null = null;
+    try {
+      body = (await request.json()) as { turnId?: string; dartIndex?: number };
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    }
     if (!body.turnId || typeof body.dartIndex !== 'number') {
       return NextResponse.json({ error: 'turnId and dartIndex are required' }, { status: 400 });
     }

@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { decorateAvg } from '@/utils/playerStats';
 import type { Player, ThrowRecord, TurnRecord, TurnWithThrows } from '@/lib/match/types';
+import { useMemo } from 'react';
 
 type LocalTurn = {
   playerId: string | null;
@@ -33,6 +34,17 @@ export function MatchPlayersCard({
   getScoreForPlayer,
   getAvgForPlayer,
 }: Props) {
+  const latestTurnByPlayer = useMemo(() => {
+    const byPlayer: Record<string, TurnRecord> = {};
+    for (const turn of turns) {
+      const existing = byPlayer[turn.player_id];
+      if (!existing || turn.turn_number >= existing.turn_number) {
+        byPlayer[turn.player_id] = turn;
+      }
+    }
+    return byPlayer;
+  }, [turns]);
+
   return (
     <Card>
       <CardHeader>
@@ -53,14 +65,12 @@ export function MatchPlayersCard({
             // Check for throws from any client (including other clients)
             let currentThrows: ThrowRecord[] = [];
             let isRemoteActiveTurn = false;
-            const playerTurns = turns.filter((turn) => turn.player_id === p.id);
-            const lastTurn = playerTurns.length > 0 ? playerTurns[playerTurns.length - 1] : null;
+            const lastTurn = latestTurnByPlayer[p.id] as TurnWithThrows | undefined;
             if (lastTurn && !lastTurn.busted && localTurn.playerId !== p.id) {
               const throwCount = turnThrowCounts[lastTurn.id] || 0;
               if (throwCount > 0 && throwCount < 3) {
                 isRemoteActiveTurn = true;
-                currentThrows = (lastTurn as TurnWithThrows).throws || [];
-                currentThrows.sort((a, b) => a.dart_index - b.dart_index);
+                currentThrows = ((lastTurn as TurnWithThrows).throws ?? []).slice().sort((a, b) => a.dart_index - b.dart_index);
               }
             }
 
@@ -125,4 +135,3 @@ export function MatchPlayersCard({
     </Card>
   );
 }
-

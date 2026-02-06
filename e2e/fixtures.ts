@@ -2,9 +2,11 @@ import { test as base, expect } from '@playwright/test';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 // Test Supabase instance configuration (port 56XXX)
-const TEST_SUPABASE_URL = 'http://127.0.0.1:56421';
-const TEST_SUPABASE_ANON_KEY =
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0';
+const TEST_SUPABASE_URL = process.env.E2E_SUPABASE_URL ?? 'http://127.0.0.1:56421';
+const TEST_SUPABASE_SERVICE_ROLE_KEY =
+  process.env.E2E_SUPABASE_SERVICE_ROLE_KEY ??
+  process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY ??
+  process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 // Test player IDs (from seed.sql) - must be valid UUIDs
 export const TEST_PLAYERS = {
@@ -12,6 +14,12 @@ export const TEST_PLAYERS = {
   TWO: '22222222-2222-2222-2222-222222222222',
   THREE: '33333333-3333-3333-3333-333333333333',
 } as const;
+
+const TEST_PLAYER_NAMES: Record<string, string> = {
+  [TEST_PLAYERS.ONE]: 'E2E Player One',
+  [TEST_PLAYERS.TWO]: 'E2E Player Two',
+  [TEST_PLAYERS.THREE]: 'E2E Player Three',
+};
 
 type TestFixtures = {
   supabase: SupabaseClient;
@@ -30,7 +38,12 @@ type TestFixtures = {
  */
 export const test = base.extend<TestFixtures>({
   supabase: async ({}, use) => {
-    const client = createClient(TEST_SUPABASE_URL, TEST_SUPABASE_ANON_KEY);
+    if (!TEST_SUPABASE_SERVICE_ROLE_KEY) {
+      throw new Error('Missing SUPABASE_SERVICE_ROLE_KEY for e2e fixtures');
+    }
+    const client = createClient(TEST_SUPABASE_URL, TEST_SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
     await use(client);
   },
 
@@ -49,6 +62,8 @@ export const test = base.extend<TestFixtures>({
       const legsToWin = options?.legsToWin ?? 1;
       const playerIds = options?.playerIds ?? [TEST_PLAYERS.ONE, TEST_PLAYERS.TWO];
       const legWinnerId = options?.legWinnerId ?? null;
+
+      await ensurePlayersExist(supabase, playerIds);
 
       // Create match
       const { data: match, error: matchError } = await supabase
@@ -146,6 +161,38 @@ async function cleanupMatchData(supabase: SupabaseClient, matchId: string) {
 
   // Delete match
   await supabase.from('matches').delete().eq('id', matchId);
+}
+
+async function ensurePlayersExist(supabase: SupabaseClient, playerIds: string[]) {
+  const rows = playerIds.map((playerId, index) => ({
+    id: playerId,
+    display_name: TEST_PLAYER_NAMES[playerId] ?? `E2E Player ${index + 1}`,
+  }));
+
+  // Guard against stale local data where these canonical E2E names exist on different UUIDs.
+  // We need deterministic UUIDs for tests, so remove conflicting rows first.
+  const desiredByName = new Map(rows.map((row) => [row.display_name, row.id]));
+  const { data: existingByName, error: existingError } = await supabase
+    .from('players')
+    .select('id, display_name')
+    .in('display_name', rows.map((row) => row.display_name));
+  if (existingError) {
+    throw new Error(`Failed to query existing test players: ${existingError.message}`);
+  }
+  for (const existing of existingByName ?? []) {
+    const desiredId = desiredByName.get(existing.display_name);
+    if (desiredId && existing.id !== desiredId) {
+      const { error: deleteError } = await supabase.from('players').delete().eq('id', existing.id);
+      if (deleteError) {
+        throw new Error(`Failed to remove conflicting player ${existing.display_name}: ${deleteError.message}`);
+      }
+    }
+  }
+
+  const { error } = await supabase.from('players').upsert(rows, { onConflict: 'id' });
+  if (error) {
+    throw new Error(`Failed to ensure test players: ${error.message}`);
+  }
 }
 
 /**

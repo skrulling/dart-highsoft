@@ -96,7 +96,7 @@ type MockBuilder = {
 };
 
 // Query logging
-let queryLog: QueryLogEntry[] = [];
+const queryLog: QueryLogEntry[] = [];
 
 export const recordQuery = (table: keyof MockDb, operation: QueryLogEntry['operation'], detail?: string) => {
   queryLog.push({ table, operation, detail });

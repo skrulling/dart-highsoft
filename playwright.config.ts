@@ -1,4 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
+import { loadEnvConfig } from '@next/env';
+
+loadEnvConfig(process.cwd());
 
 /**
  * Playwright E2E Test Configuration

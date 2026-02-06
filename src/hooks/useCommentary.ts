@@ -31,7 +31,7 @@ type UseCommentaryResult = {
 
 export function useCommentary(): UseCommentaryResult {
   const [commentaryEnabled, setCommentaryEnabled] = useState(false);
-  const [audioEnabled, setAudioEnabled] = useState(true);
+  const [audioEnabled, setAudioEnabled] = useState(false);
   const [voice, setVoice] = useState<VoiceOption>('onyx'); // Match TTSService default - male voice
   const [personaId, setPersonaId] = useState<CommentaryPersonaId>('chad');
   const [currentCommentary, setCurrentCommentary] = useState<string | null>(null);
@@ -65,20 +65,17 @@ export function useCommentary(): UseCommentaryResult {
     setPersonaId(nextPersona);
   }, []);
 
-  // Load commentary settings from localStorage and TTSService
+  // Load commentary preferences and enforce disabled-by-default AI toggles
   useEffect(() => {
     try {
-      const savedEnabled =
-        localStorage.getItem('commentary-enabled') ?? localStorage.getItem('chad-enabled');
-      if (savedEnabled !== null) {
-        setCommentaryEnabled(savedEnabled === 'true');
-      }
-
-      const savedAudioEnabled =
-        localStorage.getItem('commentary-audio-enabled') ?? localStorage.getItem('chad-audio-enabled');
-      if (savedAudioEnabled !== null) {
-        setAudioEnabled(savedAudioEnabled === 'true');
-      }
+      // Always start each session with AI features disabled.
+      setCommentaryEnabled(false);
+      setAudioEnabled(false);
+      localStorage.setItem('commentary-enabled', 'false');
+      localStorage.setItem('chad-enabled', 'false');
+      localStorage.setItem('commentary-audio-enabled', 'false');
+      localStorage.setItem('chad-audio-enabled', 'false');
+      ttsServiceRef.current.updateSettings({ enabled: false });
 
       const savedPersona = localStorage.getItem('commentary-persona');
       if (savedPersona) {

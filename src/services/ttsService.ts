@@ -39,7 +39,7 @@ export class TTSService {
       voice: 'onyx', // Male voice - deep and authoritative
       speed: 1.1,
       volume: 70,
-      enabled: true,
+      enabled: false,
       ...settings,
     };
 
@@ -56,8 +56,9 @@ export class TTSService {
     try {
       const saved = localStorage.getItem('chad-tts-settings');
       if (saved) {
-        const parsed = JSON.parse(saved);
-        this.settings = { ...this.settings, ...parsed };
+        const parsed = JSON.parse(saved) as Partial<TTSSettings>;
+        const { enabled: _ignoredEnabled, ...persisted } = parsed;
+        this.settings = { ...this.settings, ...persisted, enabled: false };
       }
     } catch (error) {
       console.error('Failed to load TTS settings:', error);

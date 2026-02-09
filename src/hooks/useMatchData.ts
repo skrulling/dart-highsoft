@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { getSupabaseClient } from '@/lib/supabaseClient';
 import { loadMatchData } from '@/lib/match/loadMatchData';
+import { recordPerfMetric } from '@/lib/match/perfMetrics';
 import type { LegRecord, MatchRecord, Player, TurnRecord, TurnWithThrows, MatchPlayersRow } from '@/lib/match/types';
 
 type UseMatchDataResult = {
@@ -48,11 +49,12 @@ export function useMatchData(matchId: string): UseMatchDataResult {
 
   const loadAll = useCallback(async () => {
     const requestId = ++loadAllRequestIdRef.current;
+    const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
     setLoading(true);
     setError(null);
     try {
       const supabase = await getSupabaseClient();
-      const result = await loadMatchData(supabase, matchId);
+      const result = await loadMatchData(supabase, matchId, { includeTurnsByLegSummary: true });
 
       if (requestId !== loadAllRequestIdRef.current) return;
 
@@ -66,6 +68,12 @@ export function useMatchData(matchId: string): UseMatchDataResult {
       const msg = e instanceof Error ? e.message : 'Unknown error';
       setError(msg);
     } finally {
+      if (process.env.NODE_ENV !== 'production') {
+        const endedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        const durationMs = Math.round(endedAt - startedAt);
+        console.debug(`[perf] match loadAll took ${durationMs}ms`);
+        recordPerfMetric(matchId, 'matchLoadAllMs', durationMs);
+      }
       if (requestId === loadAllRequestIdRef.current) {
         setLoading(false);
       }
@@ -75,10 +83,12 @@ export function useMatchData(matchId: string): UseMatchDataResult {
   // Separate loading function for spectator mode that doesn't show loading screen
   const loadAllSpectator = useCallback(async () => {
     const requestId = ++loadAllSpectatorRequestIdRef.current;
+    const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
     setSpectatorLoading(true);
+    setError(null);
     try {
       const supabase = await getSupabaseClient();
-      const result = await loadMatchData(supabase, matchId);
+      const result = await loadMatchData(supabase, matchId, { includeTurnsByLegSummary: false });
 
       if (requestId !== loadAllSpectatorRequestIdRef.current) return;
 
@@ -94,8 +104,15 @@ export function useMatchData(matchId: string): UseMatchDataResult {
       console.error('Spectator mode refresh error:', e);
       // Don't set error state in spectator mode to avoid disrupting the view
     } finally {
+      if (process.env.NODE_ENV !== 'production') {
+        const endedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        const durationMs = Math.round(endedAt - startedAt);
+        console.debug(`[perf] spectator loadAll took ${durationMs}ms`);
+        recordPerfMetric(matchId, 'spectatorLoadAllMs', durationMs);
+      }
       if (requestId === loadAllSpectatorRequestIdRef.current) {
         setSpectatorLoading(false);
+        setLoading(false);
       }
     }
   }, [matchId]);

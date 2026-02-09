@@ -60,6 +60,43 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(searchParamsState.value),
 }));
 
+vi.mock('next/dynamic', async () => {
+  const React = await import('react');
+
+  return {
+    default: (
+      loader: () => Promise<unknown>,
+      options?: {
+        loading?: React.ComponentType;
+      }
+    ) => {
+      const LazyComponent = React.lazy(async () => {
+        const loaded = await loader();
+        if (typeof loaded === 'function') {
+          return { default: loaded as React.ComponentType };
+        }
+        if (
+          loaded &&
+          typeof loaded === 'object' &&
+          'default' in (loaded as Record<string, unknown>) &&
+          typeof (loaded as { default?: unknown }).default === 'function'
+        ) {
+          return { default: (loaded as { default: React.ComponentType }).default };
+        }
+        throw new Error('Unsupported dynamic import mock result');
+      });
+
+      const DynamicComponent = (props: Record<string, unknown>) => (
+        <React.Suspense fallback={options?.loading ? React.createElement(options.loading) : null}>
+          <LazyComponent {...props} />
+        </React.Suspense>
+      );
+      DynamicComponent.displayName = 'MockNextDynamicComponent';
+      return DynamicComponent;
+    },
+  };
+});
+
 vi.mock('@/hooks/useRealtime', () => ({
   useRealtime: () => mockRealtime,
 }));
@@ -214,6 +251,16 @@ describe('MatchClient', () => {
   });
 
   describe('spectator mode', () => {
+    it('boots directly into spectator mode from URL params on first render', async () => {
+      setSearchParams('spectator=true');
+      const view = render(<MatchClient matchId="match-1" />);
+
+      await screen.findByText('Live Match');
+      expect(screen.queryByText('Undo dart')).toBeNull();
+
+      view.unmount();
+    });
+
     it('avoids extra throws queries during spectator initial load', async () => {
       setSearchParams('spectator=true');
       const view = render(<MatchClient matchId="match-1" />);

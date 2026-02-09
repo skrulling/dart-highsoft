@@ -4,6 +4,7 @@ import { useCallback, useRef, useState } from 'react';
 import { getSupabaseClient } from '@/lib/supabaseClient';
 import { apiRequest } from '@/lib/apiClient';
 import { applyThrow, type FinishRule } from '@/utils/x01';
+import { recordPerfMetric } from '@/lib/match/perfMetrics';
 import type { SegmentResult } from '@/utils/dartboard';
 import type { LegRecord, MatchRecord, Player, TurnRecord, TurnWithThrows } from '@/lib/match/types';
 import type { EditableThrow } from '@/components/match/EditThrowsModal';
@@ -45,6 +46,7 @@ type UseMatchActionsArgs = {
   } | null>;
   setLocalTurn: React.Dispatch<React.SetStateAction<LocalTurn>>;
   loadAll: () => Promise<void>;
+  loadTurnsForLeg: (legId: string) => Promise<TurnRecord[]>;
   routerPush: (href: string) => void;
   getScoreForPlayer: (playerId: string) => number;
   canEditPlayers: boolean;
@@ -108,6 +110,7 @@ export function useMatchActions(args: UseMatchActionsArgs): UseMatchActionsResul
     ongoingTurnRef,
     setLocalTurn,
     loadAll,
+    loadTurnsForLeg,
     routerPush,
     getScoreForPlayer,
     canEditPlayers,
@@ -132,7 +135,7 @@ export function useMatchActions(args: UseMatchActionsArgs): UseMatchActionsResul
   const [rematchLoading, setRematchLoading] = useState(false);
   const scoringQueueRef = useRef<Promise<void>>(Promise.resolve());
 
-  const startTurnIfNeeded = useCallback(async () => {
+  const syncTurnFromStateIfNeeded = useCallback(() => {
     if (!currentLeg || !currentPlayer) return null as string | null;
     if (ongoingTurnRef.current) return ongoingTurnRef.current.turnId;
 
@@ -175,27 +178,8 @@ export function useMatchActions(args: UseMatchActionsArgs): UseMatchActionsResul
         return latestCurrentLegTurn.id;
       }
     }
-
-    let data: TurnRecord | null = null;
-    try {
-      const result = await apiRequest<{ turn: TurnRecord }>(`/api/matches/${matchId}/turns`, {
-        body: { legId: currentLeg.id, playerId: currentPlayer.id },
-      });
-      data = result.turn;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to start turn';
-      alert(message);
-      return null;
-    }
-    ongoingTurnRef.current = {
-      turnId: data.id,
-      playerId: currentPlayer.id,
-      darts: [],
-      startScore: getScoreForPlayer(currentPlayer.id),
-    };
-    setLocalTurn({ playerId: currentPlayer.id, darts: [] });
-    return data.id;
-  }, [currentLeg, currentPlayer, ongoingTurnRef, matchId, getScoreForPlayer, setLocalTurn, turns, turnThrowCounts]);
+    return null;
+  }, [currentLeg, currentPlayer, ongoingTurnRef, getScoreForPlayer, setLocalTurn, turns, turnThrowCounts]);
 
   const finishTurn = useCallback(
     async (busted: boolean, opts?: { skipReload?: boolean }) => {
@@ -210,14 +194,20 @@ export function useMatchActions(args: UseMatchActionsArgs): UseMatchActionsResul
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to update turn';
         alert(message);
+        await loadAll();
+        return;
       }
       ongoingTurnRef.current = null;
       setLocalTurn({ playerId: null, darts: [] });
       if (!opts?.skipReload) {
-        await loadAll();
+        if (currentLeg?.id) {
+          await loadTurnsForLeg(currentLeg.id);
+        } else {
+          await loadAll();
+        }
       }
     },
-    [ongoingTurnRef, setLocalTurn, loadAll, matchId]
+    [ongoingTurnRef, setLocalTurn, loadAll, loadTurnsForLeg, matchId, currentLeg?.id]
   );
 
   const triggerMatchRecap = useCallback(
@@ -392,12 +382,23 @@ export function useMatchActions(args: UseMatchActionsArgs): UseMatchActionsResul
     async (_x: number, _y: number, result: SegmentResult) => {
       if (matchWinnerId) return; // match over
       if (!currentLeg || !currentPlayer) return;
-      const turnId = await startTurnIfNeeded();
-      if (!turnId) return;
+      const clickStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      let turnId = syncTurnFromStateIfNeeded();
+      if (!turnId) {
+        turnId = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+        ongoingTurnRef.current = {
+          turnId,
+          playerId: currentPlayer.id,
+          darts: [],
+          startScore: getScoreForPlayer(currentPlayer.id),
+        };
+        setLocalTurn({ playerId: currentPlayer.id, darts: [] });
+      }
 
       const myScoreStart = ongoingTurnRef.current?.startScore ?? getScoreForPlayer(currentPlayer.id);
       const localSubtotal = localTurn.darts.reduce((s, d) => s + d.scored, 0);
       const outcome = applyThrow(myScoreStart - localSubtotal, result, finishRule);
+      const hadPersistedTurnId = !turnId.startsWith('pending-');
 
       const newDartIndex = ongoingTurnRef.current!.darts.length + 1;
       const optimisticDart = { scored: result.scored, label: result.label, kind: result.kind as SegmentResult['kind'] };
@@ -406,21 +407,57 @@ export function useMatchActions(args: UseMatchActionsArgs): UseMatchActionsResul
         playerId: currentPlayer.id,
         darts: [...prev.darts, optimisticDart],
       }));
+      if (process.env.NODE_ENV !== 'production') {
+        const optimisticAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        const durationMs = Math.round(optimisticAt - clickStartedAt);
+        console.debug(`[perf] click-to-optimistic-paint ${durationMs}ms`);
+        recordPerfMetric(matchId, 'clickToOptimisticPaintMs', durationMs);
+      }
 
       try {
-        await apiRequest(`/api/matches/${matchId}/throws`, {
-          body: { turnId, dartIndex: newDartIndex, segment: result.label, scored: result.scored },
+        const throwResult = await apiRequest<{ turnId?: string }>(`/api/matches/${matchId}/throws`, {
+          body: hadPersistedTurnId
+            ? { turnId, dartIndex: newDartIndex, segment: result.label, scored: result.scored }
+            : {
+                legId: currentLeg.id,
+                playerId: currentPlayer.id,
+                dartIndex: newDartIndex,
+                segment: result.label,
+                scored: result.scored,
+              },
         });
+        if (throwResult.turnId && ongoingTurnRef.current && ongoingTurnRef.current.turnId === turnId) {
+          ongoingTurnRef.current = {
+            ...ongoingTurnRef.current,
+            turnId: throwResult.turnId,
+          };
+          turnId = throwResult.turnId;
+        }
+        if (process.env.NODE_ENV !== 'production') {
+          const ackAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+          const durationMs = Math.round(ackAt - clickStartedAt);
+          console.debug(`[perf] click-to-server-ack ${durationMs}ms`);
+          recordPerfMetric(matchId, 'clickToServerAckMs', durationMs);
+        }
       } catch (error) {
         // Roll back optimistic local dart if persistence failed.
         const current = ongoingTurnRef.current;
         if (current && current.turnId === turnId && current.darts.length > 0) {
           current.darts.pop();
+          if (current.darts.length === 0 && !hadPersistedTurnId) {
+            ongoingTurnRef.current = null;
+          }
         }
-        setLocalTurn((prev) => ({
-          playerId: prev.playerId,
-          darts: prev.darts.slice(0, -1),
-        }));
+        setLocalTurn((prev) => {
+          const nextDarts = prev.darts.slice(0, -1);
+          if (nextDarts.length === 0 && !hadPersistedTurnId) {
+            return { playerId: null, darts: [] };
+          }
+          return {
+            playerId: prev.playerId,
+            darts: nextDarts,
+          };
+        });
         const message = error instanceof Error ? error.message : 'Failed to save throw';
         alert(message);
         return;
@@ -445,7 +482,7 @@ export function useMatchActions(args: UseMatchActionsArgs): UseMatchActionsResul
       matchWinnerId,
       currentLeg,
       currentPlayer,
-      startTurnIfNeeded,
+      syncTurnFromStateIfNeeded,
       ongoingTurnRef,
       getScoreForPlayer,
       localTurn.darts,

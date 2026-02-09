@@ -11,7 +11,16 @@ export type MatchLoadResult = {
   turnsByLeg: Record<string, TurnRecord[]>;
 };
 
-export async function loadMatchData(supabase: SupabaseClient, matchId: string): Promise<MatchLoadResult> {
+export type LoadMatchDataOptions = {
+  includeTurnsByLegSummary?: boolean;
+};
+
+export async function loadMatchData(
+  supabase: SupabaseClient,
+  matchId: string,
+  options: LoadMatchDataOptions = {}
+): Promise<MatchLoadResult> {
+  const includeTurnsByLegSummary = options.includeTurnsByLegSummary ?? true;
   const [
     { data: m, error: matchError },
     { data: mp, error: matchPlayersError },
@@ -35,7 +44,7 @@ export async function loadMatchData(supabase: SupabaseClient, matchId: string): 
   const legs = ((lgs ?? []) as LegRecord[]) ?? [];
 
   const currentLeg = legs.find((l) => !l.winner_player_id) || legs[legs.length - 1] || null;
-  const legIds = legs.map((l) => l.id);
+  const legIds = includeTurnsByLegSummary ? legs.map((l) => l.id) : [];
 
   const [{ data: currentLegTurns, error: currentLegTurnsError }, { data: allTurns, error: allTurnsError }] =
     await Promise.all([
@@ -76,4 +85,3 @@ export async function loadMatchData(supabase: SupabaseClient, matchId: string): 
 
   return { match, players, legs, turns, turnThrowCounts, turnsByLeg };
 }
-

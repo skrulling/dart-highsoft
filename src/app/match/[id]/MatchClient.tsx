@@ -1,11 +1,12 @@
 "use client";
 
-import { MatchSpectatorView } from '@/components/match/MatchSpectatorView';
 import { MatchScoringView } from '@/components/match/MatchScoringView';
 import { RealtimeDebugPanel } from '@/components/match/RealtimeDebugPanel';
+import { PerfDebugPanel } from '@/components/match/PerfDebugPanel';
 import { SegmentResult } from '@/utils/dartboard';
 import { FinishRule } from '@/utils/x01';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { useCommentary } from '@/hooks/useCommentary';
 import { useMatchData } from '@/hooks/useMatchData';
 import { useMatchRealtime } from '@/hooks/useMatchRealtime';
@@ -28,13 +29,19 @@ import {
   canReorderPlayers as canReorderPlayersSelector,
 } from '@/lib/match/selectors';
 
+const MatchSpectatorView = dynamic(
+  () => import('@/components/match/MatchSpectatorView').then((module) => module.MatchSpectatorView),
+  { loading: () => <div className="p-4">Loading spectator view…</div> }
+);
+
 export default function MatchClient({ matchId }: { matchId: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const spectatorParam = searchParams.get('spectator') === 'true';
   const [origin, setOrigin] = useState('');
   
   // Spectator mode state
-  const [isSpectatorMode, setIsSpectatorMode] = useState(false);
+  const [isSpectatorMode, setIsSpectatorMode] = useState(spectatorParam);
   const [celebration, setCelebration] = useState<{
     score: number;
     playerName: string;
@@ -123,10 +130,15 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   const debugRealtime =
     process.env.NODE_ENV !== 'production' &&
     (searchParams.get('debugRealtime') === '1' || searchParams.get('debug') === 'realtime');
+  const debugPerf = process.env.NODE_ENV !== 'production';
 
   useEffect(() => {
+    if (isSpectatorMode) {
+      void loadAllSpectator();
+      return;
+    }
     void loadAll();
-  }, [loadAll]);
+  }, [isSpectatorMode, loadAll, loadAllSpectator]);
 
   useEffect(() => {
     setOrigin(window.location.origin);
@@ -197,11 +209,8 @@ export default function MatchClient({ matchId }: { matchId: string }) {
 
   // Check for spectator mode from URL params
   useEffect(() => {
-    const spectatorParam = searchParams.get('spectator');
-    if (spectatorParam === 'true') {
-      setIsSpectatorMode(true);
-    }
-  }, [searchParams]);
+    setIsSpectatorMode(spectatorParam);
+  }, [spectatorParam]);
 
   useEffect(() => {
     if (!isSpectatorMode) return;
@@ -355,6 +364,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     ongoingTurnRef,
     setLocalTurn,
     loadAll,
+    loadTurnsForLeg,
     routerPush: router.push,
     getScoreForPlayer,
     canEditPlayers,
@@ -436,6 +446,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
           isSpectatorMode={true}
           enabled={debugRealtime}
         />
+        <PerfDebugPanel matchId={matchId} enabled={debugPerf} />
       </>
     );
   }
@@ -495,6 +506,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         isSpectatorMode={false}
         enabled={debugRealtime}
       />
+      <PerfDebugPanel matchId={matchId} enabled={debugPerf} />
     </>
   );
 }

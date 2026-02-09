@@ -1,6 +1,5 @@
 import QRCode from 'react-qr-code';
 import { Home } from 'lucide-react';
-import { ScoreProgressChart } from '@/components/ScoreProgressChart';
 import { TurnRow } from '@/components/TurnRow';
 import { SpectatorLiveMatchCard } from '@/components/match/SpectatorLiveMatchCard';
 import CommentaryDisplay from '@/components/CommentaryDisplay';
@@ -13,6 +12,12 @@ import type { LegRecord, MatchRecord, Player, TurnRecord } from '@/lib/match/typ
 import type { VoiceOption } from '@/services/ttsService';
 import type { FinishRule } from '@/utils/x01';
 import { useEffect, useMemo, useState } from 'react';
+import dynamic from 'next/dynamic';
+
+const ScoreProgressChart = dynamic(
+  () => import('@/components/ScoreProgressChart').then((module) => module.ScoreProgressChart),
+  { loading: () => <div className="h-[300px] w-full animate-pulse rounded-md bg-muted/30" /> }
+);
 
 type CelebrationState = {
   score: number;

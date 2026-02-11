@@ -66,7 +66,7 @@ function compareTrendStrength(a: unknown, b: unknown): number {
   if (aStrength == null && bStrength == null) return 0;
   if (aStrength == null) return -1;
   if (bStrength == null) return 1;
-  return aStrength - bStrength;
+  return bStrength - aStrength;
 }
 
 type MergedPlayer = {
@@ -290,7 +290,7 @@ export function GridLeaderboard() {
       ],
       rendering: {
         rows: {
-          minVisibleRows: 20,
+          minVisibleRows: 12,
         },
       },
       lang: {
@@ -306,6 +306,10 @@ export function GridLeaderboard() {
   return (
     <div className="grid-leaderboard">
       <style>{`
+        .grid-leaderboard .grid-leaderboard__viewport {
+          height: 560px;
+          overflow-y: auto;
+        }
         .grid-leaderboard .hcg-table tbody {
           counter-reset: row-num;
         }
@@ -319,7 +323,9 @@ export function GridLeaderboard() {
           content: counter(row-num);
         }
       `}</style>
-      <Grid options={options} />
+      <div className="grid-leaderboard__viewport">
+        <Grid options={options} />
+      </div>
     </div>
   );
 }

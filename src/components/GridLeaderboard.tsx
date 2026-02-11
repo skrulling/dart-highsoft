@@ -307,8 +307,8 @@ export function GridLeaderboard() {
     <div className="grid-leaderboard">
       <style>{`
         .grid-leaderboard .hcg-container {
-          height: 560px;
-          max-height: 560px;
+          height: 1200px;
+          max-height: 1200px;
         }
         .grid-leaderboard .hcg-table tbody {
           counter-reset: row-num;

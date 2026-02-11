@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { getSupabaseClient } from '@/lib/supabaseClient';
-import { getEloLeaderboard, getEloTier, type EloLeaderboardEntry } from '@/utils/eloRating';
-import { getMultiEloLeaderboard, type MultiEloLeaderboardEntry } from '@/utils/eloRatingMultiplayer';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { useLeaderboardData } from '@/hooks/useLeaderboardData';
+import { LeaderboardSection, EloLeaderboardItem, PlayerSummaryItem } from '@/components/leaderboard';
+import { medal, formatLeaderboardDate } from '@/utils/leaderboard';
 
 type TopRoundScore = {
   id: string;
@@ -53,15 +53,12 @@ type TopRoundScorePayload = {
 };
 
 export default function LeaderboardsPage() {
-  const [leaders, setLeaders] = useState<{ player_id: string; display_name: string; wins: number; avg_per_turn: number }[]>([]);
-  const [avgLeaders, setAvgLeaders] = useState<{ player_id: string; display_name: string; wins: number; avg_per_turn: number }[]>([]);
-  const [eloLeaders, setEloLeaders] = useState<EloLeaderboardEntry[]>([]);
-  const [eloMultiLeaders, setEloMultiLeaders] = useState<MultiEloLeaderboardEntry[]>([]);
+  const { leaders, avgLeaders, eloLeaders, eloMultiLeaders, loading } = useLeaderboardData(10);
   const [topRoundScores, setTopRoundScores] = useState<TopRoundScore[]>([]);
   const [highestCheckouts, setHighestCheckouts] = useState<{ player_id: string; display_name: string; score: number; date: string; darts_used: number }[]>([]);
   const [quickestLegsDouble, setQuickestLegsDouble] = useState<{ player_id: string; display_name: string; dart_count: number; date: string; start_score: string }[]>([]);
   const [quickestLegsSingle, setQuickestLegsSingle] = useState<{ player_id: string; display_name: string; dart_count: number; date: string; start_score: string }[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [topScoresLoading, setTopScoresLoading] = useState(true);
   const [checkoutLoading, setCheckoutLoading] = useState(true);
   const [quickestLegsLoading, setQuickestLegsLoading] = useState(true);
 
@@ -69,63 +66,37 @@ export default function LeaderboardsPage() {
     (async () => {
       try {
         const supabase = await getSupabaseClient();
-        const [{ data: winnersData }, eloData, eloMultiData, { data: avgData }, { data: topScoresData }] = await Promise.all([
-          supabase
-            .from('player_summary')
-            .select('*')
-            .not('display_name', 'ilike', '%test%')
-            .order('wins', { ascending: false })
-            .limit(10),
-          getEloLeaderboard(10),
-          getMultiEloLeaderboard(10),
-          supabase
-            .from('player_summary')
-            .select('*')
-            .not('display_name', 'ilike', '%test%')
-            .order('avg_per_turn', { ascending: false })
-            .limit(10),
-          supabase
-            .from('turns')
-            .select(`
+        const { data: topScoresData } = await supabase
+          .from('turns')
+          .select(`
+            id,
+            player_id,
+            total_scored,
+            created_at,
+            leg_id,
+            legs!inner (
               id,
-              player_id,
-              total_scored,
-              created_at,
-              leg_id,
-              legs!inner (
+              match_id,
+              matches!inner (
                 id,
-                match_id,
-                matches!inner (
-                  id,
-                  ended_early
-                )
-              ),
-              players!inner (
-                id,
-                display_name
+                ended_early
               )
-            `)
-            .eq('busted', false)
-            .eq('legs.matches.ended_early', false)
-            .not('players.display_name', 'ilike', '%test%')
-            .order('total_scored', { ascending: false })
-            .limit(10)
-        ]);
+            ),
+            players!inner (
+              id,
+              display_name
+            )
+          `)
+          .eq('busted', false)
+          .eq('legs.matches.ended_early', false)
+          .not('players.display_name', 'ilike', '%test%')
+          .order('total_scored', { ascending: false })
+          .limit(10);
 
-        setLeaders(((winnersData as unknown) as { player_id: string; display_name: string; wins: number; avg_per_turn: number }[]) ?? []);
-        setAvgLeaders(((avgData as unknown) as { player_id: string; display_name: string; wins: number; avg_per_turn: number }[]) ?? []);
-        setEloLeaders(eloData);
-        setEloMultiLeaders(eloMultiData);
-
-        // Transform top scores data
         const mapTopRoundScore = (row: TopRoundScorePayload): TopRoundScore | null => {
           const playerRelation = Array.isArray(row.players) ? row.players[0] : row.players;
           const legRelation = Array.isArray(row.legs) ? row.legs[0] : row.legs;
-
-          if (!playerRelation || !legRelation) {
-            return null;
-          }
-
+          if (!playerRelation || !legRelation) return null;
           return {
             id: row.id,
             player_id: row.player_id,
@@ -133,26 +104,20 @@ export default function LeaderboardsPage() {
             total_scored: row.total_scored,
             created_at: row.created_at,
             leg_id: row.leg_id,
-            match_id: legRelation.match_id
+            match_id: legRelation.match_id,
           };
         };
 
-        const rawTopScores = (topScoresData ?? []) as unknown[];
-
-        const transformedTopScores = rawTopScores
+        const transformedTopScores = ((topScoresData ?? []) as unknown[])
           .map((row) => mapTopRoundScore(row as TopRoundScorePayload))
           .filter((row): row is TopRoundScore => row !== null);
 
         setTopRoundScores(transformedTopScores);
       } catch (error) {
-        console.error('Error loading leaderboards:', error);
-        setLeaders([]);
-        setAvgLeaders([]);
-        setEloLeaders([]);
-        setEloMultiLeaders([]);
+        console.error('Error loading top round scores:', error);
         setTopRoundScores([]);
       } finally {
-        setLoading(false);
+        setTopScoresLoading(false);
       }
     })();
   }, []);
@@ -162,18 +127,15 @@ export default function LeaderboardsPage() {
       try {
         setCheckoutLoading(true);
         const supabase = await getSupabaseClient();
-
         const { data: checkoutData } = await supabase
           .from('checkout_leaderboard')
           .select('*')
           .order('score', { ascending: false })
           .limit(10);
 
-        if (checkoutData) {
-          setHighestCheckouts(checkoutData as { player_id: string; display_name: string; score: number; date: string; darts_used: number }[]);
-        } else {
-          setHighestCheckouts([]);
-        }
+        setHighestCheckouts(
+          (checkoutData as { player_id: string; display_name: string; score: number; date: string; darts_used: number }[]) ?? []
+        );
       } catch (error) {
         console.error('Error loading highest checkouts:', error);
         setHighestCheckouts([]);
@@ -213,16 +175,6 @@ export default function LeaderboardsPage() {
     })();
   }, []);
 
-  const medal = (index: number) => (index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `${index + 1}.`);
-
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric'
-    });
-  };
-
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -239,282 +191,165 @@ export default function LeaderboardsPage() {
       </div>
 
       <div className="grid md:grid-cols-2 gap-6">
-        {/* Top 10 Multiplayer ELO Ratings */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-xl font-semibold">Top 10 Multiplayer ELO Ratings</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ul className="divide-y border rounded bg-card">
-              {eloMultiLeaders.map((entry, idx) => {
-                const tier = getEloTier(entry.current_rating);
-                return (
-                  <li key={entry.player_id} className="flex items-center justify-between px-3 py-2">
-                    <div className="flex items-center gap-3">
-                      <span className="w-8 text-lg text-center">{medal(idx)}</span>
-                      <div>
-                        <div>{entry.display_name}</div>
-                        <div className={`text-xs ${tier.color}`}>
-                          {tier.icon} {tier.name}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-6">
-                      <div className="font-mono tabular-nums text-lg font-bold">{entry.current_rating}</div>
-                      <div className="text-sm text-muted-foreground">{entry.win_percentage}% win</div>
-                    </div>
-                  </li>
-                );
-              })}
-              {eloMultiLeaders.length === 0 && (
-                <li className="px-3 py-4 text-sm text-muted-foreground">
-                  <div>No multiplayer ELO ratings yet.</div>
-                  <div className="text-xs mt-1">Complete some 3+ player matches to see rankings!</div>
-                </li>
-              )}
-            </ul>
-          </CardContent>
-        </Card>
+        <LeaderboardSection
+          title="Top 10 Multiplayer ELO Ratings"
+          emptyMessage="No multiplayer ELO ratings yet."
+          emptySubMessage="Complete some 3+ player matches to see rankings!"
+          isEmpty={eloMultiLeaders.length === 0}
+        >
+          {eloMultiLeaders.map((entry, idx) => (
+            <EloLeaderboardItem key={entry.player_id} entry={entry} index={idx} />
+          ))}
+        </LeaderboardSection>
 
-        {/* Top 10 Match Winners */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-xl font-semibold">Top 10 Match Winners</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ul className="divide-y border rounded bg-card">
-              {leaders.map((row, idx) => (
-                <li key={row.player_id} className="flex items-center justify-between px-3 py-2">
-                  <div className="flex items-center gap-3">
-                    <span className="w-8 text-lg text-center">{medal(idx)}</span>
-                    <span>{row.display_name}</span>
-                  </div>
-                  <div className="flex items-center gap-6">
-                    <div className="font-mono tabular-nums">{row.wins}</div>
-                    <div className="text-sm text-muted-foreground">{row.avg_per_turn.toFixed(2)} avg</div>
-                  </div>
-                </li>
-              ))}
-              {leaders.length === 0 && (
-                <li className="px-3 py-4 text-sm text-muted-foreground">No matches recorded yet.</li>
-              )}
-            </ul>
-          </CardContent>
-        </Card>
+        <LeaderboardSection
+          title="Top 10 Match Winners"
+          emptyMessage="No matches recorded yet."
+          isEmpty={leaders.length === 0}
+        >
+          {leaders.map((row, idx) => (
+            <PlayerSummaryItem key={row.player_id} entry={row} index={idx} primaryMetric="wins" />
+          ))}
+        </LeaderboardSection>
 
-        {/* Top 10 by Average Score */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-xl font-semibold">Top 10 by Average Score</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ul className="divide-y border rounded bg-card">
-              {avgLeaders.map((row, idx) => (
-                <li key={row.player_id} className="flex items-center justify-between px-3 py-2">
-                  <div className="flex items-center gap-3">
-                    <span className="w-8 text-lg text-center">{medal(idx)}</span>
-                    <span>{row.display_name}</span>
-                  </div>
-                  <div className="flex items-center gap-6">
-                    <div className="font-mono tabular-nums text-lg font-bold">{row.avg_per_turn.toFixed(2)}</div>
-                    <div className="text-sm text-muted-foreground">{row.wins} wins</div>
-                  </div>
-                </li>
-              ))}
-              {avgLeaders.length === 0 && (
-                <li className="px-3 py-4 text-sm text-muted-foreground">No average scores to display yet.</li>
-              )}
-            </ul>
-          </CardContent>
-        </Card>
+        <LeaderboardSection
+          title="Top 10 by Average Score"
+          emptyMessage="No average scores to display yet."
+          isEmpty={avgLeaders.length === 0}
+        >
+          {avgLeaders.map((row, idx) => (
+            <PlayerSummaryItem key={row.player_id} entry={row} index={idx} primaryMetric="avg" />
+          ))}
+        </LeaderboardSection>
 
-        {/* Top 10 ELO Ratings */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-xl font-semibold">Top 10 ELO Ratings</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ul className="divide-y border rounded bg-card">
-              {eloLeaders.map((entry, idx) => {
-                const tier = getEloTier(entry.current_rating);
-                return (
-                  <li key={entry.player_id} className="flex items-center justify-between px-3 py-2">
-                    <div className="flex items-center gap-3">
-                      <span className="w-8 text-lg text-center">{medal(idx)}</span>
-                      <div>
-                        <div>{entry.display_name}</div>
-                        <div className={`text-xs ${tier.color}`}>
-                          {tier.icon} {tier.name}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-6">
-                      <div className="font-mono tabular-nums text-lg font-bold">{entry.current_rating}</div>
-                      <div className="text-sm text-muted-foreground">{entry.win_percentage}% win</div>
-                    </div>
-                  </li>
-                );
-              })}
-              {eloLeaders.length === 0 && (
-                <li className="px-3 py-4 text-sm text-muted-foreground">
-                  <div>No ELO ratings yet.</div>
-                  <div className="text-xs mt-1">Complete some 1v1 matches to see ELO rankings!</div>
-                </li>
-              )}
-            </ul>
-          </CardContent>
-        </Card>
+        <LeaderboardSection
+          title="Top 10 ELO Ratings"
+          emptyMessage="No ELO ratings yet."
+          emptySubMessage="Complete some 1v1 matches to see ELO rankings!"
+          isEmpty={eloLeaders.length === 0}
+        >
+          {eloLeaders.map((entry, idx) => (
+            <EloLeaderboardItem key={entry.player_id} entry={entry} index={idx} />
+          ))}
+        </LeaderboardSection>
 
-        {/* Top 10 Round Scores of All Time - NEW LEADERBOARD */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-xl font-semibold">Top 10 Round Scores of All Time</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ul className="divide-y border rounded bg-card">
-              {topRoundScores.map((score, idx) => (
-                <li key={score.id} className="flex items-center justify-between px-3 py-2">
-                  <div className="flex items-center gap-3">
-                    <span className="w-8 text-lg text-center">{medal(idx)}</span>
-                    <div>
-                      <div className="font-medium">{score.display_name}</div>
-                      <div className="text-xs text-muted-foreground">{formatDate(score.created_at)}</div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-6">
-                    <div className="font-mono tabular-nums text-2xl font-bold text-primary">{score.total_scored}</div>
-                    {score.total_scored === 180 && <span className="text-lg">🎯</span>}
-                    {score.total_scored >= 140 && score.total_scored < 180 && <span className="text-lg">🔥</span>}
-                  </div>
-                </li>
-              ))}
-              {topRoundScores.length === 0 && (
-                <li className="px-3 py-4 text-sm text-muted-foreground">No round scores recorded yet.</li>
-              )}
-            </ul>
-          </CardContent>
-        </Card>
+        {/* Top 10 Round Scores of All Time */}
+        <LeaderboardSection
+          title="Top 10 Round Scores of All Time"
+          emptyMessage={topScoresLoading ? 'Loading top scores...' : 'No round scores recorded yet.'}
+          isEmpty={topRoundScores.length === 0}
+        >
+          {topRoundScores.map((score, idx) => (
+            <li key={score.id} className="flex items-center justify-between px-3 py-2">
+              <div className="flex items-center gap-3">
+                <span className="w-8 text-lg text-center">{medal(idx)}</span>
+                <div>
+                  <div className="font-medium">{score.display_name}</div>
+                  <div className="text-xs text-muted-foreground">{formatLeaderboardDate(score.created_at)}</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-6">
+                <div className="font-mono tabular-nums text-2xl font-bold text-primary">{score.total_scored}</div>
+                {score.total_scored === 180 && <span className="text-lg">🎯</span>}
+                {score.total_scored >= 140 && score.total_scored < 180 && <span className="text-lg">🔥</span>}
+              </div>
+            </li>
+          ))}
+        </LeaderboardSection>
 
         {/* Highest Checkouts */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-xl font-semibold">Highest Checkouts</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ul className="divide-y border rounded bg-card">
-              {highestCheckouts.map((score, idx) => (
-                <li key={`${score.player_id}-${score.date}`} className="flex items-center justify-between px-3 py-2">
-                  <div className="flex items-center gap-3">
-                    <span className="w-8 text-lg text-center">{medal(idx)}</span>
-                    <div>
-                      <div className="font-medium">{score.display_name}</div>
-                      <div className="text-xs text-muted-foreground">{formatDate(score.date)}</div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-6">
-                    <div className="text-right">
-                      <div className="font-mono tabular-nums text-2xl font-bold">{score.score}</div>
-                      <div className="text-xs text-muted-foreground">{score.darts_used} darts</div>
-                    </div>
-                    {score.score >= 100 && <span className="text-lg">🚀</span>}
-                  </div>
-                </li>
-              ))}
-              {checkoutLoading && (
-                <li className="px-3 py-4 text-sm text-muted-foreground">Loading checkouts...</li>
-              )}
-              {!checkoutLoading && highestCheckouts.length === 0 && (
-                <li className="px-3 py-4 text-sm text-muted-foreground">No checkouts recorded yet.</li>
-              )}
-            </ul>
-          </CardContent>
-        </Card>
+        <LeaderboardSection
+          title="Highest Checkouts"
+          emptyMessage={checkoutLoading ? 'Loading checkouts...' : 'No checkouts recorded yet.'}
+          isEmpty={highestCheckouts.length === 0}
+        >
+          {highestCheckouts.map((score, idx) => (
+            <li key={`${score.player_id}-${score.date}`} className="flex items-center justify-between px-3 py-2">
+              <div className="flex items-center gap-3">
+                <span className="w-8 text-lg text-center">{medal(idx)}</span>
+                <div>
+                  <div className="font-medium">{score.display_name}</div>
+                  <div className="text-xs text-muted-foreground">{formatLeaderboardDate(score.date)}</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-6">
+                <div className="text-right">
+                  <div className="font-mono tabular-nums text-2xl font-bold">{score.score}</div>
+                  <div className="text-xs text-muted-foreground">{score.darts_used} darts</div>
+                </div>
+                {score.score >= 100 && <span className="text-lg">🚀</span>}
+              </div>
+            </li>
+          ))}
+        </LeaderboardSection>
 
         {/* Quickest Legs (Double Out) */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-xl font-semibold">Quickest Legs (Double Out)</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ul className="divide-y border rounded bg-card">
-              {quickestLegsDouble.map((leg, idx) => (
-                <li key={`${leg.player_id}-${leg.date}`} className="flex items-center justify-between px-3 py-2">
-                  <div className="flex items-center gap-3">
-                    <span className="w-8 text-lg text-center">{medal(idx)}</span>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium">{leg.display_name}</span>
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-mono font-medium ${
-                          leg.start_score === '501' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' :
-                          leg.start_score === '301' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
-                          'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'
-                        }`}>
-                          {leg.start_score}
-                        </span>
-                      </div>
-                      <div className="text-xs text-muted-foreground">{formatDate(leg.date)}</div>
-                    </div>
+        <LeaderboardSection
+          title="Quickest Legs (Double Out)"
+          emptyMessage={quickestLegsLoading ? 'Loading quickest legs...' : 'No double-out legs recorded yet.'}
+          isEmpty={quickestLegsDouble.length === 0}
+        >
+          {quickestLegsDouble.map((leg, idx) => (
+            <li key={`${leg.player_id}-${leg.date}`} className="flex items-center justify-between px-3 py-2">
+              <div className="flex items-center gap-3">
+                <span className="w-8 text-lg text-center">{medal(idx)}</span>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">{leg.display_name}</span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-mono font-medium ${
+                      leg.start_score === '501' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' :
+                      leg.start_score === '301' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
+                      'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'
+                    }`}>
+                      {leg.start_score}
+                    </span>
                   </div>
-                  <div className="flex items-center gap-6">
-                    <div className="text-right">
-                      <div className="font-mono tabular-nums text-2xl font-bold text-blue-600 dark:text-blue-400">{leg.dart_count}</div>
-                      <div className="text-xs text-muted-foreground">darts</div>
-                    </div>
-                  </div>
-                </li>
-              ))}
-              {quickestLegsLoading && (
-                <li className="px-3 py-4 text-sm text-muted-foreground">Loading quickest legs...</li>
-              )}
-              {!quickestLegsLoading && quickestLegsDouble.length === 0 && (
-                <li className="px-3 py-4 text-sm text-muted-foreground">No double-out legs recorded yet.</li>
-              )}
-            </ul>
-          </CardContent>
-        </Card>
+                  <div className="text-xs text-muted-foreground">{formatLeaderboardDate(leg.date)}</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-6">
+                <div className="text-right">
+                  <div className="font-mono tabular-nums text-2xl font-bold text-blue-600 dark:text-blue-400">{leg.dart_count}</div>
+                  <div className="text-xs text-muted-foreground">darts</div>
+                </div>
+              </div>
+            </li>
+          ))}
+        </LeaderboardSection>
 
         {/* Quickest Legs (Single Out) */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-xl font-semibold">Quickest Legs (Single Out)</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ul className="divide-y border rounded bg-card">
-              {quickestLegsSingle.map((leg, idx) => (
-                <li key={`${leg.player_id}-${leg.date}`} className="flex items-center justify-between px-3 py-2">
-                  <div className="flex items-center gap-3">
-                    <span className="w-8 text-lg text-center">{medal(idx)}</span>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium">{leg.display_name}</span>
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-mono font-medium ${
-                          leg.start_score === '501' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' :
-                          leg.start_score === '301' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
-                          'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'
-                        }`}>
-                          {leg.start_score}
-                        </span>
-                      </div>
-                      <div className="text-xs text-muted-foreground">{formatDate(leg.date)}</div>
-                    </div>
+        <LeaderboardSection
+          title="Quickest Legs (Single Out)"
+          emptyMessage={quickestLegsLoading ? 'Loading quickest legs...' : 'No single-out legs recorded yet.'}
+          isEmpty={quickestLegsSingle.length === 0}
+        >
+          {quickestLegsSingle.map((leg, idx) => (
+            <li key={`${leg.player_id}-${leg.date}`} className="flex items-center justify-between px-3 py-2">
+              <div className="flex items-center gap-3">
+                <span className="w-8 text-lg text-center">{medal(idx)}</span>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">{leg.display_name}</span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-mono font-medium ${
+                      leg.start_score === '501' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' :
+                      leg.start_score === '301' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
+                      'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'
+                    }`}>
+                      {leg.start_score}
+                    </span>
                   </div>
-                  <div className="flex items-center gap-6">
-                    <div className="text-right">
-                      <div className="font-mono tabular-nums text-2xl font-bold text-green-600 dark:text-green-400">{leg.dart_count}</div>
-                      <div className="text-xs text-muted-foreground">darts</div>
-                    </div>
-                  </div>
-                </li>
-              ))}
-              {quickestLegsLoading && (
-                <li className="px-3 py-4 text-sm text-muted-foreground">Loading quickest legs...</li>
-              )}
-              {!quickestLegsLoading && quickestLegsSingle.length === 0 && (
-                <li className="px-3 py-4 text-sm text-muted-foreground">No single-out legs recorded yet.</li>
-              )}
-            </ul>
-          </CardContent>
-        </Card>
+                  <div className="text-xs text-muted-foreground">{formatLeaderboardDate(leg.date)}</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-6">
+                <div className="text-right">
+                  <div className="font-mono tabular-nums text-2xl font-bold text-green-600 dark:text-green-400">{leg.dart_count}</div>
+                  <div className="text-xs text-muted-foreground">darts</div>
+                </div>
+              </div>
+            </li>
+          ))}
+        </LeaderboardSection>
       </div>
     </div>
   );

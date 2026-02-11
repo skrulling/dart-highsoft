@@ -123,14 +123,15 @@ export async function getPlayerEloStats(playerId: string): Promise<PlayerEloStat
 /**
  * Get ELO leaderboard
  */
-export async function getEloLeaderboard(limit: number = 50): Promise<EloLeaderboardEntry[]> {
+export async function getEloLeaderboard(limit?: number): Promise<EloLeaderboardEntry[]> {
   const supabase = await getSupabaseClient();
-  
-  const { data, error } = await supabase
+
+  let query = supabase
     .from('elo_leaderboard')
     .select('*')
-    .gt('wins', 0)
-    .limit(limit);
+    .gt('wins', 0);
+  if (limit) query = query.limit(limit);
+  const { data, error } = await query;
     
   if (error) {
     console.error('Error fetching ELO leaderboard:', error);

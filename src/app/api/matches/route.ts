@@ -72,8 +72,12 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Player names cannot be empty' }, { status: 400 });
       }
 
+      // Deduplicate names so parallel lookups don't race on the same player
+      const uniqueNames = [...new Set(trimmedNames)];
+      const resolvedByName = new Map<string, { id: string }>();
+
       const resolvedPlayers = await Promise.all(
-        trimmedNames.map(async (trimmedName) => {
+        uniqueNames.map(async (trimmedName) => {
           const { data: existingPlayer } = await supabase
             .from('players')
             .select('*')
@@ -86,12 +90,18 @@ export async function POST(request: NextRequest) {
             .select('*')
             .single();
           if (playerError || !newPlayer) {
+            if (playerError?.code === '23505') {
+              throw new Error(`A player named "${trimmedName}" already exists`);
+            }
             throw new Error(`Failed to create player: ${trimmedName}`);
           }
           return newPlayer;
         })
       );
-      playerIds = resolvedPlayers.map((p) => p.id);
+      for (let i = 0; i < uniqueNames.length; i++) {
+        resolvedByName.set(uniqueNames[i], resolvedPlayers[i]);
+      }
+      playerIds = trimmedNames.map((n) => resolvedByName.get(n)!.id);
     }
     
     // Create match

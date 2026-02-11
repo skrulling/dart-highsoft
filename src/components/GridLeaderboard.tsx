@@ -306,9 +306,9 @@ export function GridLeaderboard() {
   return (
     <div className="grid-leaderboard">
       <style>{`
-        .grid-leaderboard .grid-leaderboard__viewport {
+        .grid-leaderboard .hcg-container {
           height: 560px;
-          overflow-y: auto;
+          max-height: 560px;
         }
         .grid-leaderboard .hcg-table tbody {
           counter-reset: row-num;
@@ -323,9 +323,7 @@ export function GridLeaderboard() {
           content: counter(row-num);
         }
       `}</style>
-      <div className="grid-leaderboard__viewport">
-        <Grid options={options} />
-      </div>
+      <Grid options={options} />
     </div>
   );
 }

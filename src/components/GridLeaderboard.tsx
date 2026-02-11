@@ -1,10 +1,14 @@
 "use client";
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import Highcharts from 'highcharts';
 import { Grid, type GridOptions } from '@highcharts/grid-pro-react';
+import SparklineRenderer from '@highcharts/grid-pro/es-modules/Grid/Pro/CellRendering/Renderers/SparklineRenderer';
 import '@highcharts/grid-pro/css/grid-pro.css';
 import { useLeaderboardData } from '@/hooks/useLeaderboardData';
-import { getEloTier } from '@/utils/eloRating';
+import { batchEloHistory, batchMultiEloHistory } from '@/utils/eloHistory';
+
+SparklineRenderer.useHighcharts(Highcharts);
 
 const MEDALS = ['🥇', '🥈', '🥉'];
 
@@ -32,18 +36,29 @@ function formatWithMedal(value: number | null, medals: Map<number, string>, idx:
   return medal ? `${medal} ${display}` : display;
 }
 
+function sparklineChartOptions(this: { value: unknown }, _data: unknown) {
+  const raw = String(this.value).trim();
+  if (!raw) return {};
+  const nums = raw.split(',').map(Number);
+  const positive = nums.length > 1 && nums[nums.length - 1] >= nums[0];
+  return {
+    colors: [positive ? '#22c55e' : '#ef4444'],
+  };
+}
+
 type MergedPlayer = {
+  player_id: string;
   display_name: string;
   wins: number | null;
   avg_per_turn: number | null;
   elo_1v1: number | null;
-  elo_1v1_tier: string;
   elo_multi: number | null;
-  elo_multi_tier: string;
 };
 
 export function GridLeaderboard() {
   const { leaders, eloLeaders, eloMultiLeaders, loading } = useLeaderboardData();
+  const [eloHistory, setEloHistory] = useState<Map<string, number[]>>(new Map());
+  const [multiEloHistory, setMultiEloHistory] = useState<Map<string, number[]>>(new Map());
 
   const merged = useMemo(() => {
     const map = new Map<string, MergedPlayer>();
@@ -51,13 +66,12 @@ export function GridLeaderboard() {
     const getOrCreate = (id: string, name: string): MergedPlayer => {
       if (!map.has(id)) {
         map.set(id, {
+          player_id: id,
           display_name: name,
           wins: null,
           avg_per_turn: null,
           elo_1v1: null,
-          elo_1v1_tier: '',
           elo_multi: null,
-          elo_multi_tier: '',
         });
       }
       return map.get(id)!;
@@ -72,35 +86,44 @@ export function GridLeaderboard() {
     for (const entry of eloLeaders) {
       const p = getOrCreate(entry.player_id, entry.display_name);
       p.elo_1v1 = entry.current_rating;
-      const tier = getEloTier(entry.current_rating);
-      p.elo_1v1_tier = `${tier.icon} ${tier.name}`;
     }
 
     for (const entry of eloMultiLeaders) {
       const p = getOrCreate(entry.player_id, entry.display_name);
       p.elo_multi = entry.current_rating;
-      const tier = getEloTier(entry.current_rating);
-      p.elo_multi_tier = `${tier.icon} ${tier.name}`;
     }
 
     return Array.from(map.values());
   }, [leaders, eloLeaders, eloMultiLeaders]);
 
+  useEffect(() => {
+    const playerIds = merged.map((p) => p.player_id);
+    if (playerIds.length === 0) return;
+
+    Promise.all([
+      batchEloHistory(playerIds),
+      batchMultiEloHistory(playerIds),
+    ]).then(([elo, multi]) => {
+      setEloHistory(elo);
+      setMultiEloHistory(multi);
+    });
+  }, [merged]);
+
   const options = useMemo<GridOptions>(() => {
     const player: string[] = [];
     const multiEloRaw: (number | null)[] = [];
-    const multiEloTier: string[] = [];
+    const multiEloTrend: string[] = [];
     const elo1v1Raw: (number | null)[] = [];
-    const elo1v1Tier: string[] = [];
+    const elo1v1Trend: string[] = [];
     const winsRaw: (number | null)[] = [];
     const avgRaw: (number | null)[] = [];
 
     merged.forEach((row) => {
       player.push(row.display_name);
       multiEloRaw.push(row.elo_multi);
-      multiEloTier.push(row.elo_multi_tier || '–');
+      multiEloTrend.push(multiEloHistory.get(row.player_id)?.join(',') ?? '');
       elo1v1Raw.push(row.elo_1v1);
-      elo1v1Tier.push(row.elo_1v1_tier || '–');
+      elo1v1Trend.push(eloHistory.get(row.player_id)?.join(',') ?? '');
       winsRaw.push(row.wins);
       avgRaw.push(row.avg_per_turn);
     });
@@ -126,9 +149,9 @@ export function GridLeaderboard() {
           idx,
           player,
           multiElo,
-          multiEloTier,
+          multiEloTrend,
           elo1v1,
-          elo1v1Tier,
+          elo1v1Trend,
           wins,
           avg,
         },
@@ -160,8 +183,14 @@ export function GridLeaderboard() {
           },
         },
         {
-          id: 'multiEloTier',
-          header: { format: 'Tier' },
+          id: 'multiEloTrend',
+          header: { format: 'Trend' },
+          cells: {
+            renderer: {
+              type: 'sparkline' as const,
+              chartOptions: sparklineChartOptions,
+            },
+          },
           sorting: { enabled: false },
         },
         {
@@ -179,8 +208,14 @@ export function GridLeaderboard() {
           },
         },
         {
-          id: 'elo1v1Tier',
-          header: { format: 'Tier' },
+          id: 'elo1v1Trend',
+          header: { format: 'Trend' },
+          cells: {
+            renderer: {
+              type: 'sparkline' as const,
+              chartOptions: sparklineChartOptions,
+            },
+          },
           sorting: { enabled: false },
         },
         {
@@ -217,11 +252,11 @@ export function GridLeaderboard() {
         { columnId: 'player' },
         {
           format: 'Multiplayer ELO',
-          columns: [{ columnId: 'multiElo' }, { columnId: 'multiEloTier' }],
+          columns: [{ columnId: 'multiElo' }, { columnId: 'multiEloTrend' }],
         },
         {
           format: '1v1 ELO',
-          columns: [{ columnId: 'elo1v1' }, { columnId: 'elo1v1Tier' }],
+          columns: [{ columnId: 'elo1v1' }, { columnId: 'elo1v1Trend' }],
         },
         { columnId: 'wins' },
         { columnId: 'avg' },
@@ -235,7 +270,7 @@ export function GridLeaderboard() {
         noData: 'No leaderboard data yet. Play some matches!',
       },
     };
-  }, [merged]);
+  }, [merged, eloHistory, multiEloHistory]);
 
   if (loading) {
     return <div className="text-muted-foreground text-sm py-4">Loading leaderboard...</div>;

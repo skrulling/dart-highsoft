@@ -46,6 +46,29 @@ function sparklineChartOptions(this: { value: unknown }, _data: unknown) {
   };
 }
 
+function parseSparkline(value: unknown): number[] {
+  if (typeof value !== 'string') return [];
+  return value
+    .split(',')
+    .map((part) => Number(part))
+    .filter((num) => Number.isFinite(num));
+}
+
+function getTrendStrength(value: unknown): number | null {
+  const points = parseSparkline(value);
+  if (points.length < 2) return null;
+  return points[points.length - 1] - points[0];
+}
+
+function compareTrendStrength(a: unknown, b: unknown): number {
+  const aStrength = getTrendStrength(a);
+  const bStrength = getTrendStrength(b);
+  if (aStrength == null && bStrength == null) return 0;
+  if (aStrength == null) return -1;
+  if (bStrength == null) return 1;
+  return aStrength - bStrength;
+}
+
 type MergedPlayer = {
   player_id: string;
   display_name: string;
@@ -191,7 +214,10 @@ export function GridLeaderboard() {
               chartOptions: sparklineChartOptions,
             },
           },
-          sorting: { enabled: false },
+          sorting: {
+            order: 'desc',
+            compare: compareTrendStrength,
+          },
         },
         {
           id: 'elo1v1',
@@ -216,7 +242,10 @@ export function GridLeaderboard() {
               chartOptions: sparklineChartOptions,
             },
           },
-          sorting: { enabled: false },
+          sorting: {
+            order: 'desc',
+            compare: compareTrendStrength,
+          },
         },
         {
           id: 'wins',

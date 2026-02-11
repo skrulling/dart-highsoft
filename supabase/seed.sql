@@ -221,9 +221,9 @@ declare
   winner_id uuid;
   starter_id uuid;
   leg_winner_id uuid;
-  match_id uuid;
-  leg_id uuid;
-  turn_id uuid;
+  v_match_id uuid;
+  v_leg_id uuid;
+  v_turn_id uuid;
   turn_player_id uuid;
   v_seed text;
   v_md5 text;
@@ -258,7 +258,7 @@ begin
 
     v_seed := 'seed-extra-match-' || match_idx::text;
     v_md5 := md5(v_seed);
-    match_id := (
+    v_match_id := (
       substr(v_md5, 1, 8) || '-' ||
       substr(v_md5, 9, 4) || '-' ||
       substr(v_md5, 13, 4) || '-' ||
@@ -271,10 +271,14 @@ begin
       winner_player_id, completed_at, ended_early, created_at
     )
     values (
-      match_id,
-      'x01',
-      case when mod(match_idx, 5) in (0, 1, 2) then '501' else '301' end,
-      case when mod(match_idx, 4) in (0, 2) then 'double_out' else 'single_out' end,
+      v_match_id,
+      'x01'::public.game_mode,
+      (
+        case when mod(match_idx, 5) in (0, 1, 2) then '501' else '301' end
+      )::public.x01_start,
+      (
+        case when mod(match_idx, 4) in (0, 2) then 'double_out' else 'single_out' end
+      )::public.finish_rule,
       2,
       winner_id,
       completed_at_ts,
@@ -290,8 +294,8 @@ begin
 
     insert into public.match_players (match_id, player_id, play_order)
     values
-      (match_id, p1, 0),
-      (match_id, p2, 1)
+      (v_match_id, p1, 0),
+      (v_match_id, p2, 1)
     on conflict (match_id, player_id) do update
     set play_order = excluded.play_order;
 
@@ -306,7 +310,7 @@ begin
 
       v_seed := 'seed-extra-leg-' || match_idx::text || '-' || leg_no::text;
       v_md5 := md5(v_seed);
-      leg_id := (
+      v_leg_id := (
         substr(v_md5, 1, 8) || '-' ||
         substr(v_md5, 9, 4) || '-' ||
         substr(v_md5, 13, 4) || '-' ||
@@ -316,8 +320,8 @@ begin
 
       insert into public.legs (id, match_id, leg_number, starting_player_id, winner_player_id, created_at)
       values (
-        leg_id,
-        match_id,
+        v_leg_id,
+        v_match_id,
         leg_no,
         case when mod(leg_no, 2) = 1 then starter_id else case when starter_id = p1 then p2 else p1 end end,
         leg_winner_id,
@@ -368,22 +372,22 @@ begin
         end case;
 
         insert into public.turns (leg_id, player_id, turn_number, total_scored, busted, match_id)
-        values (leg_id, turn_player_id, turn_no, v_score1 + v_score2 + v_score3, false, match_id)
+        values (v_leg_id, turn_player_id, turn_no, v_score1 + v_score2 + v_score3, false, v_match_id)
         on conflict (leg_id, turn_number) do update
         set
           player_id = excluded.player_id,
           total_scored = excluded.total_scored,
           busted = excluded.busted,
           match_id = excluded.match_id
-        returning id into turn_id;
+        returning id into v_turn_id;
 
-        delete from public.throws where public.throws.turn_id = turn_id;
+        delete from public.throws where public.throws.turn_id = v_turn_id;
 
         insert into public.throws (turn_id, dart_index, segment, scored, match_id)
         values
-          (turn_id, 1, v_seg1, v_score1, match_id),
-          (turn_id, 2, v_seg2, v_score2, match_id),
-          (turn_id, 3, v_seg3, v_score3, match_id);
+          (v_turn_id, 1, v_seg1, v_score1, v_match_id),
+          (v_turn_id, 2, v_seg2, v_score2, v_match_id),
+          (v_turn_id, 3, v_seg3, v_score3, v_match_id);
       end loop;
     end loop;
   end loop;

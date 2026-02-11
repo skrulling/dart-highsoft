@@ -117,9 +117,13 @@ export function GridLeaderboard() {
     const wins = winsRaw.map((v, i) => formatWithMedal(v, winsMedals, i));
     const avg = avgRaw.map((v, i) => formatWithMedal(v, avgMedals, i, 2));
 
+    // Empty column — CSS counters fill in the row number
+    const idx = merged.map(() => '');
+
     return {
       dataTable: {
         columns: {
+          idx,
           player,
           multiElo,
           multiEloTier,
@@ -130,6 +134,12 @@ export function GridLeaderboard() {
         },
       },
       columns: [
+        {
+          id: 'idx',
+          header: { format: '#' },
+          width: 45,
+          sorting: { enabled: false },
+        },
         {
           id: 'player',
           header: { format: 'Player' },
@@ -203,6 +213,7 @@ export function GridLeaderboard() {
         },
       ],
       header: [
+        { columnId: 'idx' },
         { columnId: 'player' },
         {
           format: 'Multiplayer ELO',
@@ -231,5 +242,23 @@ export function GridLeaderboard() {
     return <div className="text-muted-foreground text-sm py-4">Loading leaderboard...</div>;
   }
 
-  return <Grid options={options} />;
+  return (
+    <div className="grid-leaderboard" style={{ maxHeight: 2000, overflow: 'auto' }}>
+      <style>{`
+        .grid-leaderboard .hcg-table tbody {
+          counter-reset: row-num;
+        }
+        .grid-leaderboard .hcg-table tbody tr {
+          counter-increment: row-num;
+        }
+        .grid-leaderboard .hcg-table tbody tr td:first-child {
+          text-align: center;
+        }
+        .grid-leaderboard .hcg-table tbody tr td:first-child::after {
+          content: counter(row-num);
+        }
+      `}</style>
+      <Grid options={options} />
+    </div>
+  );
 }

@@ -15,6 +15,9 @@ export async function POST(request: Request) {
       .select('*')
       .single();
     if (error || !data) {
+      if (error?.code === '23505') {
+        return NextResponse.json({ error: 'A player with that name already exists' }, { status: 409 });
+      }
       return NextResponse.json({ error: error?.message ?? 'Failed to create player' }, { status: 500 });
     }
     return NextResponse.json({ player: data });

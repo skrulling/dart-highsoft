@@ -151,19 +151,20 @@ export default function LeaderboardsPage() {
         setQuickestLegsLoading(true);
         const supabase = await getSupabaseClient();
 
-        const { data: doubleData } = await supabase
-          .from('quickest_legs_leaderboard')
-          .select('*')
-          .eq('finish_rule', 'double_out')
-          .order('dart_count', { ascending: true })
-          .limit(10);
-
-        const { data: singleData } = await supabase
-          .from('quickest_legs_leaderboard')
-          .select('*')
-          .eq('finish_rule', 'single_out')
-          .order('dart_count', { ascending: true })
-          .limit(10);
+        const [{ data: doubleData }, { data: singleData }] = await Promise.all([
+          supabase
+            .from('quickest_legs_leaderboard')
+            .select('*')
+            .eq('finish_rule', 'double_out')
+            .order('dart_count', { ascending: true })
+            .limit(10),
+          supabase
+            .from('quickest_legs_leaderboard')
+            .select('*')
+            .eq('finish_rule', 'single_out')
+            .order('dart_count', { ascending: true })
+            .limit(10),
+        ]);
 
         if (doubleData) setQuickestLegsDouble(doubleData);
         if (singleData) setQuickestLegsSingle(singleData);

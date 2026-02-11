@@ -21,6 +21,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ mat
       .select('*')
       .single();
     if (playerError || !newPlayer) {
+      if (playerError?.code === '23505') {
+        return NextResponse.json({ error: 'A player with that name already exists' }, { status: 409 });
+      }
       return NextResponse.json({ error: playerError?.message ?? 'Failed to create player' }, { status: 500 });
     }
 

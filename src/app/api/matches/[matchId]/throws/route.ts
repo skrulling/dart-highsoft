@@ -51,22 +51,23 @@ export async function POST(request: Request, { params }: { params: Promise<{ mat
       if (!linked) return NextResponse.json({ error: 'Turn not found for match' }, { status: 404 });
       resolvedTurnId = body.turnId;
     } else if (body.legId && body.playerId) {
-      const { data: leg } = await supabase
-        .from('legs')
-        .select('id')
-        .eq('id', body.legId)
-        .eq('match_id', matchId)
-        .single();
+      const [{ data: leg }, { data: matchPlayer }] = await Promise.all([
+        supabase
+          .from('legs')
+          .select('id')
+          .eq('id', body.legId)
+          .eq('match_id', matchId)
+          .single(),
+        supabase
+          .from('match_players')
+          .select('player_id')
+          .eq('match_id', matchId)
+          .eq('player_id', body.playerId)
+          .maybeSingle(),
+      ]);
       if (!leg) {
         return NextResponse.json({ error: 'Leg not found for match' }, { status: 404 });
       }
-
-      const { data: matchPlayer } = await supabase
-        .from('match_players')
-        .select('player_id')
-        .eq('match_id', matchId)
-        .eq('player_id', body.playerId)
-        .maybeSingle();
       if (!matchPlayer) {
         return NextResponse.json({ error: 'Player not found for match' }, { status: 404 });
       }

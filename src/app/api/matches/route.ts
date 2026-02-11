@@ -66,30 +66,42 @@ export async function POST(request: NextRequest) {
       finish = body.checkout === 'single' ? 'single_out' : 'double_out';
       legsToWin = body.legs;
 
-      for (const participantName of body.participants) {
-        const trimmedName = participantName.trim();
-        if (!trimmedName) {
-          return NextResponse.json({ error: 'Player names cannot be empty' }, { status: 400 });
-        }
-        const { data: existingPlayer } = await supabase
-          .from('players')
-          .select('*')
-          .eq('display_name', trimmedName)
-          .single();
-        if (existingPlayer) {
-          playerIds.push(existingPlayer.id);
-        } else {
+      const trimmedNames = body.participants.map((n) => n.trim());
+      const emptyName = trimmedNames.find((n) => !n);
+      if (emptyName !== undefined) {
+        return NextResponse.json({ error: 'Player names cannot be empty' }, { status: 400 });
+      }
+
+      // Deduplicate names so parallel lookups don't race on the same player
+      const uniqueNames = [...new Set(trimmedNames)];
+      const resolvedByName = new Map<string, { id: string }>();
+
+      const resolvedPlayers = await Promise.all(
+        uniqueNames.map(async (trimmedName) => {
+          const { data: existingPlayer } = await supabase
+            .from('players')
+            .select('*')
+            .eq('display_name', trimmedName)
+            .single();
+          if (existingPlayer) return existingPlayer;
           const { data: newPlayer, error: playerError } = await supabase
             .from('players')
             .insert({ display_name: trimmedName })
             .select('*')
             .single();
           if (playerError || !newPlayer) {
-            return NextResponse.json({ error: `Failed to create player: ${participantName}` }, { status: 500 });
+            if (playerError?.code === '23505') {
+              throw new Error(`A player named "${trimmedName}" already exists`);
+            }
+            throw new Error(`Failed to create player: ${trimmedName}`);
           }
-          playerIds.push(newPlayer.id);
-        }
+          return newPlayer;
+        })
+      );
+      for (let i = 0; i < uniqueNames.length; i++) {
+        resolvedByName.set(uniqueNames[i], resolvedPlayers[i]);
       }
+      playerIds = trimmedNames.map((n) => resolvedByName.get(n)!.id);
     }
     
     // Create match

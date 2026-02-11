@@ -1,8 +1,9 @@
 "use client";
 
-import Highcharts from 'highcharts';
-import HighchartsReact from 'highcharts-react-official';
+import dynamic from 'next/dynamic';
 import { useEffect, useMemo, useState } from 'react';
+
+const Chart = dynamic(() => import('@/components/Chart'), { ssr: false });
 import { getSupabaseClient } from '@/lib/supabaseClient';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -146,23 +147,26 @@ export default function StatsPage() {
         setTurns(playerTurns);
 
         if (playerTurns.length > 0) {
-          // Fetch throws for these turns
-          // Process in batches if too many turns
-          const allThrows: ThrowRow[] = [];
+          // Fetch throws for these turns in parallel batches
           const turnIds = playerTurns.map(turn => turn.id);
-          
           const batchSize = 200;
+          const batches: string[][] = [];
           for (let i = 0; i < turnIds.length; i += batchSize) {
-            const batch = turnIds.slice(i, i + batchSize);
-            const { data: throwData } = await supabase
-              .from('throws')
-              .select('id, turn_id, dart_index, segment, scored')
-              .in('turn_id', batch);
-            
-            if (throwData) {
-              allThrows.push(...((throwData as unknown) as ThrowRow[]));
-            }
+            batches.push(turnIds.slice(i, i + batchSize));
           }
+
+          const batchResults = await Promise.all(
+            batches.map((batch) =>
+              supabase
+                .from('throws')
+                .select('id, turn_id, dart_index, segment, scored')
+                .in('turn_id', batch)
+            )
+          );
+
+          const allThrows: ThrowRow[] = batchResults.flatMap(
+            ({ data }) => ((data as unknown) as ThrowRow[]) ?? []
+          );
           setThrows(allThrows);
         } else {
           setThrows([]);
@@ -1179,9 +1183,7 @@ export default function StatsPage() {
                       <CardDescription>Turn score frequency breakdown</CardDescription>
                     </CardHeader>
                     <CardContent>
-                      <HighchartsReact
-                        highcharts={Highcharts}
-                        options={{
+                      <Chart options={{
                           title: { text: null },
                           chart: { type: 'column', height: 300 },
                           xAxis: {
@@ -1217,9 +1219,7 @@ export default function StatsPage() {
                       <CardDescription>Top dartboard areas targeted</CardDescription>
                     </CardHeader>
                     <CardContent>
-                      <HighchartsReact
-                        highcharts={Highcharts}
-                        options={{
+                      <Chart options={{
                           title: { text: null },
                           chart: { type: 'column', height: 300 },
                           xAxis: {
@@ -1416,9 +1416,7 @@ export default function StatsPage() {
                     <CardDescription>Success rates across 1–20 (excluding bull)</CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <HighchartsReact
-                      highcharts={Highcharts}
-                      options={{
+                    <Chart options={{
                         title: { text: null },
                         chart: { type: 'bar', height: 500 },
                         xAxis: {
@@ -1468,9 +1466,7 @@ export default function StatsPage() {
                     <CardDescription>20 vs 19 target success rates</CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <HighchartsReact
-                      highcharts={Highcharts}
-                      options={{
+                    <Chart options={{
                         title: { text: null },
                         chart: { type: 'column', height: 400 },
                         xAxis: {
@@ -1518,9 +1514,7 @@ export default function StatsPage() {
                     <CardDescription>Performance progression and consistency tracking</CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <HighchartsReact
-                      highcharts={Highcharts}
-                      options={{
+                    <Chart options={{
                         title: { text: null },
                         chart: { height: 400 },
                         xAxis: {
@@ -1606,9 +1600,7 @@ export default function StatsPage() {
                     <CardDescription>Opening three visits (first 9 darts) per day</CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <HighchartsReact
-                      highcharts={Highcharts}
-                      options={{
+                    <Chart options={{
                         title: { text: null },
                         chart: { height: 360 },
                         xAxis: {
@@ -1662,9 +1654,7 @@ export default function StatsPage() {
                     <CardDescription>Hit rate vs. misses into 1 or 5 when aiming at 20</CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <HighchartsReact
-                      highcharts={Highcharts}
-                      options={{
+                    <Chart options={{
                         title: { text: null },
                         chart: { height: 360 },
                         xAxis: {
@@ -1735,9 +1725,7 @@ export default function StatsPage() {
                     <CardDescription>Daily distribution of high-scoring turns</CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <HighchartsReact
-                      highcharts={Highcharts}
-                      options={{
+                    <Chart options={{
                         title: { text: null },
                         chart: { type: 'column', height: 380 },
                         xAxis: {
@@ -1780,9 +1768,7 @@ export default function StatsPage() {
                 <CardDescription>Championship leaderboard</CardDescription>
               </CardHeader>
               <CardContent>
-                <HighchartsReact
-                  highcharts={Highcharts}
-                  options={{
+                <Chart options={{
                     title: { text: null },
                     chart: { type: 'bar', height: 300 },
                     xAxis: { 
@@ -1818,9 +1804,7 @@ export default function StatsPage() {
                 <CardDescription>Consistency rankings</CardDescription>
               </CardHeader>
               <CardContent>
-                <HighchartsReact
-                  highcharts={Highcharts}
-                  options={{
+                <Chart options={{
                     title: { text: null },
                     chart: { type: 'bar', height: 300 },
                     xAxis: { 

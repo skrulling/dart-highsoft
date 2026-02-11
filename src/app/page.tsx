@@ -3,8 +3,9 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { Button } from '@/components/ui/button';
 import { useEffect, useState } from 'react';
-import QRCode from 'react-qr-code';
 import dynamic from 'next/dynamic';
+
+const QRCode = dynamic(() => import('react-qr-code'), { ssr: false });
 
 const GridLeaderboard = dynamic(
   () => import('@/components/GridLeaderboard').then(m => ({ default: m.GridLeaderboard })),

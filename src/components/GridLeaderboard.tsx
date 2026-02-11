@@ -215,7 +215,6 @@ export function GridLeaderboard() {
             },
           },
           sorting: {
-            order: 'desc',
             compare: compareTrendStrength,
           },
         },
@@ -243,7 +242,6 @@ export function GridLeaderboard() {
             },
           },
           sorting: {
-            order: 'desc',
             compare: compareTrendStrength,
           },
         },

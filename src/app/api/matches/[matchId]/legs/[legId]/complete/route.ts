@@ -32,9 +32,19 @@ export async function POST(request: Request, { params }: { params: Promise<{ mat
       return NextResponse.json({ error: legErr.message }, { status: 500 });
     }
 
-    const { data: allLegs, error: listErr } = await supabase.from('legs').select('*').eq('match_id', matchId);
+    const [{ data: allLegs, error: listErr }, { data: mpData, error: mpErr }] = await Promise.all([
+      supabase.from('legs').select('*').eq('match_id', matchId),
+      supabase
+        .from('match_players')
+        .select('player_id, play_order')
+        .eq('match_id', matchId)
+        .order('play_order'),
+    ]);
     if (listErr || !allLegs) {
       return NextResponse.json({ error: listErr?.message ?? 'Failed to load legs' }, { status: 500 });
+    }
+    if (mpErr || !mpData) {
+      return NextResponse.json({ error: mpErr?.message ?? 'Failed to load match players' }, { status: 500 });
     }
     const wonCounts = (allLegs as { winner_player_id: string | null }[]).reduce<Record<string, number>>((acc, l) => {
       if (l.winner_player_id) acc[l.winner_player_id] = (acc[l.winner_player_id] || 0) + 1;
@@ -44,14 +54,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ mat
     const someoneWonMatch = Object.entries(wonCounts).find(([, c]) => c >= target);
 
     if (!someoneWonMatch) {
-      const { data: mpData, error: mpErr } = await supabase
-        .from('match_players')
-        .select('player_id, play_order')
-        .eq('match_id', matchId)
-        .order('play_order');
-      if (mpErr || !mpData) {
-        return NextResponse.json({ error: mpErr?.message ?? 'Failed to load match players' }, { status: 500 });
-      }
       const orderedPlayerIds = (mpData as { player_id: string; play_order: number }[]).map((r) => r.player_id);
       const currentIdx = orderedPlayerIds.findIndex((id) => id === leg.starting_player_id);
       const nextIdx = currentIdx >= 0 ? (currentIdx + 1) % orderedPlayerIds.length : 0;
@@ -72,14 +74,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ mat
       .eq('id', matchId);
     if (setWinnerErr) return NextResponse.json({ error: setWinnerErr.message }, { status: 500 });
 
-    const { data: mpData, error: mpErr } = await supabase
-      .from('match_players')
-      .select('player_id, play_order')
-      .eq('match_id', matchId)
-      .order('play_order');
-    if (mpErr || !mpData) {
-      return NextResponse.json({ error: mpErr?.message ?? 'Failed to load match players' }, { status: 500 });
-    }
     const playerIds = (mpData as { player_id: string }[]).map((r) => r.player_id);
     if (playerIds.length === 2) {
       const loserId = playerIds.find((id) => id !== winnerPid);

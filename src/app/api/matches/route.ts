@@ -66,30 +66,32 @@ export async function POST(request: NextRequest) {
       finish = body.checkout === 'single' ? 'single_out' : 'double_out';
       legsToWin = body.legs;
 
-      for (const participantName of body.participants) {
-        const trimmedName = participantName.trim();
-        if (!trimmedName) {
-          return NextResponse.json({ error: 'Player names cannot be empty' }, { status: 400 });
-        }
-        const { data: existingPlayer } = await supabase
-          .from('players')
-          .select('*')
-          .eq('display_name', trimmedName)
-          .single();
-        if (existingPlayer) {
-          playerIds.push(existingPlayer.id);
-        } else {
+      const trimmedNames = body.participants.map((n) => n.trim());
+      const emptyName = trimmedNames.find((n) => !n);
+      if (emptyName !== undefined) {
+        return NextResponse.json({ error: 'Player names cannot be empty' }, { status: 400 });
+      }
+
+      const resolvedPlayers = await Promise.all(
+        trimmedNames.map(async (trimmedName) => {
+          const { data: existingPlayer } = await supabase
+            .from('players')
+            .select('*')
+            .eq('display_name', trimmedName)
+            .single();
+          if (existingPlayer) return existingPlayer;
           const { data: newPlayer, error: playerError } = await supabase
             .from('players')
             .insert({ display_name: trimmedName })
             .select('*')
             .single();
           if (playerError || !newPlayer) {
-            return NextResponse.json({ error: `Failed to create player: ${participantName}` }, { status: 500 });
+            throw new Error(`Failed to create player: ${trimmedName}`);
           }
-          playerIds.push(newPlayer.id);
-        }
-      }
+          return newPlayer;
+        })
+      );
+      playerIds = resolvedPlayers.map((p) => p.id);
     }
     
     // Create match

@@ -228,8 +228,7 @@ export function GridLeaderboard() {
       ],
       rendering: {
         rows: {
-          strictHeights: true,
-          minVisibleRows: 10,
+          minVisibleRows: 20,
         },
       },
       lang: {
@@ -243,7 +242,7 @@ export function GridLeaderboard() {
   }
 
   return (
-    <div className="grid-leaderboard" style={{ maxHeight: 2000, overflow: 'auto' }}>
+    <div className="grid-leaderboard">
       <style>{`
         .grid-leaderboard .hcg-table tbody {
           counter-reset: row-num;

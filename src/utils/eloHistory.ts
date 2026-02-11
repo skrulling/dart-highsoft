@@ -1,5 +1,31 @@
 import { getSupabaseClient } from '@/lib/supabaseClient';
 
+type RecentEloTrendRow = {
+  player_id: string;
+  last_20_ratings: number[] | null;
+};
+
+async function fetchRecentTrendFromView(
+  viewName: 'player_recent_elo_trend' | 'player_recent_elo_multi_trend',
+  playerIds: string[]
+): Promise<Map<string, number[]>> {
+  const supabase = await getSupabaseClient();
+  const { data, error } = await supabase
+    .from(viewName)
+    .select('player_id, last_20_ratings')
+    .in('player_id', playerIds);
+
+  if (error) {
+    throw error;
+  }
+
+  const map = new Map<string, number[]>();
+  for (const row of (data as RecentEloTrendRow[] | null) ?? []) {
+    map.set(row.player_id, row.last_20_ratings ?? []);
+  }
+  return map;
+}
+
 /**
  * Fetch ELO rating history for multiple players (1v1) in a single query.
  * Returns a Map from player_id to an array of rating_after values in chronological order.
@@ -9,6 +35,14 @@ export async function batchEloHistory(
   limit = 20
 ): Promise<Map<string, number[]>> {
   if (playerIds.length === 0) return new Map();
+
+  if (limit === 20) {
+    try {
+      return await fetchRecentTrendFromView('player_recent_elo_trend', playerIds);
+    } catch (error) {
+      console.error('Error fetching recent ELO trend view:', error);
+    }
+  }
 
   const supabase = await getSupabaseClient();
   const { data, error } = await supabase
@@ -47,6 +81,14 @@ export async function batchMultiEloHistory(
   limit = 20
 ): Promise<Map<string, number[]>> {
   if (playerIds.length === 0) return new Map();
+
+  if (limit === 20) {
+    try {
+      return await fetchRecentTrendFromView('player_recent_elo_multi_trend', playerIds);
+    } catch (error) {
+      console.error('Error fetching recent multi ELO trend view:', error);
+    }
+  }
 
   const supabase = await getSupabaseClient();
   const { data, error } = await supabase

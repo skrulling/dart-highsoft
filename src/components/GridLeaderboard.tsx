@@ -66,7 +66,7 @@ function compareTrendStrength(a: unknown, b: unknown): number {
   if (aStrength == null && bStrength == null) return 0;
   if (aStrength == null) return -1;
   if (bStrength == null) return 1;
-  return bStrength - aStrength;
+  return aStrength - bStrength;
 }
 
 type MergedPlayer = {

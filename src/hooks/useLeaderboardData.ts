@@ -27,6 +27,20 @@ function buildRecentWinsByPlayer(rows: RecentFormRow[]): Map<string, number[]> {
   return recentWinsByPlayer;
 }
 
+function collectRelevantPlayerIds(
+  leaders: PlayerSummaryEntry[],
+  avgLeaders: PlayerSummaryEntry[],
+  eloLeaders: EloLeaderboardEntry[],
+  eloMultiLeaders: MultiEloLeaderboardEntry[]
+): string[] {
+  const ids = new Set<string>();
+  for (const row of leaders) ids.add(row.player_id);
+  for (const row of avgLeaders) ids.add(row.player_id);
+  for (const row of eloLeaders) ids.add(row.player_id);
+  for (const row of eloMultiLeaders) ids.add(row.player_id);
+  return [...ids];
+}
+
 export function useLeaderboardData(limit?: number) {
   const [leaders, setLeaders] = useState<PlayerSummaryEntry[]>([]);
   const [avgLeaders, setAvgLeaders] = useState<PlayerSummaryEntry[]>([]);
@@ -58,18 +72,32 @@ export function useLeaderboardData(limit?: number) {
           avgQuery = avgQuery.limit(limit);
         }
 
-        const [{ data: winnersData }, eloData, eloMultiData, { data: avgData }, { data: recentFormData }] = await Promise.all([
+        const [{ data: winnersData }, eloData, eloMultiData, { data: avgData }] = await Promise.all([
           winnersQuery,
           getEloLeaderboard(limit),
           getMultiEloLeaderboard(limit),
           avgQuery,
-          recentFormQuery,
         ]);
-        setLeaders((winnersData as unknown as PlayerSummaryEntry[]) ?? []);
-        setAvgLeaders((avgData as unknown as PlayerSummaryEntry[]) ?? []);
+
+        const winnerRows = (winnersData as unknown as PlayerSummaryEntry[]) ?? [];
+        const avgRows = (avgData as unknown as PlayerSummaryEntry[]) ?? [];
+        setLeaders(winnerRows);
+        setAvgLeaders(avgRows);
         setEloLeaders(eloData);
         setEloMultiLeaders(eloMultiData);
-        setRecentWinsByPlayer(buildRecentWinsByPlayer((recentFormData as unknown as RecentFormRow[]) ?? []));
+
+        const relevantPlayerIds = limit
+          ? collectRelevantPlayerIds(winnerRows, avgRows, eloData, eloMultiData)
+          : [];
+        if (limit && relevantPlayerIds.length === 0) {
+          setRecentWinsByPlayer(new Map());
+        } else {
+          const scopedRecentFormQuery = limit
+            ? recentFormQuery.in('player_id', relevantPlayerIds)
+            : recentFormQuery;
+          const { data: recentFormData } = await scopedRecentFormQuery;
+          setRecentWinsByPlayer(buildRecentWinsByPlayer((recentFormData as unknown as RecentFormRow[]) ?? []));
+        }
       } catch {
         setLeaders([]);
         setAvgLeaders([]);

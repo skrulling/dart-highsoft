@@ -5,15 +5,17 @@ type RecentEloTrendRow = {
   last_20_ratings: number[] | null;
 };
 
-async function fetchRecentTrendFromView(
-  viewName: 'player_recent_elo_trend' | 'player_recent_elo_multi_trend',
+async function fetchRecentTrendFromRpc(
+  functionName: 'get_player_recent_elo_trend' | 'get_player_recent_elo_multi_trend',
   playerIds: string[]
 ): Promise<Map<string, number[]>> {
   const supabase = await getSupabaseClient();
   const { data, error } = await supabase
-    .from(viewName)
-    .select('player_id, last_20_ratings')
-    .in('player_id', playerIds);
+    .rpc(functionName, {
+      p_player_ids: playerIds,
+      p_limit: 20,
+    })
+    .select('player_id, last_20_ratings');
 
   if (error) {
     throw error;
@@ -38,9 +40,9 @@ export async function batchEloHistory(
 
   if (limit === 20) {
     try {
-      return await fetchRecentTrendFromView('player_recent_elo_trend', playerIds);
+      return await fetchRecentTrendFromRpc('get_player_recent_elo_trend', playerIds);
     } catch (error) {
-      console.error('Error fetching recent ELO trend view:', error);
+      console.error('Error fetching recent ELO trend via RPC:', error);
     }
   }
 
@@ -84,9 +86,9 @@ export async function batchMultiEloHistory(
 
   if (limit === 20) {
     try {
-      return await fetchRecentTrendFromView('player_recent_elo_multi_trend', playerIds);
+      return await fetchRecentTrendFromRpc('get_player_recent_elo_multi_trend', playerIds);
     } catch (error) {
-      console.error('Error fetching recent multi ELO trend view:', error);
+      console.error('Error fetching recent multi ELO trend via RPC:', error);
     }
   }
 

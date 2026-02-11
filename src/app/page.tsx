@@ -19,7 +19,7 @@ export default function Home() {
   }, []);
 
   return (
-    <main className="p-4 md:p-6 space-y-6 max-w-5xl mx-auto">
+    <main className="w-[90%] mx-auto p-4 md:p-6 space-y-6">
       <div className="flex items-center gap-3">
         <Image src="/favicon.ico" alt="Dart Scoreboard" width={32} height={32} className="rounded" />
         <h1 className="text-2xl font-semibold">Dart Scoreboard</h1>

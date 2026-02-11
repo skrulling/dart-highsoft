@@ -8,7 +8,7 @@ import '@highcharts/grid-pro/css/grid-pro.css';
 import { useLeaderboardData } from '@/hooks/useLeaderboardData';
 import { batchEloHistory, batchMultiEloHistory } from '@/utils/eloHistory';
 
-SparklineRenderer.useHighcharts(Highcharts);
+SparklineRenderer['useHighcharts'](Highcharts);
 
 const MEDALS = ['🥇', '🥈', '🥉'];
 
@@ -36,13 +36,60 @@ function formatWithMedal(value: number | null, medals: Map<number, string>, idx:
   return medal ? `${medal} ${display}` : display;
 }
 
-function sparklineChartOptions(this: { value: unknown }, _data: unknown) {
+function sparklineChartOptions(this: { value: unknown }) {
   const raw = String(this.value).trim();
   if (!raw) return {};
   const nums = raw.split(',').map(Number);
   const positive = nums.length > 1 && nums[nums.length - 1] >= nums[0];
   return {
     colors: [positive ? '#22c55e' : '#ef4444'],
+  };
+}
+
+function winsSparklineChartOptions(this: { value: unknown }) {
+  const points = parseSparkline(this.value).map((value) => (value >= 0 ? 1 : -1));
+  if (points.length === 0) return {};
+
+  return {
+    chart: {
+      type: 'column',
+      height: 24,
+      margin: [1, 1, 1, 1],
+      spacing: [0, 0, 0, 0],
+    },
+    legend: { enabled: false },
+    tooltip: { enabled: false },
+    credits: { enabled: false },
+    xAxis: { visible: false },
+    yAxis: {
+      visible: false,
+      min: -1,
+      max: 1,
+      startOnTick: false,
+      endOnTick: false,
+    },
+    plotOptions: {
+      series: {
+        animation: false,
+        enableMouseTracking: false,
+      },
+      column: {
+        borderWidth: 0,
+        pointPadding: 0.06,
+        groupPadding: 0,
+        threshold: 0,
+      },
+    },
+    series: [
+      {
+        type: 'column',
+        data: points,
+        zones: [
+          { value: 0, color: '#ef4444' },
+          { color: '#22c55e' },
+        ],
+      } as Highcharts.SeriesColumnOptions,
+    ],
   };
 }
 
@@ -69,6 +116,31 @@ function compareTrendStrength(a: unknown, b: unknown): number {
   return aStrength - bStrength;
 }
 
+function getWinsFormScore(value: unknown): number | null {
+  const points = parseSparkline(value);
+  if (points.length === 0) return null;
+  return points.reduce((sum, point) => sum + (point > 0 ? 1 : -1), 0);
+}
+
+function getWinsCount(value: unknown): number | null {
+  const points = parseSparkline(value);
+  if (points.length === 0) return null;
+  return points.filter((point) => point > 0).length;
+}
+
+function compareWinsForm(a: unknown, b: unknown): number {
+  const aScore = getWinsFormScore(a);
+  const bScore = getWinsFormScore(b);
+  if (aScore == null && bScore == null) return 0;
+  if (aScore == null) return -1;
+  if (bScore == null) return 1;
+  if (aScore !== bScore) return aScore - bScore;
+
+  const aWins = getWinsCount(a) ?? 0;
+  const bWins = getWinsCount(b) ?? 0;
+  return aWins - bWins;
+}
+
 type MergedPlayer = {
   player_id: string;
   display_name: string;
@@ -79,7 +151,7 @@ type MergedPlayer = {
 };
 
 export function GridLeaderboard() {
-  const { leaders, eloLeaders, eloMultiLeaders, loading } = useLeaderboardData();
+  const { leaders, eloLeaders, eloMultiLeaders, recentWinsByPlayer, loading } = useLeaderboardData();
   const [eloHistory, setEloHistory] = useState<Map<string, number[]>>(new Map());
   const [multiEloHistory, setMultiEloHistory] = useState<Map<string, number[]>>(new Map());
 
@@ -139,6 +211,7 @@ export function GridLeaderboard() {
     const elo1v1Raw: (number | null)[] = [];
     const elo1v1Trend: string[] = [];
     const winsRaw: (number | null)[] = [];
+    const winsRecent: string[] = [];
     const avgRaw: (number | null)[] = [];
 
     merged.forEach((row) => {
@@ -148,6 +221,7 @@ export function GridLeaderboard() {
       elo1v1Raw.push(row.elo_1v1);
       elo1v1Trend.push(eloHistory.get(row.player_id)?.join(',') ?? '');
       winsRaw.push(row.wins);
+      winsRecent.push((recentWinsByPlayer.get(row.player_id) ?? []).slice().reverse().join(','));
       avgRaw.push(row.avg_per_turn);
     });
 
@@ -176,6 +250,7 @@ export function GridLeaderboard() {
           elo1v1,
           elo1v1Trend,
           wins,
+          winsRecent,
           avg,
         },
       },
@@ -247,7 +322,7 @@ export function GridLeaderboard() {
         },
         {
           id: 'wins',
-          header: { format: 'Wins' },
+          header: { format: 'Total' },
           sorting: {
             compare: (a, b) => {
               const na = typeof a === 'string' ? parseFloat(a.replace(/[^\d]/g, '')) : NaN;
@@ -257,6 +332,20 @@ export function GridLeaderboard() {
               if (isNaN(nb)) return 1;
               return na - nb;
             },
+          },
+        },
+        {
+          id: 'winsRecent',
+          header: { format: 'Last 10' },
+          width: 140,
+          cells: {
+            renderer: {
+              type: 'sparkline' as const,
+              chartOptions: winsSparklineChartOptions,
+            },
+          },
+          sorting: {
+            compare: compareWinsForm,
           },
         },
         {
@@ -285,7 +374,10 @@ export function GridLeaderboard() {
           format: '1v1 ELO',
           columns: [{ columnId: 'elo1v1' }, { columnId: 'elo1v1Trend' }],
         },
-        { columnId: 'wins' },
+        {
+          format: 'Wins',
+          columns: [{ columnId: 'wins' }, { columnId: 'winsRecent' }],
+        },
         { columnId: 'avg' },
       ],
       rendering: {
@@ -297,7 +389,7 @@ export function GridLeaderboard() {
         noData: 'No leaderboard data yet. Play some matches!',
       },
     };
-  }, [merged, eloHistory, multiEloHistory]);
+  }, [merged, eloHistory, multiEloHistory, recentWinsByPlayer]);
 
   if (loading) {
     return <div className="text-muted-foreground text-sm py-4">Loading leaderboard...</div>;

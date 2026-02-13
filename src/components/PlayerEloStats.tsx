@@ -41,7 +41,7 @@ export function PlayerEloStats({ player, showHistory = true }: Props) {
       setStats(statsData);
       setHistory(historyData);
     } catch (error) {
-      console.error('Error loading player ELO stats:', error);
+      console.error('Error loading player Elo stats:', error);
     } finally {
       setLoading(false);
     }
@@ -51,7 +51,7 @@ export function PlayerEloStats({ player, showHistory = true }: Props) {
     return (
       <Card>
         <CardContent className="py-8 text-center">
-          <div className="text-muted-foreground">Loading ELO stats...</div>
+          <div className="text-muted-foreground">Loading Elo stats...</div>
         </CardContent>
       </Card>
     );
@@ -61,14 +61,14 @@ export function PlayerEloStats({ player, showHistory = true }: Props) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>ELO Rating</CardTitle>
+          <CardTitle>Elo Rating</CardTitle>
         </CardHeader>
         <CardContent className="text-center py-8">
           <div className="space-y-2">
             <div className="text-6xl">🎯</div>
             <div className="text-lg font-semibold">Unrated Player</div>
             <div className="text-sm text-muted-foreground">
-              Play some 1v1 matches to get an ELO rating!
+              Play some 1v1 matches to get an Elo rating!
             </div>
           </div>
         </CardContent>
@@ -85,7 +85,7 @@ export function PlayerEloStats({ player, showHistory = true }: Props) {
       <Card className={hasImproved ? "border-yellow-500 bg-yellow-50 dark:bg-yellow-950/20" : ""}>
         <CardHeader>
           <CardTitle className="flex items-center justify-between">
-            ELO Rating
+            Elo Rating
             {hasImproved && <Badge variant="secondary" className="text-yellow-600 dark:text-yellow-400">🔥 Peak Rating!</Badge>}
           </CardTitle>
         </CardHeader>

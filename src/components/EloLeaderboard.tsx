@@ -38,7 +38,7 @@ export function EloLeaderboard({ limit = 20, showRecentChanges = false }: Props)
       setLeaderboard(leaderboardData);
       setRecentChanges(recentData);
     } catch (error) {
-      console.error('Error loading ELO data:', error);
+      console.error('Error loading Elo data:', error);
     } finally {
       setLoading(false);
     }
@@ -48,7 +48,7 @@ export function EloLeaderboard({ limit = 20, showRecentChanges = false }: Props)
     return (
       <Card>
         <CardContent className="py-12 text-center">
-          <div className="text-lg text-muted-foreground">Loading ELO rankings...</div>
+          <div className="text-lg text-muted-foreground">Loading Elo rankings...</div>
         </CardContent>
       </Card>
     );
@@ -77,7 +77,7 @@ export function EloLeaderboard({ limit = 20, showRecentChanges = false }: Props)
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              🏆 ELO Leaderboard
+              🏆 Elo Leaderboard
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -150,13 +150,13 @@ export function EloLeaderboard({ limit = 20, showRecentChanges = false }: Props)
       {activeTab === 'recent' && showRecentChanges && (
         <Card>
           <CardHeader>
-            <CardTitle>Recent ELO Changes</CardTitle>
+            <CardTitle>Recent Elo Changes</CardTitle>
           </CardHeader>
           <CardContent>
             {recentChanges.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">
                 <div className="text-lg mb-2">No recent matches</div>
-                <div className="text-sm">ELO changes will appear here after rated matches.</div>
+                <div className="text-sm">Elo changes will appear here after rated matches.</div>
               </div>
             ) : (
               <div className="space-y-3">

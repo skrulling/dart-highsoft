@@ -41,7 +41,7 @@ export function PlayerMultiEloStats({ player, showHistory = true }: Props) {
     return (
       <Card>
         <CardContent className="py-8 text-center">
-          <div className="text-muted-foreground">Loading multiplayer ELO stats...</div>
+          <div className="text-muted-foreground">Loading multiplayer Elo stats...</div>
         </CardContent>
       </Card>
     );
@@ -51,7 +51,7 @@ export function PlayerMultiEloStats({ player, showHistory = true }: Props) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Multiplayer ELO Rating</CardTitle>
+          <CardTitle>Multiplayer Elo Rating</CardTitle>
         </CardHeader>
         <CardContent className="text-center py-8">
           <div className="space-y-2">
@@ -72,7 +72,7 @@ export function PlayerMultiEloStats({ player, showHistory = true }: Props) {
       <Card className={hasImproved ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-950/20' : ''}>
         <CardHeader>
           <CardTitle className="flex items-center justify-between">
-            Multiplayer ELO Rating
+            Multiplayer Elo Rating
             {hasImproved && (
               <Badge variant="secondary" className="text-indigo-600 dark:text-indigo-400">
                 🔥 Peak Rating!
@@ -144,4 +144,3 @@ export function PlayerMultiEloStats({ player, showHistory = true }: Props) {
     </div>
   );
 }
-

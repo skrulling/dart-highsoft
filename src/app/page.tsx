@@ -36,7 +36,7 @@ export default function Home() {
           <Link href="/players">Players</Link>
         </Button>
         <Button asChild variant="outline">
-          <Link href="/elo-multi">Multiplayer ELO</Link>
+          <Link href="/elo-multi">Multiplayer Elo</Link>
         </Button>
       </div>
 

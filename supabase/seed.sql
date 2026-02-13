@@ -5,14 +5,14 @@
 -- 8 local players
 insert into public.players (id, display_name, elo_rating, elo_rating_multi, created_at)
 values
-  ('70000000-0000-0000-0000-000000000001', 'Alex Storm', 1320, 1288, now() - interval '120 days'),
-  ('70000000-0000-0000-0000-000000000002', 'Mia Larsen', 1385, 1362, now() - interval '112 days'),
-  ('70000000-0000-0000-0000-000000000003', 'Jonas Pike', 1258, 1271, now() - interval '104 days'),
-  ('70000000-0000-0000-0000-000000000004', 'Nora Vale', 1422, 1401, now() - interval '96 days'),
-  ('70000000-0000-0000-0000-000000000005', 'Viktor Rune', 1294, 1313, now() - interval '88 days'),
-  ('70000000-0000-0000-0000-000000000006', 'Freya Hale', 1347, 1336, now() - interval '80 days'),
-  ('70000000-0000-0000-0000-000000000007', 'Liam Frost', 1216, 1230, now() - interval '72 days'),
-  ('70000000-0000-0000-0000-000000000008', 'Zoe Mercer', 1368, 1351, now() - interval '64 days')
+  ('70000000-0000-0000-0000-000000000001', 'Alex Storm', 1200, 1200, now() - interval '120 days'),
+  ('70000000-0000-0000-0000-000000000002', 'Mia Larsen', 1200, 1200, now() - interval '112 days'),
+  ('70000000-0000-0000-0000-000000000003', 'Jonas Pike', 1200, 1200, now() - interval '104 days'),
+  ('70000000-0000-0000-0000-000000000004', 'Nora Vale', 1200, 1200, now() - interval '96 days'),
+  ('70000000-0000-0000-0000-000000000005', 'Viktor Rune', 1200, 1200, now() - interval '88 days'),
+  ('70000000-0000-0000-0000-000000000006', 'Freya Hale', 1200, 1200, now() - interval '80 days'),
+  ('70000000-0000-0000-0000-000000000007', 'Liam Frost', 1200, 1200, now() - interval '72 days'),
+  ('70000000-0000-0000-0000-000000000008', 'Zoe Mercer', 1200, 1200, now() - interval '64 days')
 on conflict (id) do update
 set
   display_name = excluded.display_name,
@@ -390,6 +390,65 @@ begin
           (v_turn_id, 3, v_seg3, v_score3, v_match_id);
       end loop;
     end loop;
+  end loop;
+end;
+$$;
+
+-- Populate ELO rating history by calling update_elo_ratings() for every
+-- completed 1v1 match in chronological order.  This fills the elo_ratings
+-- table so leaderboards, stats views, and trend sparklines have data.
+do $$
+declare
+  m record;
+  loser_id uuid;
+begin
+  -- Reset ELO to starting value so the history builds up realistically
+  -- from 1200 (the values on the players table will be overwritten by
+  -- the update_elo_ratings calls below).
+  update public.players
+  set elo_rating = 1200
+  where id in (
+    '70000000-0000-0000-0000-000000000001',
+    '70000000-0000-0000-0000-000000000002',
+    '70000000-0000-0000-0000-000000000003',
+    '70000000-0000-0000-0000-000000000004',
+    '70000000-0000-0000-0000-000000000005',
+    '70000000-0000-0000-0000-000000000006',
+    '70000000-0000-0000-0000-000000000007',
+    '70000000-0000-0000-0000-000000000008'
+  );
+
+  -- Clear any existing elo_ratings for idempotency
+  delete from public.elo_ratings
+  where player_id in (
+    '70000000-0000-0000-0000-000000000001',
+    '70000000-0000-0000-0000-000000000002',
+    '70000000-0000-0000-0000-000000000003',
+    '70000000-0000-0000-0000-000000000004',
+    '70000000-0000-0000-0000-000000000005',
+    '70000000-0000-0000-0000-000000000006',
+    '70000000-0000-0000-0000-000000000007',
+    '70000000-0000-0000-0000-000000000008'
+  );
+
+  -- Process every completed 1v1 match in chronological order
+  for m in
+    select
+      ma.id as match_id,
+      ma.winner_player_id
+    from public.matches ma
+    where ma.winner_player_id is not null
+      and ma.completed_at is not null
+      and (select count(*) from public.match_players mp where mp.match_id = ma.id) = 2
+    order by ma.created_at asc
+  loop
+    select mp.player_id into loser_id
+    from public.match_players mp
+    where mp.match_id = m.match_id
+      and mp.player_id != m.winner_player_id
+    limit 1;
+
+    perform update_elo_ratings(m.match_id, m.winner_player_id, loser_id);
   end loop;
 end;
 $$;

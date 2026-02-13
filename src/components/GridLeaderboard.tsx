@@ -12,6 +12,27 @@ SparklineRenderer['useHighcharts'](Highcharts);
 
 const MEDALS = ['🥇', '🥈', '🥉'];
 
+const ELO_TIER_RANGES = [
+  { max: 1124, tier: 1 },
+  { max: 1174, tier: 2 },
+  { max: 1224, tier: 3 },
+  { max: 1274, tier: 4 },
+  { max: 1324, tier: 5 },
+  { max: 1374, tier: 6 },
+  { max: 1449, tier: 7 },
+] as const;
+
+const ELO_TIER_TEXT_OFFSET_Y: Record<number, number> = {
+  1: 1,
+  2: 1,
+  3: 1,
+  4: 0,
+  5: 0,
+  6: 0,
+  7: 0,
+  8: 0,
+};
+
 /**
  * For an array of nullable numbers, return a Map from row-index to medal string
  * for the top 3 values (descending). Nulls are ignored.
@@ -34,6 +55,38 @@ function formatWithMedal(value: number | null, medals: Map<number, string>, idx:
   const display = decimals != null ? value.toFixed(decimals) : String(value);
   const medal = medals.get(idx);
   return medal ? `${medal} ${display}` : display;
+}
+
+function getEloTierBadgeNumber(rating: number): number {
+  for (const range of ELO_TIER_RANGES) {
+    if (rating <= range.max) return range.tier;
+  }
+  return 8;
+}
+
+function renderEloBadgeHtml(value: unknown): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return '<span class="elo-badge-empty">–</span>';
+  }
+
+  const rating = Math.round(value);
+  const tier = getEloTierBadgeNumber(rating);
+  const textOffsetY = ELO_TIER_TEXT_OFFSET_Y[tier] ?? 0;
+
+  return `
+    <span class="elo-badge elo-badge--tier-${tier}" style="background-image: url('/elo-badges/tier-${tier}.png');">
+      <span class="elo-badge__rating" style="transform: translateY(${textOffsetY}px);">${rating}</span>
+    </span>
+  `;
+}
+
+function compareNullableNumbers(a: unknown, b: unknown): number {
+  const na = typeof a === 'number' && Number.isFinite(a) ? a : null;
+  const nb = typeof b === 'number' && Number.isFinite(b) ? b : null;
+  if (na == null && nb == null) return 0;
+  if (na == null) return -1;
+  if (nb == null) return 1;
+  return na - nb;
 }
 
 function sparklineChartOptions(this: { value: unknown }) {
@@ -226,14 +279,12 @@ export function GridLeaderboard() {
     });
 
     // Pre-compute per-column medals
-    const multiEloMedals = rankColumn(multiEloRaw);
-    const elo1v1Medals = rankColumn(elo1v1Raw);
     const winsMedals = rankColumn(winsRaw);
     const avgMedals = rankColumn(avgRaw);
 
-    // Build display strings with medals baked in
-    const multiElo = multiEloRaw.map((v, i) => formatWithMedal(v, multiEloMedals, i));
-    const elo1v1 = elo1v1Raw.map((v, i) => formatWithMedal(v, elo1v1Medals, i));
+    // Keep Elo raw numeric for stable sorting; render badges via formatter.
+    const multiElo = multiEloRaw;
+    const elo1v1 = elo1v1Raw;
     const wins = winsRaw.map((v, i) => formatWithMedal(v, winsMedals, i));
     const avg = avgRaw.map((v, i) => formatWithMedal(v, avgMedals, i, 2));
 
@@ -268,16 +319,15 @@ export function GridLeaderboard() {
         {
           id: 'multiElo',
           header: { format: 'Rating' },
+          width: 170,
+          cells: {
+            formatter: function () {
+              return renderEloBadgeHtml(this.value);
+            },
+          },
           sorting: {
             order: 'desc',
-            compare: (a, b) => {
-              const na = typeof a === 'string' ? parseFloat(a.replace(/[^\d]/g, '')) : NaN;
-              const nb = typeof b === 'string' ? parseFloat(b.replace(/[^\d]/g, '')) : NaN;
-              if (isNaN(na) && isNaN(nb)) return 0;
-              if (isNaN(na)) return -1;
-              if (isNaN(nb)) return 1;
-              return na - nb;
-            },
+            compare: compareNullableNumbers,
           },
         },
         {
@@ -296,15 +346,14 @@ export function GridLeaderboard() {
         {
           id: 'elo1v1',
           header: { format: 'Rating' },
-          sorting: {
-            compare: (a, b) => {
-              const na = typeof a === 'string' ? parseFloat(a.replace(/[^\d]/g, '')) : NaN;
-              const nb = typeof b === 'string' ? parseFloat(b.replace(/[^\d]/g, '')) : NaN;
-              if (isNaN(na) && isNaN(nb)) return 0;
-              if (isNaN(na)) return -1;
-              if (isNaN(nb)) return 1;
-              return na - nb;
+          width: 170,
+          cells: {
+            formatter: function () {
+              return renderEloBadgeHtml(this.value);
             },
+          },
+          sorting: {
+            compare: compareNullableNumbers,
           },
         },
         {
@@ -367,11 +416,11 @@ export function GridLeaderboard() {
         { columnId: 'idx' },
         { columnId: 'player' },
         {
-          format: 'Multiplayer ELO',
+          format: 'Multiplayer Elo',
           columns: [{ columnId: 'multiElo' }, { columnId: 'multiEloTrend' }],
         },
         {
-          format: '1v1 ELO',
+          format: '1v1 Elo',
           columns: [{ columnId: 'elo1v1' }, { columnId: 'elo1v1Trend' }],
         },
         {
@@ -401,6 +450,7 @@ export function GridLeaderboard() {
         .grid-leaderboard .hcg-container {
           height: 800px;
           max-height: 800px;
+          --hcg-vertical-padding: 6px;
         }
         .grid-leaderboard .hcg-table tbody {
           counter-reset: row-num;
@@ -413,6 +463,34 @@ export function GridLeaderboard() {
         }
         .grid-leaderboard .hcg-table tbody tr td:first-child::after {
           content: counter(row-num);
+        }
+        .grid-leaderboard .elo-badge {
+          display: flex;
+          position: relative;
+          width: 132px;
+          height: 32px;
+          margin: 0 auto;
+          align-items: center;
+          justify-content: center;
+          background-size: contain;
+          background-repeat: no-repeat;
+          background-position: center;
+        }
+        .grid-leaderboard .elo-badge__rating {
+          display: inline-block;
+          min-width: 58px;
+          text-align: center;
+          font-weight: 800;
+          font-size: 18px;
+          line-height: 1;
+          letter-spacing: 0.02em;
+          color: #ffffff;
+          text-shadow:
+            0 1px 2px rgba(0, 0, 0, 0.85),
+            0 0 8px rgba(0, 0, 0, 0.45);
+        }
+        .grid-leaderboard .elo-badge-empty {
+          color: #94a3b8;
         }
       `}</style>
       <Grid options={options} />

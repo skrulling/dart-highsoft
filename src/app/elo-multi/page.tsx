@@ -30,7 +30,7 @@ export default function MultiEloPage() {
   return (
     <div className="container mx-auto p-4 space-y-6">
       <div className="space-y-2">
-        <h1 className="text-3xl font-bold">Multiplayer ELO</h1>
+        <h1 className="text-3xl font-bold">Multiplayer Elo</h1>
         <p className="text-muted-foreground">Rankings and player rating details for 3+ player matches</p>
       </div>
 
@@ -44,7 +44,7 @@ export default function MultiEloPage() {
           ) : (
             <Card>
               <CardHeader>
-                <CardTitle>Player Multiplayer ELO</CardTitle>
+                <CardTitle>Player Multiplayer Elo</CardTitle>
                 <CardDescription>Select a player below to view their rating and history</CardDescription>
               </CardHeader>
               <CardContent>
@@ -68,4 +68,3 @@ export default function MultiEloPage() {
     </div>
   );
 }
-

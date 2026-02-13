@@ -193,8 +193,8 @@ export default function LeaderboardsPage() {
 
       <div className="grid md:grid-cols-2 gap-6">
         <LeaderboardSection
-          title="Top 10 Multiplayer ELO Ratings"
-          emptyMessage="No multiplayer ELO ratings yet."
+          title="Top 10 Multiplayer Elo Ratings"
+          emptyMessage="No multiplayer Elo ratings yet."
           emptySubMessage="Complete some 3+ player matches to see rankings!"
           isEmpty={eloMultiLeaders.length === 0}
         >
@@ -224,9 +224,9 @@ export default function LeaderboardsPage() {
         </LeaderboardSection>
 
         <LeaderboardSection
-          title="Top 10 ELO Ratings"
-          emptyMessage="No ELO ratings yet."
-          emptySubMessage="Complete some 1v1 matches to see ELO rankings!"
+          title="Top 10 Elo Ratings"
+          emptyMessage="No Elo ratings yet."
+          emptySubMessage="Complete some 1v1 matches to see Elo rankings!"
           isEmpty={eloLeaders.length === 0}
         >
           {eloLeaders.map((entry, idx) => (

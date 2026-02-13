@@ -44,7 +44,7 @@ export function MultiEloLeaderboard({ limit = 20, showRecentChanges = false }: P
     return (
       <Card>
         <CardContent className="py-12 text-center">
-          <div className="text-lg text-muted-foreground">Loading multiplayer ELO rankings...</div>
+          <div className="text-lg text-muted-foreground">Loading multiplayer Elo rankings...</div>
         </CardContent>
       </Card>
     );
@@ -66,7 +66,7 @@ export function MultiEloLeaderboard({ limit = 20, showRecentChanges = false }: P
       {activeTab === 'leaderboard' && (
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">🏆 Multiplayer ELO Leaderboard</CardTitle>
+            <CardTitle className="flex items-center gap-2">🏆 Multiplayer Elo Leaderboard</CardTitle>
           </CardHeader>
           <CardContent>
             {leaderboard.length === 0 ? (
@@ -133,7 +133,7 @@ export function MultiEloLeaderboard({ limit = 20, showRecentChanges = false }: P
       {activeTab === 'recent' && showRecentChanges && (
         <Card>
           <CardHeader>
-            <CardTitle>Recent Multiplayer ELO Changes</CardTitle>
+            <CardTitle>Recent Multiplayer Elo Changes</CardTitle>
           </CardHeader>
           <CardContent>
             {recent.length === 0 ? (
@@ -165,4 +165,3 @@ export function MultiEloLeaderboard({ limit = 20, showRecentChanges = false }: P
     </div>
   );
 }
-

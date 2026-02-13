@@ -809,15 +809,15 @@ export default function StatsPage() {
             variant={activeView === 'elo' ? 'default' : 'outline'}
             onClick={() => setActiveView('elo')}
           >
-            🏆 ELO Rankings
+            🏆 Elo Rankings
           </Button>
           <Button asChild variant="outline">
-            <Link href="/elo-multi">👥 Multiplayer ELO</Link>
+            <Link href="/elo-multi">👥 Multiplayer Elo</Link>
           </Button>
         </div>
       </div>
 
-      {/* ELO View */}
+      {/* Elo View */}
       {activeView === 'elo' && (
         <div className="space-y-6">
           <div className="grid md:grid-cols-2 gap-6">
@@ -834,8 +834,8 @@ export default function StatsPage() {
               ) : (
                 <Card>
                   <CardHeader>
-                    <CardTitle>Player ELO Stats</CardTitle>
-                    <CardDescription>Select a player below to view their ELO rating and history</CardDescription>
+                    <CardTitle>Player Elo Stats</CardTitle>
+                    <CardDescription>Select a player below to view their Elo rating and history</CardDescription>
                   </CardHeader>
                   <CardContent>
                     <Select value={selectedPlayer} onValueChange={setSelectedPlayer}>

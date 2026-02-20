@@ -1,4 +1,4 @@
-import { TrendingUp, TrendingDown } from 'lucide-react';
+import { TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { formatEloChange } from '@/utils/eloRating';
 import type { MatchEloChange } from '@/hooks/useMatchEloChanges';
 
@@ -28,7 +28,7 @@ export function EloChangesDisplay({ eloChanges, loading, matchWinnerId, playerBy
         {sorted.map((entry) => {
           const { text, color } = formatEloChange(entry.rating_change);
           const name = playerById[entry.player_id]?.display_name ?? 'Unknown';
-          const Icon = entry.rating_change >= 0 ? TrendingUp : TrendingDown;
+          const Icon = entry.rating_change > 0 ? TrendingUp : entry.rating_change < 0 ? TrendingDown : Minus;
 
           return (
             <div key={entry.player_id} className="flex items-center justify-between text-sm">

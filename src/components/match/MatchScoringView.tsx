@@ -72,7 +72,6 @@ type Props = {
   finishRule: FinishRule;
   eloChanges: MatchEloChange[];
   eloChangesLoading: boolean;
-  matchId: string;
 };
 
 export function MatchScoringView({
@@ -123,7 +122,6 @@ export function MatchScoringView({
   finishRule,
   eloChanges,
   eloChangesLoading,
-  matchId,
 }: Props) {
   const currentPlayerLastTurn = useMemo(() => {
     if (!currentPlayer) return null;

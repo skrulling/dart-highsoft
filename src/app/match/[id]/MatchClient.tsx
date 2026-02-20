@@ -507,7 +507,6 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         finishRule={finishRule}
         eloChanges={eloChanges}
         eloChangesLoading={eloChangesLoading}
-        matchId={matchId}
       />
       <RealtimeDebugPanel
         matchId={matchId}

@@ -9,6 +9,7 @@ export default async function PracticePage() {
   const { data: players } = await supabase
     .from('players')
     .select('id, display_name')
+    .eq('is_active', true)
     .order('display_name', { ascending: true });
 
   return (

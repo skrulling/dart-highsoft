@@ -2,22 +2,23 @@
 -- Populates realistic-looking players and historical x01 matches so UI screens
 -- (games list, leaderboards, stats) are useful immediately after `supabase db reset`.
 
--- 8 local players
-insert into public.players (id, display_name, elo_rating, elo_rating_multi, created_at)
+-- 8 local players (4 in Bergen, 4 in Vik)
+insert into public.players (id, display_name, elo_rating, elo_rating_multi, location, created_at)
 values
-  ('70000000-0000-0000-0000-000000000001', 'Alex Storm', 1200, 1200, now() - interval '120 days'),
-  ('70000000-0000-0000-0000-000000000002', 'Mia Larsen', 1200, 1200, now() - interval '112 days'),
-  ('70000000-0000-0000-0000-000000000003', 'Jonas Pike', 1200, 1200, now() - interval '104 days'),
-  ('70000000-0000-0000-0000-000000000004', 'Nora Vale', 1200, 1200, now() - interval '96 days'),
-  ('70000000-0000-0000-0000-000000000005', 'Viktor Rune', 1200, 1200, now() - interval '88 days'),
-  ('70000000-0000-0000-0000-000000000006', 'Freya Hale', 1200, 1200, now() - interval '80 days'),
-  ('70000000-0000-0000-0000-000000000007', 'Liam Frost', 1200, 1200, now() - interval '72 days'),
-  ('70000000-0000-0000-0000-000000000008', 'Zoe Mercer', 1200, 1200, now() - interval '64 days')
+  ('70000000-0000-0000-0000-000000000001', 'Alex Storm', 1200, 1200, 'bergen', now() - interval '120 days'),
+  ('70000000-0000-0000-0000-000000000002', 'Mia Larsen', 1200, 1200, 'bergen', now() - interval '112 days'),
+  ('70000000-0000-0000-0000-000000000003', 'Jonas Pike', 1200, 1200, 'bergen', now() - interval '104 days'),
+  ('70000000-0000-0000-0000-000000000004', 'Nora Vale', 1200, 1200, 'bergen', now() - interval '96 days'),
+  ('70000000-0000-0000-0000-000000000005', 'Viktor Rune', 1200, 1200, 'vik', now() - interval '88 days'),
+  ('70000000-0000-0000-0000-000000000006', 'Freya Hale', 1200, 1200, 'vik', now() - interval '80 days'),
+  ('70000000-0000-0000-0000-000000000007', 'Liam Frost', 1200, 1200, 'vik', now() - interval '72 days'),
+  ('70000000-0000-0000-0000-000000000008', 'Zoe Mercer', 1200, 1200, 'vik', now() - interval '64 days')
 on conflict (id) do update
 set
   display_name = excluded.display_name,
   elo_rating = excluded.elo_rating,
-  elo_rating_multi = excluded.elo_rating_multi;
+  elo_rating_multi = excluded.elo_rating_multi,
+  location = excluded.location;
 
 -- Historical + active matches
 insert into public.matches (

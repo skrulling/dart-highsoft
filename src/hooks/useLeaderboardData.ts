@@ -12,6 +12,11 @@ export type PlayerSummaryEntry = {
   avg_per_turn: number;
 };
 
+type PlayerLocationRow = {
+  id: string;
+  location: string | null;
+};
+
 type RecentFormRow = {
   player_id: string;
   last_10_results: number[] | null;
@@ -47,6 +52,7 @@ export function useLeaderboardData(limit?: number) {
   const [eloLeaders, setEloLeaders] = useState<EloLeaderboardEntry[]>([]);
   const [eloMultiLeaders, setEloMultiLeaders] = useState<MultiEloLeaderboardEntry[]>([]);
   const [recentWinsByPlayer, setRecentWinsByPlayer] = useState<Map<string, number[]>>(new Map());
+  const [playerLocations, setPlayerLocations] = useState<Map<string, string | null>>(new Map());
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -56,28 +62,36 @@ export function useLeaderboardData(limit?: number) {
         let winnersQuery = supabase
           .from('player_summary')
           .select('*')
-          .not('display_name', 'ilike', '%test%')
           .order('wins', { ascending: false });
         let avgQuery = supabase
           .from('player_summary')
           .select('*')
-          .not('display_name', 'ilike', '%test%')
           .order('avg_per_turn', { ascending: false });
         const recentFormQuery = supabase
           .from('player_recent_form')
           .select('player_id, last_10_results');
+        const locationsQuery = supabase
+          .from('players')
+          .select('id, location');
 
         if (limit) {
           winnersQuery = winnersQuery.limit(limit);
           avgQuery = avgQuery.limit(limit);
         }
 
-        const [{ data: winnersData }, eloData, eloMultiData, { data: avgData }] = await Promise.all([
+        const [{ data: winnersData }, eloData, eloMultiData, { data: avgData }, { data: locData }] = await Promise.all([
           winnersQuery,
           getEloLeaderboard(limit),
           getMultiEloLeaderboard(limit),
           avgQuery,
+          locationsQuery,
         ]);
+
+        const locMap = new Map<string, string | null>();
+        for (const row of (locData as unknown as PlayerLocationRow[]) ?? []) {
+          locMap.set(row.id, row.location);
+        }
+        setPlayerLocations(locMap);
 
         const winnerRows = (winnersData as unknown as PlayerSummaryEntry[]) ?? [];
         const avgRows = (avgData as unknown as PlayerSummaryEntry[]) ?? [];
@@ -110,5 +124,5 @@ export function useLeaderboardData(limit?: number) {
     })();
   }, [limit]);
 
-  return { leaders, avgLeaders, eloLeaders, eloMultiLeaders, recentWinsByPlayer, loading };
+  return { leaders, avgLeaders, eloLeaders, eloMultiLeaders, recentWinsByPlayer, playerLocations, loading };
 }

@@ -62,12 +62,11 @@ export default function StatsPage() {
           supabase
             .from('player_summary')
             .select('*')
-            .not('display_name', 'ilike', '%test%')
             .order('wins', { ascending: false }),
           supabase
             .from('players')
             .select('id, display_name')
-            .not('display_name', 'ilike', '%test%')
+            .eq('is_active', true)
             .order('display_name'),
           supabase
             .from('legs')

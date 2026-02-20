@@ -3,7 +3,7 @@ import { getSupabaseServerClient } from '@/lib/supabaseServer';
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as { displayName?: string };
+    const body = (await request.json()) as { displayName?: string; location?: string };
     const displayName = body.displayName?.trim();
     if (!displayName) {
       return NextResponse.json({ error: 'displayName is required' }, { status: 400 });
@@ -11,7 +11,7 @@ export async function POST(request: Request) {
     const supabase = getSupabaseServerClient();
     const { data, error } = await supabase
       .from('players')
-      .insert({ display_name: displayName })
+      .insert({ display_name: displayName, location: body.location ?? null })
       .select('*')
       .single();
     if (error || !data) {

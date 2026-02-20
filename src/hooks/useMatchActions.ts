@@ -734,7 +734,7 @@ export function useMatchActions(args: UseMatchActionsArgs): UseMatchActionsResul
   const openEditPlayersModal = useCallback(async () => {
     if (!canEditPlayers) return;
     const supabase = await getSupabaseClient();
-    const { data, error } = await supabase.from('players').select('*').order('display_name');
+    const { data, error } = await supabase.from('players').select('*').eq('is_active', true).order('display_name');
     if (error) {
       alert(error.message);
       return;

@@ -7,6 +7,8 @@ import SparklineRenderer from '@highcharts/grid-pro/es-modules/Grid/Pro/CellRend
 import '@highcharts/grid-pro/css/grid-pro.css';
 import { useLeaderboardData } from '@/hooks/useLeaderboardData';
 import { batchEloHistory, batchMultiEloHistory } from '@/utils/eloHistory';
+import { LOCATIONS, type LocationValue } from '@/utils/locations';
+import { Button } from '@/components/ui/button';
 
 SparklineRenderer['useHighcharts'](Highcharts);
 
@@ -197,16 +199,42 @@ function compareWinsForm(a: unknown, b: unknown): number {
 type MergedPlayer = {
   player_id: string;
   display_name: string;
+  location: string | null;
   wins: number | null;
   avg_per_turn: number | null;
   elo_1v1: number | null;
   elo_multi: number | null;
 };
 
+const LEADERBOARD_LOCATION_STORAGE_KEY = 'leaderboard-location-filter';
+
+function loadLeaderboardLocations(): LocationValue[] {
+  if (typeof window === 'undefined') return LOCATIONS.map((l) => l.value);
+  try {
+    const stored = localStorage.getItem(LEADERBOARD_LOCATION_STORAGE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored) as LocationValue[];
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch { /* ignore */ }
+  return LOCATIONS.map((l) => l.value);
+}
+
 export function GridLeaderboard() {
-  const { leaders, eloLeaders, eloMultiLeaders, recentWinsByPlayer, loading } = useLeaderboardData();
+  const { leaders, eloLeaders, eloMultiLeaders, recentWinsByPlayer, playerLocations, loading } = useLeaderboardData();
   const [eloHistory, setEloHistory] = useState<Map<string, number[]>>(new Map());
   const [multiEloHistory, setMultiEloHistory] = useState<Map<string, number[]>>(new Map());
+  const [enabledLocations, setEnabledLocations] = useState<LocationValue[]>(loadLeaderboardLocations);
+
+  useEffect(() => {
+    localStorage.setItem(LEADERBOARD_LOCATION_STORAGE_KEY, JSON.stringify(enabledLocations));
+  }, [enabledLocations]);
+
+  function toggleLocation(loc: LocationValue) {
+    setEnabledLocations((prev) =>
+      prev.includes(loc) ? prev.filter((l) => l !== loc) : [...prev, loc]
+    );
+  }
 
   const merged = useMemo(() => {
     const map = new Map<string, MergedPlayer>();
@@ -216,6 +244,7 @@ export function GridLeaderboard() {
         map.set(id, {
           player_id: id,
           display_name: name,
+          location: playerLocations.get(id) ?? null,
           wins: null,
           avg_per_turn: null,
           elo_1v1: null,
@@ -242,7 +271,13 @@ export function GridLeaderboard() {
     }
 
     return Array.from(map.values());
-  }, [leaders, eloLeaders, eloMultiLeaders]);
+  }, [leaders, eloLeaders, eloMultiLeaders, playerLocations]);
+
+  const filteredMerged = useMemo(() => {
+    return merged.filter(
+      (p) => p.location === null || enabledLocations.includes(p.location as LocationValue)
+    );
+  }, [merged, enabledLocations]);
 
   useEffect(() => {
     const playerIds = merged.map((p) => p.player_id);
@@ -259,6 +294,7 @@ export function GridLeaderboard() {
 
   const options = useMemo<GridOptions>(() => {
     const player: string[] = [];
+    const location: string[] = [];
     const multiEloRaw: (number | null)[] = [];
     const multiEloTrend: string[] = [];
     const elo1v1Raw: (number | null)[] = [];
@@ -267,8 +303,10 @@ export function GridLeaderboard() {
     const winsRecent: string[] = [];
     const avgRaw: (number | null)[] = [];
 
-    merged.forEach((row) => {
+    filteredMerged.forEach((row) => {
       player.push(row.display_name);
+      const loc = LOCATIONS.find((l) => l.value === row.location);
+      location.push(loc?.label ?? '–');
       multiEloRaw.push(row.elo_multi);
       multiEloTrend.push(multiEloHistory.get(row.player_id)?.join(',') ?? '');
       elo1v1Raw.push(row.elo_1v1);
@@ -289,13 +327,17 @@ export function GridLeaderboard() {
     const avg = avgRaw.map((v, i) => formatWithMedal(v, avgMedals, i, 2));
 
     // Empty column — CSS counters fill in the row number
-    const idx = merged.map(() => '');
+    const idx = filteredMerged.map(() => '');
 
     return {
+      columnDefaults: {
+        filtering: { enabled: true },
+      },
       dataTable: {
         columns: {
           idx,
           player,
+          location,
           multiElo,
           multiEloTrend,
           elo1v1,
@@ -311,10 +353,16 @@ export function GridLeaderboard() {
           header: { format: '#' },
           width: 45,
           sorting: { enabled: false },
+          filtering: { enabled: false },
         },
         {
           id: 'player',
           header: { format: 'Player' },
+        },
+        {
+          id: 'location',
+          header: { format: 'Location' },
+          width: 100,
         },
         {
           id: 'multiElo',
@@ -342,6 +390,7 @@ export function GridLeaderboard() {
           sorting: {
             compare: compareTrendStrength,
           },
+          filtering: { enabled: false },
         },
         {
           id: 'elo1v1',
@@ -368,6 +417,7 @@ export function GridLeaderboard() {
           sorting: {
             compare: compareTrendStrength,
           },
+          filtering: { enabled: false },
         },
         {
           id: 'wins',
@@ -396,6 +446,7 @@ export function GridLeaderboard() {
           sorting: {
             compare: compareWinsForm,
           },
+          filtering: { enabled: false },
         },
         {
           id: 'avg',
@@ -415,6 +466,7 @@ export function GridLeaderboard() {
       header: [
         { columnId: 'idx' },
         { columnId: 'player' },
+        { columnId: 'location' },
         {
           format: 'Multiplayer Elo',
           columns: [{ columnId: 'multiElo' }, { columnId: 'multiEloTrend' }],
@@ -438,7 +490,7 @@ export function GridLeaderboard() {
         noData: 'No leaderboard data yet. Play some matches!',
       },
     };
-  }, [merged, eloHistory, multiEloHistory, recentWinsByPlayer]);
+  }, [filteredMerged, eloHistory, multiEloHistory, recentWinsByPlayer]);
 
   if (loading) {
     return <div className="text-muted-foreground text-sm py-4">Loading leaderboard...</div>;
@@ -446,6 +498,19 @@ export function GridLeaderboard() {
 
   return (
     <div className="grid-leaderboard">
+      <div className="flex gap-1 mb-3">
+        {LOCATIONS.map((loc) => (
+          <Button
+            key={loc.value}
+            type="button"
+            size="sm"
+            variant={enabledLocations.includes(loc.value) ? 'default' : 'outline'}
+            onClick={() => toggleLocation(loc.value)}
+          >
+            {loc.label}
+          </Button>
+        ))}
+      </div>
       <style>{`
         .grid-leaderboard .hcg-container {
           height: 800px;

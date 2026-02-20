@@ -330,6 +330,9 @@ export function GridLeaderboard() {
     const idx = filteredMerged.map(() => '');
 
     return {
+      columnDefaults: {
+        filtering: { enabled: true },
+      },
       dataTable: {
         columns: {
           idx,
@@ -350,6 +353,7 @@ export function GridLeaderboard() {
           header: { format: '#' },
           width: 45,
           sorting: { enabled: false },
+          filtering: { enabled: false },
         },
         {
           id: 'player',
@@ -386,6 +390,7 @@ export function GridLeaderboard() {
           sorting: {
             compare: compareTrendStrength,
           },
+          filtering: { enabled: false },
         },
         {
           id: 'elo1v1',
@@ -412,6 +417,7 @@ export function GridLeaderboard() {
           sorting: {
             compare: compareTrendStrength,
           },
+          filtering: { enabled: false },
         },
         {
           id: 'wins',
@@ -440,6 +446,7 @@ export function GridLeaderboard() {
           sorting: {
             compare: compareWinsForm,
           },
+          filtering: { enabled: false },
         },
         {
           id: 'avg',

@@ -7,12 +7,27 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { LOCATIONS, type LocationValue } from '@/utils/locations';
 
-type Player = { id: string; display_name: string };
+type Player = { id: string; display_name: string; location: string | null };
 
 type StartScore = '201' | '301' | '501';
 
 type FinishRule = 'single_out' | 'double_out';
+
+const STORAGE_KEY = 'match-location-filter';
+
+function loadEnabledLocations(): LocationValue[] {
+  if (typeof window === 'undefined') return LOCATIONS.map((l) => l.value);
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored) as LocationValue[];
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch { /* ignore */ }
+  return LOCATIONS.map((l) => l.value);
+}
 
 export default function NewMatchPage() {
   const router = useRouter();
@@ -22,14 +37,39 @@ export default function NewMatchPage() {
   const [startScore, setStartScore] = useState<StartScore>('501');
   const [finish, setFinish] = useState<FinishRule>('double_out');
   const [legsToWin, setLegsToWin] = useState(1);
+  const [enabledLocations, setEnabledLocations] = useState<LocationValue[]>(loadEnabledLocations);
 
   useEffect(() => {
     (async () => {
       const supabase = await getSupabaseClient();
-      const { data } = await supabase.from('players').select('*').order('display_name');
+      const { data } = await supabase.from('players').select('*').eq('is_active', true).order('display_name');
       setPlayers((data as Player[]) ?? []);
     })();
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(enabledLocations));
+  }, [enabledLocations]);
+
+  function toggleLocation(loc: LocationValue) {
+    setEnabledLocations((prev) => {
+      const next = prev.includes(loc) ? prev.filter((l) => l !== loc) : [...prev, loc];
+      // Deselect players that will be hidden by the new filter
+      const hiddenIds = new Set(
+        players
+          .filter((p) => p.location !== null && !next.includes(p.location as LocationValue))
+          .map((p) => p.id)
+      );
+      if (hiddenIds.size > 0) {
+        setSelectedIds((ids) => ids.filter((id) => !hiddenIds.has(id)));
+      }
+      return next;
+    });
+  }
+
+  const filteredPlayers = players.filter(
+    (p) => p.location === null || enabledLocations.includes(p.location as LocationValue)
+  );
 
   async function createPlayer() {
     const name = newName.trim();
@@ -71,14 +111,33 @@ export default function NewMatchPage() {
     <div className="max-w-2xl mx-auto p-4 md:p-6 space-y-6">
       <h1 className="text-2xl font-semibold">New Match</h1>
       <div className="space-y-3">
-        <div className="font-medium">Players</div>
+        <div className="flex items-center justify-between">
+          <div className="font-medium">Players</div>
+          <div className="flex gap-1">
+            {LOCATIONS.map((loc) => (
+              <Button
+                key={loc.value}
+                type="button"
+                size="sm"
+                variant={enabledLocations.includes(loc.value) ? 'default' : 'outline'}
+                onClick={() => toggleLocation(loc.value)}
+              >
+                {loc.label}
+              </Button>
+            ))}
+          </div>
+        </div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-          {players.map((p) => (
-            <label key={p.id} className={`flex items-center gap-2 border p-2 rounded ${selectedIds.includes(p.id) ? 'border-accent bg-accent/30' : ''}`}>
-              <input type="checkbox" checked={selectedIds.includes(p.id)} onChange={() => toggle(p.id)} />
-              <span>{p.display_name}</span>
-            </label>
-          ))}
+          {filteredPlayers.map((p) => {
+            const loc = LOCATIONS.find((l) => l.value === p.location);
+            return (
+              <label key={p.id} className={`flex items-center gap-2 border p-2 rounded ${selectedIds.includes(p.id) ? 'border-accent bg-accent/30' : ''}`}>
+                <input type="checkbox" checked={selectedIds.includes(p.id)} onChange={() => toggle(p.id)} />
+                <span>{p.display_name}</span>
+                {loc && <span className="ml-auto text-[10px] font-medium text-muted-foreground bg-muted px-1.5 py-0.5 rounded">{loc.label}</span>}
+              </label>
+            );
+          })}
         </div>
         <div className="flex gap-2">
           <Input className="flex-1" placeholder="New player name" value={newName} onChange={(e) => setNewName(e.target.value)} />

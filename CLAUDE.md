@@ -193,3 +193,17 @@ When implementing new features that modify player/match relationships, ensure pr
 - CASCADE constraints for data cleanup
 
 The current migration files provide the baseline schema, with migrations 0007+ handling edit permissions for throws/turns and 0008+ handling match player modifications.
+
+### Views Must Use Security Invoker
+
+**All views MUST use `security_invoker = true`.** By default, PostgreSQL views run as `SECURITY DEFINER` (using the view creator's permissions), which bypasses RLS policies. This is a critical security issue.
+
+When creating or recreating a view, **always** set security invoker immediately after:
+```sql
+create or replace view public.my_view as
+select ...;
+
+alter view public.my_view set (security_invoker = true);
+```
+
+**IMPORTANT:** `CREATE OR REPLACE VIEW` resets `security_invoker` back to the default (`SECURITY DEFINER`). If a migration recreates an existing view, the `security_invoker` flag must be re-applied in the same migration. This has caused regressions before (see migration `0037`).

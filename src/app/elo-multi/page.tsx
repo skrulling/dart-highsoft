@@ -19,7 +19,7 @@ export default function MultiEloPage() {
       const { data } = await supabase
         .from('players')
         .select('id, display_name')
-        .not('display_name', 'ilike', '%test%')
+        .eq('is_active', true)
         .order('display_name');
       setPlayers(((data as unknown) as Player[]) ?? []);
     })();

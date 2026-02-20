@@ -11,6 +11,7 @@ import { useCommentary } from '@/hooks/useCommentary';
 import { useMatchData } from '@/hooks/useMatchData';
 import { useMatchRealtime } from '@/hooks/useMatchRealtime';
 import { useMatchActions } from '@/hooks/useMatchActions';
+import { useMatchEloChanges } from '@/hooks/useMatchEloChanges';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useRealtime } from '@/hooks/useRealtime';
 import type { LegRecord, MatchRecord, Player, TurnRecord } from '@/lib/match/types';
@@ -259,6 +260,9 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   // Determine if match has a winner already
   const matchWinnerId = useMemo(() => selectMatchWinnerId(match, legs), [match, legs]);
 
+  // Fetch ELO rating changes for the completed match
+  const { eloChanges, loading: eloChangesLoading } = useMatchEloChanges(matchId, matchWinnerId, players.length);
+
   // Check if first round is completed (all players have had at least one turn)
   const canEditPlayers = useMemo(
     () =>
@@ -439,6 +443,8 @@ export default function MatchClient({ matchId }: { matchId: string }) {
           onToggleMute={() => setAudioEnabled(!audioEnabled)}
           queueLength={ttsServiceRef.current.getQueueLength()}
           activePersona={activePersona}
+          eloChanges={eloChanges}
+          eloChangesLoading={eloChangesLoading}
         />
         <RealtimeDebugPanel
           matchId={matchId}
@@ -499,6 +505,8 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         currentLeg={currentLeg}
         getAvgForPlayer={getAvgForPlayer}
         finishRule={finishRule}
+        eloChanges={eloChanges}
+        eloChangesLoading={eloChangesLoading}
       />
       <RealtimeDebugPanel
         matchId={matchId}

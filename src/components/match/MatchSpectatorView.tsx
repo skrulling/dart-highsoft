@@ -7,6 +7,8 @@ import CommentarySettings from '@/components/CommentarySettings';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { EloChangesDisplay } from '@/components/match/EloChangesDisplay';
+import type { MatchEloChange } from '@/hooks/useMatchEloChanges';
 import type { CommentaryPersona, CommentaryPersonaId } from '@/lib/commentary/types';
 import type { LegRecord, MatchRecord, Player, TurnRecord } from '@/lib/match/types';
 import type { VoiceOption } from '@/services/ttsService';
@@ -62,6 +64,8 @@ type Props = {
   onToggleMute: () => void;
   queueLength: number;
   activePersona: CommentaryPersona;
+  eloChanges: MatchEloChange[];
+  eloChangesLoading: boolean;
 };
 
 const confettiColors = ['#22c55e', '#10b981', '#f59e0b', '#ef4444', '#3b82f6', '#a855f7'];
@@ -156,6 +160,8 @@ export function MatchSpectatorView({
   onToggleMute,
   queueLength,
   activePersona,
+  eloChanges,
+  eloChangesLoading,
 }: Props) {
   const [winnerModalOpen, setWinnerModalOpen] = useState(false);
 
@@ -452,6 +458,12 @@ export function MatchSpectatorView({
               <div className="text-base md:text-lg text-muted-foreground">
                 Match complete
               </div>
+              <EloChangesDisplay
+                eloChanges={eloChanges}
+                loading={eloChangesLoading}
+                matchWinnerId={matchWinnerId}
+                playerById={playerById}
+              />
             </div>
           </DialogContent>
         </Dialog>

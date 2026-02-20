@@ -16,6 +16,8 @@ import { MatchPlayersCard } from '@/components/match/MatchPlayersCard';
 import { EditPlayersModal } from '@/components/match/EditPlayersModal';
 import { EditThrowsModal, type EditableThrow } from '@/components/match/EditThrowsModal';
 import { TurnsHistoryCard } from '@/components/TurnsHistoryCard';
+import { EloChangesDisplay } from '@/components/match/EloChangesDisplay';
+import type { MatchEloChange } from '@/hooks/useMatchEloChanges';
 import { computeCheckoutSuggestions } from '@/utils/checkoutSuggestions';
 import { computeHit, type SegmentResult } from '@/utils/dartboard';
 import type { LegRecord, MatchRecord, Player, TurnRecord, TurnWithThrows } from '@/lib/match/types';
@@ -68,6 +70,8 @@ type Props = {
   currentLeg: LegRecord;
   getAvgForPlayer: (playerId: string) => number;
   finishRule: FinishRule;
+  eloChanges: MatchEloChange[];
+  eloChangesLoading: boolean;
 };
 
 export function MatchScoringView({
@@ -116,6 +120,8 @@ export function MatchScoringView({
   currentLeg,
   getAvgForPlayer,
   finishRule,
+  eloChanges,
+  eloChangesLoading,
 }: Props) {
   const currentPlayerLastTurn = useMemo(() => {
     if (!currentPlayer) return null;
@@ -369,6 +375,12 @@ export function MatchScoringView({
                     {rematchLoading ? 'Starting…' : 'Rematch'}
                   </Button>
                 </div>
+                <EloChangesDisplay
+                  eloChanges={eloChanges}
+                  loading={eloChangesLoading}
+                  matchWinnerId={matchWinnerId}
+                  playerById={playerById}
+                />
               </CardContent>
             </Card>
           )}

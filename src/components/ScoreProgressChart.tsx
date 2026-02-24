@@ -10,6 +10,7 @@ type TurnRecord = {
   turn_number: number;
   total_scored: number;
   busted: boolean;
+  tiebreak_round: number | null;
 };
 
 interface ScoreProgressChartProps {
@@ -30,6 +31,7 @@ export function ScoreProgressChart({ players, turns, startScore, currentLegId }:
 
     for (const turn of turns) {
       if (turn.leg_id !== currentLegId) continue;
+      if (turn.tiebreak_round != null) continue;
       const playerTurns = turnsByPlayer.get(turn.player_id);
       if (playerTurns) {
         playerTurns.push(turn);

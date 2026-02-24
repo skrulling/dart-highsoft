@@ -199,7 +199,7 @@ describe('POST /api/matches/[matchId]/throws', () => {
         scored: 60,
       })
     );
-    expect(resolveOrCreateTurnForPlayerMock).toHaveBeenCalledWith(supabase, 'leg-1', 'player-1');
+    expect(resolveOrCreateTurnForPlayerMock).toHaveBeenCalledWith(supabase, 'leg-1', 'player-1', undefined);
   });
 
   it('rejects legId + playerId payload when player is not in the match', async () => {

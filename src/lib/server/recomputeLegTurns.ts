@@ -8,6 +8,7 @@ type TurnRow = {
   turn_number: number;
   total_scored: number | null;
   busted: boolean;
+  tiebreak_round: number | null;
 };
 
 type ThrowRow = {
@@ -41,7 +42,7 @@ export async function recomputeLegTurns(
 ): Promise<void> {
   const { data: tData, error: tErr } = await supabase
     .from('turns')
-    .select('id, player_id, turn_number, total_scored, busted')
+    .select('id, player_id, turn_number, total_scored, busted, tiebreak_round')
     .eq('leg_id', legId)
     .order('turn_number');
   if (tErr || !tData) return;
@@ -69,6 +70,7 @@ export async function recomputeLegTurns(
 
   const updates: { id: string; total_scored: number; busted: boolean }[] = [];
   for (const t of turns) {
+    if (t.tiebreak_round != null) continue; // skip tiebreak turns
     const start = perPlayerScore.get(t.player_id) ?? startScore;
     let current = start;
     let total = 0;

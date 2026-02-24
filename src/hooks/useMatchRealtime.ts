@@ -453,7 +453,7 @@ export function useMatchRealtime({
         const { data: updatedTurns } = await supabase
           .from('turns')
           .select(`
-                id, leg_id, player_id, turn_number, total_scored, busted, created_at,
+                id, leg_id, player_id, turn_number, total_scored, busted, tiebreak_round, created_at,
                 throws:throws(id, turn_id, dart_index, segment, scored)
               `)
           .eq('leg_id', currentLeg.id)
@@ -499,7 +499,7 @@ export function useMatchRealtime({
           .from('turns')
           .select(
             `
-            id, leg_id, player_id, turn_number, total_scored, busted, created_at,
+            id, leg_id, player_id, turn_number, total_scored, busted, tiebreak_round, created_at,
             throws:throws(id, turn_id, dart_index, segment, scored)
           `
           )
@@ -745,7 +745,7 @@ export function useMatchRealtime({
           const { data: updatedTurns } = await supabase
             .from('turns')
             .select(`
-                id, leg_id, player_id, turn_number, total_scored, busted, created_at,
+                id, leg_id, player_id, turn_number, total_scored, busted, tiebreak_round, created_at,
                 throws:throws(id, turn_id, dart_index, segment, scored)
               `)
             .eq('leg_id', currentLeg.id)

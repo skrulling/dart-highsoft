@@ -13,6 +13,7 @@ import type { CommentaryPersona, CommentaryPersonaId } from '@/lib/commentary/ty
 import type { LegRecord, MatchRecord, Player, TurnRecord } from '@/lib/match/types';
 import type { VoiceOption } from '@/services/ttsService';
 import type { FinishRule } from '@/utils/x01';
+import type { FairEndingState } from '@/utils/fairEnding';
 import { useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
 
@@ -66,6 +67,7 @@ type Props = {
   activePersona: CommentaryPersona;
   eloChanges: MatchEloChange[];
   eloChangesLoading: boolean;
+  fairEndingState?: FairEndingState;
 };
 
 const confettiColors = ['#22c55e', '#10b981', '#f59e0b', '#ef4444', '#3b82f6', '#a855f7'];
@@ -162,6 +164,7 @@ export function MatchSpectatorView({
   activePersona,
   eloChanges,
   eloChangesLoading,
+  fairEndingState,
 }: Props) {
   const [winnerModalOpen, setWinnerModalOpen] = useState(false);
 
@@ -322,6 +325,24 @@ export function MatchSpectatorView({
           </div>
         )}
 
+        {/* Fair ending status banner */}
+        {fairEndingState && fairEndingState.phase === 'completing_round' && (
+          <div className="rounded-md border border-amber-400/60 bg-amber-50 px-4 py-3 text-amber-800 dark:border-amber-700/60 dark:bg-amber-900/20 dark:text-amber-200">
+            <div className="font-semibold">Completing round</div>
+            <div className="text-sm">
+              {fairEndingState.checkedOutPlayerIds.length === 1
+                ? `${orderPlayers.find((p) => p.id === fairEndingState.checkedOutPlayerIds[0])?.display_name ?? 'Player'} checked out! Remaining players complete the round.`
+                : `${fairEndingState.checkedOutPlayerIds.length} players checked out! Remaining players complete the round.`}
+            </div>
+          </div>
+        )}
+        {fairEndingState && fairEndingState.phase === 'tiebreak' && (
+          <div className="rounded-md border border-purple-400/60 bg-purple-50 px-4 py-3 text-purple-800 dark:border-purple-700/60 dark:bg-purple-900/20 dark:text-purple-200">
+            <div className="font-semibold">Tiebreak Round {fairEndingState.tiebreakRound}</div>
+            <div className="text-sm">Multiple players checked out — highest score wins!</div>
+          </div>
+        )}
+
         {/* Cards Row - responsive layout */}
         <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
           <SpectatorLiveMatchCard
@@ -334,6 +355,7 @@ export function MatchSpectatorView({
             finishRule={finishRule}
             turnThrowCounts={turnThrowCounts}
             getAvgForPlayer={getAvgForPlayer}
+            fairEndingState={fairEndingState}
           />
 
           {/* Legs Summary */}

@@ -4,6 +4,7 @@ import { useCallback, useRef, useState } from 'react';
 import { getSupabaseClient } from '@/lib/supabaseClient';
 import { apiRequest } from '@/lib/apiClient';
 import { applyThrow, type FinishRule } from '@/utils/x01';
+import type { FairEndingState } from '@/utils/fairEnding';
 import { recordPerfMetric } from '@/lib/match/perfMetrics';
 import type { SegmentResult } from '@/utils/dartboard';
 import type { LegRecord, MatchRecord, Player, TurnRecord, TurnWithThrows } from '@/lib/match/types';
@@ -62,6 +63,8 @@ type UseMatchActionsArgs = {
     getIsPlaying: () => boolean;
   }>;
   broadcastRematch?: (newMatchId: string) => Promise<void>;
+  fairEndingState: FairEndingState;
+  startScore: number;
 };
 
 type UseMatchActionsResult = {
@@ -91,6 +94,7 @@ type UseMatchActionsResult = {
   movePlayerDown: (index: number) => Promise<void>;
   startRematch: () => Promise<void>;
   endGameEarly: () => Promise<void>;
+  endLegAndMaybeMatch: (winnerPlayerId: string) => Promise<void>;
 };
 
 export function useMatchActions(args: UseMatchActionsArgs): UseMatchActionsResult {
@@ -122,6 +126,8 @@ export function useMatchActions(args: UseMatchActionsArgs): UseMatchActionsResul
     setCommentaryPlaying,
     ttsServiceRef,
     broadcastRematch,
+    fairEndingState,
+    startScore,
   } = args;
 
   const [editOpen, setEditOpen] = useState(false);
@@ -239,8 +245,9 @@ export function useMatchActions(args: UseMatchActionsArgs): UseMatchActionsResul
           playerStatsMap.set(p.id, { totalScore: 0, completedTurns: 0, totalScored: 0 });
         });
 
-        // Single iteration through all turns
+        // Single iteration through all turns (skip tiebreak turns)
         for (const turn of allTurns) {
+          if ((turn as Record<string, unknown>).tiebreak_round != null) continue;
           const stats = playerStatsMap.get(turn.player_id);
           if (!stats) continue;
 
@@ -362,7 +369,7 @@ export function useMatchActions(args: UseMatchActionsArgs): UseMatchActionsResul
           const { data: allTurns } = await supabase
             .from('turns')
             .select(`
-              id, leg_id, player_id, turn_number, total_scored, busted, created_at,
+              id, leg_id, player_id, turn_number, total_scored, busted, tiebreak_round, created_at,
               throws:throws(id, turn_id, dart_index, segment, scored)
             `)
             .in('leg_id', allLegs.map((l) => l.id))
@@ -378,10 +385,16 @@ export function useMatchActions(args: UseMatchActionsArgs): UseMatchActionsResul
     [currentLeg, match, matchId, players, loadAll, commentaryEnabled, triggerMatchRecap]
   );
 
+  const recomputeFairEndingAndResolve = useCallback(async () => {
+    if (!match?.fair_ending || !currentLeg) return;
+    await loadAll();
+  }, [match?.fair_ending, currentLeg, loadAll]);
+
   const processBoardClick = useCallback(
     async (_x: number, _y: number, result: SegmentResult) => {
       if (matchWinnerId) return; // match over
       if (!currentLeg || !currentPlayer) return;
+      const isTiebreak = fairEndingState.phase === 'tiebreak';
       const clickStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
       let turnId = syncTurnFromStateIfNeeded();
       if (!turnId) {
@@ -395,9 +408,15 @@ export function useMatchActions(args: UseMatchActionsArgs): UseMatchActionsResul
         setLocalTurn({ playerId: currentPlayer.id, darts: [] });
       }
 
-      const myScoreStart = ongoingTurnRef.current?.startScore ?? getScoreForPlayer(currentPlayer.id);
-      const localSubtotal = localTurn.darts.reduce((s, d) => s + d.scored, 0);
-      const outcome = applyThrow(myScoreStart - localSubtotal, result, finishRule);
+      // In tiebreak, there are no bust/checkout rules - just accumulate raw score
+      let outcome;
+      if (isTiebreak) {
+        outcome = { newScore: 0, busted: false, finished: false };
+      } else {
+        const myScoreStart = ongoingTurnRef.current?.startScore ?? getScoreForPlayer(currentPlayer.id);
+        const localSubtotal = localTurn.darts.reduce((s, d) => s + d.scored, 0);
+        outcome = applyThrow(myScoreStart - localSubtotal, result, finishRule);
+      }
       const hadPersistedTurnId = !turnId.startsWith('pending-');
 
       const newDartIndex = ongoingTurnRef.current!.darts.length + 1;
@@ -414,17 +433,21 @@ export function useMatchActions(args: UseMatchActionsArgs): UseMatchActionsResul
         recordPerfMetric(matchId, 'clickToOptimisticPaintMs', durationMs);
       }
 
+      // Build throw request body
+      const tiebreakRound = isTiebreak ? fairEndingState.tiebreakRound : undefined;
       try {
+        const throwBody = hadPersistedTurnId
+          ? { turnId, dartIndex: newDartIndex, segment: result.label, scored: result.scored, ...(tiebreakRound ? { tiebreakRound } : {}) }
+          : {
+              legId: currentLeg.id,
+              playerId: currentPlayer.id,
+              dartIndex: newDartIndex,
+              segment: result.label,
+              scored: result.scored,
+              ...(tiebreakRound ? { tiebreakRound } : {}),
+            };
         const throwResult = await apiRequest<{ turnId?: string }>(`/api/matches/${matchId}/throws`, {
-          body: hadPersistedTurnId
-            ? { turnId, dartIndex: newDartIndex, segment: result.label, scored: result.scored }
-            : {
-                legId: currentLeg.id,
-                playerId: currentPlayer.id,
-                dartIndex: newDartIndex,
-                segment: result.label,
-                scored: result.scored,
-              },
+          body: throwBody,
         });
         if (throwResult.turnId && ongoingTurnRef.current && ongoingTurnRef.current.turnId === turnId) {
           ongoingTurnRef.current = {
@@ -465,16 +488,26 @@ export function useMatchActions(args: UseMatchActionsArgs): UseMatchActionsResul
 
       if (outcome.busted) {
         await finishTurn(true);
+        if (match?.fair_ending) await recomputeFairEndingAndResolve();
         return;
       }
+
+      if (outcome.finished && match?.fair_ending) {
+        // Fair ending: don't immediately end leg. Finish turn and let state recompute.
+        await finishTurn(false, { skipReload: true });
+        await loadAll();
+        return;
+      }
+
       if (outcome.finished) {
-        // Persist the partial turn and finish the leg immediately without waiting for state
+        // Normal game: finish leg immediately
         await finishTurn(false, { skipReload: true });
         await endLegAndMaybeMatch(currentPlayer.id);
         return;
       }
       if (newDartIndex >= 3) {
         await finishTurn(false);
+        if (match?.fair_ending) await recomputeFairEndingAndResolve();
         return;
       }
     },
@@ -491,6 +524,10 @@ export function useMatchActions(args: UseMatchActionsArgs): UseMatchActionsResul
       finishTurn,
       endLegAndMaybeMatch,
       matchId,
+      match?.fair_ending,
+      fairEndingState,
+      recomputeFairEndingAndResolve,
+      loadAll,
     ]
   );
 
@@ -899,5 +936,6 @@ export function useMatchActions(args: UseMatchActionsArgs): UseMatchActionsResul
     movePlayerDown,
     startRematch,
     endGameEarly,
+    endLegAndMaybeMatch,
   };
 }

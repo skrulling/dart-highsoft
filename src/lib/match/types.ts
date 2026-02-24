@@ -9,6 +9,7 @@ export type MatchRecord = {
   finish: FinishRule;
   legs_to_win: number;
   ended_early?: boolean;
+  fair_ending?: boolean;
 };
 
 export type LegRecord = {
@@ -26,6 +27,7 @@ export type TurnRecord = {
   turn_number: number;
   total_scored: number;
   busted: boolean;
+  tiebreak_round: number | null;
 };
 
 export type MatchPlayersRow = {

@@ -37,6 +37,7 @@ export default function NewMatchPage() {
   const [startScore, setStartScore] = useState<StartScore>('501');
   const [finish, setFinish] = useState<FinishRule>('double_out');
   const [legsToWin, setLegsToWin] = useState(1);
+  const [fairEnding, setFairEnding] = useState(false);
   const [enabledLocations, setEnabledLocations] = useState<LocationValue[]>(loadEnabledLocations);
 
   useEffect(() => {
@@ -97,6 +98,7 @@ export default function NewMatchPage() {
           startScore: parseInt(startScore, 10),
           finishRule: finish,
           legsToWin,
+          fairEnding: legsToWin === 1 ? fairEnding : false,
           playerIds: selectedIds,
         },
       });
@@ -172,16 +174,35 @@ export default function NewMatchPage() {
         <div>
           <div className="font-medium mb-1">Legs to win</div>
           <div className="flex items-stretch gap-2">
-            <Button type="button" variant="outline" onClick={() => setLegsToWin((v) => Math.max(1, v - 1))}>
+            <Button type="button" variant="outline" onClick={() => {
+              setLegsToWin((v) => {
+                const next = Math.max(1, v - 1);
+                if (next !== 1) setFairEnding(false);
+                return next;
+              });
+            }}>
               −
             </Button>
             <Input readOnly className="text-center select-none" value={String(legsToWin)} />
-            <Button type="button" variant="outline" onClick={() => setLegsToWin((v) => v + 1)}>
+            <Button type="button" variant="outline" onClick={() => {
+              setLegsToWin((v) => {
+                const next = v + 1;
+                if (next !== 1) setFairEnding(false);
+                return next;
+              });
+            }}>
               +
             </Button>
           </div>
         </div>
       </div>
+
+      {legsToWin === 1 && (
+        <label className="flex items-center gap-2">
+          <input type="checkbox" checked={fairEnding} onChange={(e) => setFairEnding(e.target.checked)} />
+          <span className="text-sm">Fair ending — all players complete the round before a winner is declared</span>
+        </label>
+      )}
 
       <div className="flex gap-3">
         <Button onClick={onStart}>Start match</Button>

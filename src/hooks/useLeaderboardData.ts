@@ -12,6 +12,11 @@ export type PlayerSummaryEntry = {
   avg_per_turn: number;
 };
 
+export type PlayerGameStats = {
+  games_played: number;
+  game_win_rate: number;
+};
+
 type PlayerLocationRow = {
   id: string;
   location: string | null;
@@ -22,6 +27,20 @@ type RecentFormRow = {
   last_10_results: number[] | null;
 };
 
+type MatchParticipationRow = {
+  player_id: string;
+  matches:
+    | {
+        ended_early: boolean | null;
+        winner_player_id: string | null;
+      }
+    | Array<{
+        ended_early: boolean | null;
+        winner_player_id: string | null;
+      }>
+    | null;
+};
+
 function buildRecentWinsByPlayer(rows: RecentFormRow[]): Map<string, number[]> {
   const recentWinsByPlayer = new Map<string, number[]>();
 
@@ -30,6 +49,35 @@ function buildRecentWinsByPlayer(rows: RecentFormRow[]): Map<string, number[]> {
   }
 
   return recentWinsByPlayer;
+}
+
+function buildGameStatsByPlayer(rows: MatchParticipationRow[]): Map<string, PlayerGameStats> {
+  const counts = new Map<string, { games_played: number; wins: number }>();
+
+  for (const row of rows) {
+    const match = Array.isArray(row.matches) ? row.matches[0] : row.matches;
+    if (!match || match.ended_early) continue;
+
+    const current = counts.get(row.player_id) ?? { games_played: 0, wins: 0 };
+    current.games_played += 1;
+    if (match.winner_player_id === row.player_id) {
+      current.wins += 1;
+    }
+    counts.set(row.player_id, current);
+  }
+
+  const stats = new Map<string, PlayerGameStats>();
+  for (const [playerId, value] of counts) {
+    const game_win_rate = value.games_played > 0
+      ? Number(((value.wins / value.games_played) * 100).toFixed(1))
+      : 0;
+    stats.set(playerId, {
+      games_played: value.games_played,
+      game_win_rate,
+    });
+  }
+
+  return stats;
 }
 
 function collectRelevantPlayerIds(
@@ -52,6 +100,7 @@ export function useLeaderboardData(limit?: number) {
   const [eloLeaders, setEloLeaders] = useState<EloLeaderboardEntry[]>([]);
   const [eloMultiLeaders, setEloMultiLeaders] = useState<MultiEloLeaderboardEntry[]>([]);
   const [recentWinsByPlayer, setRecentWinsByPlayer] = useState<Map<string, number[]>>(new Map());
+  const [playerGameStats, setPlayerGameStats] = useState<Map<string, PlayerGameStats>>(new Map());
   const [playerLocations, setPlayerLocations] = useState<Map<string, string | null>>(new Map());
   const [loading, setLoading] = useState(true);
 
@@ -70,6 +119,10 @@ export function useLeaderboardData(limit?: number) {
         const recentFormQuery = supabase
           .from('player_recent_form')
           .select('player_id, last_10_results');
+        const gameStatsQuery = supabase
+          .from('match_players')
+          .select('player_id, matches!inner(ended_early, winner_player_id)')
+          .eq('matches.ended_early', false);
         const locationsQuery = supabase
           .from('players')
           .select('id, location');
@@ -105,12 +158,20 @@ export function useLeaderboardData(limit?: number) {
           : [];
         if (limit && relevantPlayerIds.length === 0) {
           setRecentWinsByPlayer(new Map());
+          setPlayerGameStats(new Map());
         } else {
           const scopedRecentFormQuery = limit
             ? recentFormQuery.in('player_id', relevantPlayerIds)
             : recentFormQuery;
-          const { data: recentFormData } = await scopedRecentFormQuery;
+          const scopedGameStatsQuery = limit
+            ? gameStatsQuery.in('player_id', relevantPlayerIds)
+            : gameStatsQuery;
+          const [{ data: recentFormData }, { data: gameStatsData }] = await Promise.all([
+            scopedRecentFormQuery,
+            scopedGameStatsQuery,
+          ]);
           setRecentWinsByPlayer(buildRecentWinsByPlayer((recentFormData as unknown as RecentFormRow[]) ?? []));
+          setPlayerGameStats(buildGameStatsByPlayer((gameStatsData as unknown as MatchParticipationRow[]) ?? []));
         }
       } catch {
         setLeaders([]);
@@ -118,11 +179,21 @@ export function useLeaderboardData(limit?: number) {
         setEloLeaders([]);
         setEloMultiLeaders([]);
         setRecentWinsByPlayer(new Map());
+        setPlayerGameStats(new Map());
       } finally {
         setLoading(false);
       }
     })();
   }, [limit]);
 
-  return { leaders, avgLeaders, eloLeaders, eloMultiLeaders, recentWinsByPlayer, playerLocations, loading };
+  return {
+    leaders,
+    avgLeaders,
+    eloLeaders,
+    eloMultiLeaders,
+    recentWinsByPlayer,
+    playerGameStats,
+    playerLocations,
+    loading,
+  };
 }

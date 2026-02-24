@@ -120,6 +120,8 @@ describe('useMatchActions', () => {
           },
         },
         broadcastRematch: async () => {},
+        fairEndingState: { phase: 'normal' as const, checkedOutPlayerIds: [], tiebreakRound: 0, tiebreakPlayerIds: [], tiebreakScores: {}, winnerId: null },
+        startScore: 501,
       });
 
       return { actions, localTurn, ongoingTurnRef };
@@ -245,6 +247,8 @@ describe('useMatchActions', () => {
           },
         },
         broadcastRematch: async () => {},
+        fairEndingState: { phase: 'normal' as const, checkedOutPlayerIds: [], tiebreakRound: 0, tiebreakPlayerIds: [], tiebreakScores: {}, winnerId: null },
+        startScore: 501,
       });
 
       return { actions, localTurn };
@@ -343,6 +347,8 @@ describe('useMatchActions', () => {
           },
         },
         broadcastRematch: async () => {},
+        fairEndingState: { phase: 'normal' as const, checkedOutPlayerIds: [], tiebreakRound: 0, tiebreakPlayerIds: [], tiebreakScores: {}, winnerId: null },
+        startScore: 501,
       });
 
       return { actions, localTurn };
@@ -473,6 +479,8 @@ describe('useMatchActions', () => {
           },
         },
         broadcastRematch: async () => {},
+        fairEndingState: { phase: 'normal' as const, checkedOutPlayerIds: [], tiebreakRound: 0, tiebreakPlayerIds: [], tiebreakScores: {}, winnerId: null },
+        startScore: 501,
       });
 
       return { actions, localTurn };
@@ -567,6 +575,8 @@ describe('useMatchActions', () => {
           },
         },
         broadcastRematch: async () => {},
+        fairEndingState: { phase: 'normal' as const, checkedOutPlayerIds: [], tiebreakRound: 0, tiebreakPlayerIds: [], tiebreakScores: {}, winnerId: null },
+        startScore: 501,
       });
 
       return { actions, localTurn };

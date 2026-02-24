@@ -60,7 +60,8 @@ export async function getTurnById(supabase: SupabaseClient, turnId: string): Pro
 export async function resolveOrCreateTurnForPlayer(
   supabase: SupabaseClient,
   legId: string,
-  playerId: string
+  playerId: string,
+  tiebreakRound?: number
 ): Promise<{ turn: TurnRow | TurnSnapshot } | { error: string; status: number }> {
   const latest = await getLatestTurnForLeg(supabase, legId);
   if (latest && latest.player_id === playerId && isIncompleteTurn(latest)) {
@@ -81,6 +82,7 @@ export async function resolveOrCreateTurnForPlayer(
         turn_number: nextTurnNumber,
         total_scored: 0,
         busted: false,
+        ...(tiebreakRound != null ? { tiebreak_round: tiebreakRound } : {}),
       })
       .select('*')
       .single();

@@ -7,6 +7,7 @@ import { computeCheckoutSuggestions } from '@/utils/checkoutSuggestions';
 import { getLegRoundStats, getSpectatorScore } from '@/utils/matchStats';
 import { decorateAvg } from '@/utils/playerStats';
 import type { Player, ThrowRecord, TurnRecord, TurnWithThrows } from '@/lib/match/types';
+import type { FairEndingState } from '@/utils/fairEnding';
 import type { FinishRule } from '@/utils/x01';
 import { useEffect, useMemo, useRef } from 'react';
 
@@ -20,6 +21,7 @@ type Props = {
   finishRule: FinishRule;
   turnThrowCounts: Record<string, number>;
   getAvgForPlayer: (playerId: string) => number;
+  fairEndingState?: FairEndingState;
 };
 
 export function SpectatorLiveMatchCard({
@@ -32,6 +34,7 @@ export function SpectatorLiveMatchCard({
   finishRule,
   turnThrowCounts,
   getAvgForPlayer,
+  fairEndingState,
 }: Props) {
   const listRef = useRef<HTMLDivElement | null>(null);
   const itemRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -72,10 +75,11 @@ export function SpectatorLiveMatchCard({
             </div>
           )}
 
-          {/* Checkout suggestions - with space reservation */}
+          {/* Checkout suggestions - with space reservation (hidden during tiebreak) */}
           <div className="min-h-8 flex justify-center">
             {(() => {
-              if (!spectatorCurrentPlayer) return <div className="invisible">-</div>;
+              const isTiebreak = fairEndingState?.phase === 'tiebreak';
+              if (!spectatorCurrentPlayer || isTiebreak) return <div className="invisible">-</div>;
 
               const currentScore = getSpectatorScore(
                 turns,
@@ -124,10 +128,15 @@ export function SpectatorLiveMatchCard({
             className="grid gap-3 max-h-[70vh] min-h-[40vh] overflow-y-auto overflow-x-hidden pr-1"
           >
             {orderPlayers.map((player) => {
-              const score = getSpectatorScore(turns, currentLegId, startScore, turnThrowCounts, player.id);
+              const isTiebreak = fairEndingState?.phase === 'tiebreak';
+              const isTiebreakPlayer = isTiebreak && fairEndingState.tiebreakPlayerIds.includes(player.id);
+              const score = isTiebreakPlayer
+                ? (fairEndingState.tiebreakScores[player.id] ?? 0)
+                : getSpectatorScore(turns, currentLegId, startScore, turnThrowCounts, player.id);
               const avg = getAvgForPlayer(player.id);
               const deco = decorateAvg(avg);
               const isCurrent = spectatorCurrentPlayer?.id === player.id;
+              const isCheckedOut = fairEndingState?.checkedOutPlayerIds?.includes(player.id);
 
               // Get throws to display for this player
               let displayThrows: ThrowRecord[] = [];
@@ -160,13 +169,16 @@ export function SpectatorLiveMatchCard({
                   }}
                   className={`p-4 rounded-lg transition-all duration-500 ease-in-out ${
                     isCurrent
-                      ? 'border-2 border-emerald-400/80 bg-emerald-500/5 shadow-lg ring-2 ring-emerald-400/40'
+                      ? 'border-2 border-yellow-500 bg-yellow-500/10'
                       : 'border bg-card hover:bg-accent/30'
                   }`}
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       {isCurrent && <Badge variant="default">Playing</Badge>}
+                      {isCheckedOut && (
+                        <Badge variant="outline" className="border-green-500 text-green-600 dark:text-green-400">Checked out</Badge>
+                      )}
                       <div className="font-semibold text-lg">{player.display_name}</div>
 
                       {/* Inline throw indicators */}
@@ -183,10 +195,12 @@ export function SpectatorLiveMatchCard({
                     <div className="text-right">
                       <div className="text-3xl font-mono font-bold">{score}</div>
                       <div className="flex flex-col items-end gap-1">
-                        <div className={`text-sm font-medium ${deco.cls}`}>
-                          {deco.emoji} {avg.toFixed(1)} avg
+                        <div className={`text-sm font-medium ${isTiebreakPlayer ? 'text-amber-600 dark:text-amber-400' : deco.cls}`}>
+                          {isTiebreakPlayer
+                            ? `Round ${fairEndingState!.tiebreakRound} score`
+                            : `${deco.emoji} ${avg.toFixed(1)} avg`}
                         </div>
-                        {(() => {
+                        {!isTiebreakPlayer && (() => {
                           const { lastRoundScore, bestRoundScore } = getLegRoundStats(turns, currentLegId, player.id);
 
                           return (

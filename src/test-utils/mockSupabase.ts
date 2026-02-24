@@ -17,6 +17,7 @@ export type MatchRow = {
   start_score: '201' | '301' | '501';
   finish: 'single_out' | 'double_out';
   legs_to_win: number;
+  fair_ending?: boolean;
 };
 
 export type PlayerRow = { id: string; display_name: string };
@@ -43,6 +44,7 @@ export type TurnRow = {
   turn_number: number;
   total_scored: number | null;
   busted: boolean;
+  tiebreak_round: number | null;
 };
 
 export type ThrowRow = {

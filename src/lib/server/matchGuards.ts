@@ -8,12 +8,13 @@ export type MatchRow = {
   start_score: string;
   finish: 'single_out' | 'double_out';
   legs_to_win: number;
+  fair_ending: boolean;
 };
 
 export async function loadMatch(supabase: SupabaseClient, matchId: string): Promise<MatchRow | null> {
   const { data, error } = await supabase
     .from('matches')
-    .select('id, winner_player_id, completed_at, ended_early, start_score, finish, legs_to_win')
+    .select('id, winner_player_id, completed_at, ended_early, start_score, finish, legs_to_win, fair_ending')
     .eq('id', matchId)
     .single();
   if (error || !data) return null;

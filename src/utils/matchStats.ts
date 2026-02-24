@@ -9,6 +9,7 @@ type TurnRecord = {
   player_id: string;
   total_scored: number;
   busted: boolean;
+  tiebreak_round: number | null;
 };
 
 type TurnWithThrows = TurnRecord & {
@@ -23,13 +24,13 @@ export function getSpectatorScore(
   playerId: string
 ): number {
   const legTurns = currentLegId
-    ? turns.filter((t) => t.player_id === playerId && t.leg_id === currentLegId)
+    ? turns.filter((t) => t.player_id === playerId && t.leg_id === currentLegId && t.tiebreak_round == null)
     : [];
   const scored = legTurns.reduce((sum, t) => (t.busted ? sum : sum + (t.total_scored || 0)), 0);
   let current = startScore - scored;
 
-  const playerTurns = turns.filter((turn) => turn.player_id === playerId);
-  const lastTurn = playerTurns.length > 0 ? playerTurns[playerTurns.length - 1] : null;
+  const playerNormalTurns = turns.filter((turn) => turn.player_id === playerId && turn.tiebreak_round == null);
+  const lastTurn = playerNormalTurns.length > 0 ? playerNormalTurns[playerNormalTurns.length - 1] : null;
   if (lastTurn && !lastTurn.busted) {
     const throwCount = turnThrowCounts[lastTurn.id] || 0;
     if (throwCount > 0 && throwCount < 3) {
@@ -49,7 +50,7 @@ export function getLegRoundStats(
   playerId: string
 ): { lastRoundScore: number; bestRoundScore: number } {
   const legTurns = currentLegId
-    ? turns.filter((t) => t.player_id === playerId && t.leg_id === currentLegId && !t.busted)
+    ? turns.filter((t) => t.player_id === playerId && t.leg_id === currentLegId && !t.busted && t.tiebreak_round == null)
     : [];
 
   if (legTurns.length === 0) {

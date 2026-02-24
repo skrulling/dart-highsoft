@@ -23,6 +23,7 @@ export async function POST(request: NextRequest) {
           legsToWin: number;
           finishRule: 'single_out' | 'double_out';
           playerIds: string[];
+          fairEnding?: boolean;
         };
     
     const supabase = getSupabaseServerClient();
@@ -30,6 +31,7 @@ export async function POST(request: NextRequest) {
     let startScore: '201' | '301' | '501';
     let finish: 'single_out' | 'double_out';
     let legsToWin: number;
+    let fairEnding = false;
     let playerIds: string[] = [];
 
     if ('playerIds' in body) {
@@ -48,6 +50,7 @@ export async function POST(request: NextRequest) {
       startScore = String(body.startScore) as '201' | '301' | '501';
       finish = body.finishRule;
       legsToWin = body.legsToWin;
+      fairEnding = body.fairEnding && legsToWin === 1 ? true : false;
       playerIds = body.playerIds;
     } else {
       if (!body.type || ![201, 301, 501].includes(body.type)) {
@@ -107,11 +110,12 @@ export async function POST(request: NextRequest) {
     // Create match
     const { data: match, error: matchError } = await supabase
       .from('matches')
-      .insert({ 
-        mode: 'x01', 
-        start_score: startScore, 
-        finish, 
-        legs_to_win: legsToWin 
+      .insert({
+        mode: 'x01',
+        start_score: startScore,
+        finish,
+        legs_to_win: legsToWin,
+        fair_ending: fairEnding,
       })
       .select('*')
       .single();

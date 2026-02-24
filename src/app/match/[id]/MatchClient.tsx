@@ -431,15 +431,16 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     startScore,
   });
 
-  // When fair ending resolves a winner, end the leg (with guard to prevent double-fire)
+  // When fair ending resolves a winner, end the leg (scoring client only - spectators must not trigger this)
   const fairEndingWinnerId = fairEndingState.winnerId;
   const fairEndingResolvedRef = useRef<string | null>(null);
   useEffect(() => {
+    if (isSpectatorMode) return;
     if (fairEndingWinnerId && !matchWinnerId && fairEndingResolvedRef.current !== fairEndingWinnerId) {
       fairEndingResolvedRef.current = fairEndingWinnerId;
       void endLegAndMaybeMatch(fairEndingWinnerId);
     }
-  }, [fairEndingWinnerId, matchWinnerId, endLegAndMaybeMatch]);
+  }, [isSpectatorMode, fairEndingWinnerId, matchWinnerId, endLegAndMaybeMatch]);
 
   // Toggle spectator mode
   const toggleSpectatorMode = useCallback(() => {

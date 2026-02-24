@@ -355,6 +355,7 @@ export function MatchSpectatorView({
             finishRule={finishRule}
             turnThrowCounts={turnThrowCounts}
             getAvgForPlayer={getAvgForPlayer}
+            fairEndingState={fairEndingState}
           />
 
           {/* Legs Summary */}

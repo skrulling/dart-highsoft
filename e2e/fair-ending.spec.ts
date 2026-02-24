@@ -39,6 +39,13 @@ async function expectBanner(page: import('@playwright/test').Page, text: string)
   await expect(page.getByText(text, { exact: false })).toBeVisible({ timeout: 15000 });
 }
 
+async function expectWinner(page: import('@playwright/test').Page, name: string) {
+  // The winner modal shows "Winner" / player name / "wins the match!"
+  const winnerSection = page.getByText('wins the match', { exact: false }).locator('..');
+  await expect(winnerSection).toBeVisible({ timeout: 15000 });
+  await expect(winnerSection.getByText(name, { exact: true })).toBeVisible({ timeout: 5000 });
+}
+
 async function throwDart(page: import('@playwright/test').Page, value: string, modifier?: 'Double' | 'Triple') {
   if (modifier) {
     await page.getByRole('button', { name: modifier }).click();
@@ -129,7 +136,7 @@ test.describe('Fair Ending', () => {
     await throwDart(page, '1');
 
     // Player One should win since only they checked out
-    await expect(page.getByText(`${PLAYER_NAMES.ONE} Wins!`, { exact: false })).toBeVisible({ timeout: 15000 });
+    await expectWinner(page, PLAYER_NAMES.ONE);
   });
 
   test('Both players check out -> tiebreak, higher scorer wins', async ({
@@ -176,7 +183,7 @@ test.describe('Fair Ending', () => {
     await throwDart(page, '20');
 
     // Player Two wins the tiebreak (60 > 3)
-    await expect(page.getByText(`${PLAYER_NAMES.TWO} Wins!`, { exact: false })).toBeVisible({ timeout: 15000 });
+    await expectWinner(page, PLAYER_NAMES.TWO);
   });
 
   test('Tiebreak tie leads to another round', async ({
@@ -230,7 +237,7 @@ test.describe('Fair Ending', () => {
     await throwDart(page, '1');
 
     // Player One wins (60 > 3)
-    await expect(page.getByText(`${PLAYER_NAMES.ONE} Wins!`, { exact: false })).toBeVisible({ timeout: 15000 });
+    await expectWinner(page, PLAYER_NAMES.ONE);
   });
 
   test('Player One checks out with first dart, remaining darts are not needed', async ({
@@ -256,5 +263,93 @@ test.describe('Fair Ending', () => {
     await expectCheckedOutBadge(page, PLAYER_NAMES.ONE);
     await expectCurrentPlayer(page, PLAYER_NAMES.TWO);
     await expectMatchScore(page, PLAYER_NAMES.TWO, 20);
+  });
+
+  test('Player Two busts during completing round -> Player One still wins', async ({
+    page,
+    supabase,
+    createMatch,
+  }) => {
+    // Use double_out so P2 can bust by hitting a single when needing a double
+    const { matchId, legId } = await createMatch({
+      startScore: 201,
+      finish: 'double_out',
+      fairEnding: true,
+    });
+
+    // Seed: both players at 20 remaining (double_out: need D10 to finish)
+    const turn1 = await createTurn(supabase, legId, TEST_PLAYERS.ONE, 1);
+    await addThrowsToTurn(supabase, turn1.id, matchId, [
+      { segment: 'T20', scored: 60, dart_index: 1 },
+      { segment: 'T20', scored: 60, dart_index: 2 },
+      { segment: 'T20', scored: 60, dart_index: 3 },
+    ]);
+    await supabase.from('turns').update({ total_scored: 180, busted: false }).eq('id', turn1.id);
+
+    const turn2 = await createTurn(supabase, legId, TEST_PLAYERS.TWO, 2);
+    await addThrowsToTurn(supabase, turn2.id, matchId, [
+      { segment: 'T20', scored: 60, dart_index: 1 },
+      { segment: 'T20', scored: 60, dart_index: 2 },
+      { segment: 'T20', scored: 60, dart_index: 3 },
+    ]);
+    await supabase.from('turns').update({ total_scored: 180, busted: false }).eq('id', turn2.id);
+
+    const turn3 = await createTurn(supabase, legId, TEST_PLAYERS.ONE, 3);
+    await addThrowsToTurn(supabase, turn3.id, matchId, [
+      { segment: 'S1', scored: 1, dart_index: 1 },
+      { segment: 'Miss', scored: 0, dart_index: 2 },
+      { segment: 'Miss', scored: 0, dart_index: 3 },
+    ]);
+    await supabase.from('turns').update({ total_scored: 1, busted: false }).eq('id', turn3.id);
+
+    const turn4 = await createTurn(supabase, legId, TEST_PLAYERS.TWO, 4);
+    await addThrowsToTurn(supabase, turn4.id, matchId, [
+      { segment: 'S1', scored: 1, dart_index: 1 },
+      { segment: 'Miss', scored: 0, dart_index: 2 },
+      { segment: 'Miss', scored: 0, dart_index: 3 },
+    ]);
+    await supabase.from('turns').update({ total_scored: 1, busted: false }).eq('id', turn4.id);
+
+    await page.goto(`/match/${matchId}`);
+    await waitForMatchLoad(page);
+
+    // Both at 20, double_out. P1 checks out with D10
+    await expectCurrentPlayer(page, PLAYER_NAMES.ONE);
+    await throwDart(page, '10', 'Double');
+
+    // Completing round: P2 is up
+    await expectBanner(page, 'Completing round');
+    await expectCheckedOutBadge(page, PLAYER_NAMES.ONE);
+    await expectCurrentPlayer(page, PLAYER_NAMES.TWO);
+
+    // P2 throws S20 which busts (20 -> 0, but needs a double to finish in double_out)
+    await throwDart(page, '20');
+
+    // P1 should win since P2 busted
+    await expectWinner(page, PLAYER_NAMES.ONE);
+  });
+
+  test('Normal game without fair ending ends immediately on checkout', async ({
+    page,
+    supabase,
+    createMatch,
+  }) => {
+    // Regression: ensure non-fair-ending games still work normally
+    const { matchId, legId } = await createMatch({
+      startScore: 201,
+      finish: 'single_out',
+      fairEnding: false,
+    });
+    await seedBothPlayersAt20(supabase, matchId, legId);
+
+    await page.goto(`/match/${matchId}`);
+    await waitForMatchLoad(page);
+
+    // Player One checks out: S20 -> immediate win, no completing round
+    await expectCurrentPlayer(page, PLAYER_NAMES.ONE);
+    await throwDart(page, '20');
+
+    // Should immediately show winner, NOT "Completing round"
+    await expectWinner(page, PLAYER_NAMES.ONE);
   });
 });

@@ -23,12 +23,14 @@ import {
   selectMatchWinnerId,
   selectPlayerStats,
   selectCurrentPlayer,
+  selectCurrentPlayerWithFairEnding,
   selectSpectatorCurrentPlayer,
   getScoreForPlayer as getScoreForPlayerSelector,
   getAvgForPlayer as getAvgForPlayerSelector,
   canEditPlayers as canEditPlayersSelector,
   canReorderPlayers as canReorderPlayersSelector,
 } from '@/lib/match/selectors';
+import { computeFairEndingState, type FairEndingState } from '@/utils/fairEnding';
 
 const MatchSpectatorView = dynamic(
   () => import('@/components/match/MatchSpectatorView').then((module) => module.MatchSpectatorView),
@@ -278,7 +280,25 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   // Check if game hasn't started yet (no turns/throws registered)
   const canReorderPlayers = useMemo(() => canReorderPlayersSelector(turns, matchWinnerId), [turns, matchWinnerId]);
 
-  const currentPlayer = useMemo(
+  // Compute fair ending state
+  const fairEndingState: FairEndingState = useMemo(() => {
+    if (!match?.fair_ending) {
+      return { phase: 'normal' as const, checkedOutPlayerIds: [], tiebreakRound: 0, tiebreakPlayerIds: [], tiebreakScores: {}, winnerId: null };
+    }
+    return computeFairEndingState(
+      turns.map((t) => ({
+        player_id: t.player_id,
+        total_scored: t.total_scored,
+        busted: t.busted,
+        tiebreak_round: t.tiebreak_round,
+      })),
+      orderPlayers,
+      startScore,
+      true
+    );
+  }, [match?.fair_ending, turns, orderPlayers, startScore]);
+
+  const standardCurrentPlayer = useMemo(
     () =>
       selectCurrentPlayer({
         orderPlayers,
@@ -290,8 +310,21 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     [orderPlayers, currentLeg, localTurn, turns, turnThrowCounts]
   );
 
+  const currentPlayer = useMemo(
+    () =>
+      match?.fair_ending
+        ? selectCurrentPlayerWithFairEnding({
+            fairEndingState,
+            orderPlayers,
+            turns,
+            fallback: standardCurrentPlayer,
+          })
+        : standardCurrentPlayer,
+    [match?.fair_ending, fairEndingState, orderPlayers, turns, standardCurrentPlayer]
+  );
+
   // For spectator mode, determine current player based on incomplete turns
-  const spectatorCurrentPlayer = useMemo(
+  const standardSpectatorCurrentPlayer = useMemo(
     () =>
       selectSpectatorCurrentPlayer({
         orderPlayers,
@@ -300,6 +333,19 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         turnThrowCounts,
       }),
     [orderPlayers, currentLeg, turns, turnThrowCounts]
+  );
+
+  const spectatorCurrentPlayer = useMemo(
+    () =>
+      match?.fair_ending
+        ? selectCurrentPlayerWithFairEnding({
+            fairEndingState,
+            orderPlayers,
+            turns,
+            fallback: standardSpectatorCurrentPlayer,
+          })
+        : standardSpectatorCurrentPlayer,
+    [match?.fair_ending, fairEndingState, orderPlayers, turns, standardSpectatorCurrentPlayer]
   );
 
   const currentLegId = currentLeg?.id;
@@ -352,6 +398,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     movePlayerDown,
     startRematch,
     endGameEarly,
+    endLegAndMaybeMatch,
   } = useMatchActions({
     matchId,
     match,
@@ -380,7 +427,19 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     setCommentaryPlaying,
     ttsServiceRef,
     broadcastRematch: realtime.broadcastRematch,
+    fairEndingState,
+    startScore,
   });
+
+  // When fair ending resolves a winner, end the leg (with guard to prevent double-fire)
+  const fairEndingWinnerId = fairEndingState.winnerId;
+  const fairEndingResolvedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (fairEndingWinnerId && !matchWinnerId && fairEndingResolvedRef.current !== fairEndingWinnerId) {
+      fairEndingResolvedRef.current = fairEndingWinnerId;
+      void endLegAndMaybeMatch(fairEndingWinnerId);
+    }
+  }, [fairEndingWinnerId, matchWinnerId, endLegAndMaybeMatch]);
 
   // Toggle spectator mode
   const toggleSpectatorMode = useCallback(() => {
@@ -445,6 +504,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
           activePersona={activePersona}
           eloChanges={eloChanges}
           eloChangesLoading={eloChangesLoading}
+          fairEndingState={fairEndingState}
         />
         <RealtimeDebugPanel
           matchId={matchId}
@@ -507,6 +567,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         finishRule={finishRule}
         eloChanges={eloChanges}
         eloChangesLoading={eloChangesLoading}
+        fairEndingState={fairEndingState}
       />
       <RealtimeDebugPanel
         matchId={matchId}

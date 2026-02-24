@@ -82,6 +82,7 @@ export const createMockTurn = (overrides?: Partial<TurnRow>): TurnRow => ({
   turn_number: 1,
   total_scored: null,
   busted: false,
+  tiebreak_round: null,
   ...overrides,
 });
 
@@ -136,6 +137,7 @@ export const createTwoPlayerGameSetup = (): MockDb => {
         turn_number: 1,
         total_scored: null,
         busted: false,
+        tiebreak_round: null,
       },
     ],
     throws: [

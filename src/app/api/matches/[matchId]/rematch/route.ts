@@ -8,7 +8,7 @@ export async function POST(_: Request, { params }: { params: Promise<{ matchId: 
 
     const { data: match } = await supabase
       .from('matches')
-      .select('id, start_score, finish, legs_to_win, winner_player_id')
+      .select('id, start_score, finish, legs_to_win, fair_ending, winner_player_id')
       .eq('id', matchId)
       .single();
     if (!match) return NextResponse.json({ error: 'Match not found' }, { status: 404 });
@@ -35,7 +35,7 @@ export async function POST(_: Request, { params }: { params: Promise<{ matchId: 
 
     const { data: newMatch, error: mErr } = await supabase
       .from('matches')
-      .insert({ mode: 'x01', start_score: match.start_score, finish: match.finish, legs_to_win: match.legs_to_win })
+      .insert({ mode: 'x01', start_score: match.start_score, finish: match.finish, legs_to_win: match.legs_to_win, fair_ending: match.fair_ending ?? false })
       .select('*')
       .single();
     if (mErr || !newMatch) return NextResponse.json({ error: mErr?.message ?? 'Failed to create rematch' }, { status: 500 });

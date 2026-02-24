@@ -165,6 +165,7 @@ export function applyTurnChange(
         turn_number: record.turn_number ?? turns.length + 1,
         total_scored: record.total_scored ?? 0,
         busted: record.busted ?? false,
+        tiebreak_round: record.tiebreak_round ?? null,
         throws: [],
       });
     }

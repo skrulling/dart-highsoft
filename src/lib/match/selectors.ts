@@ -1,5 +1,7 @@
 import type { LegRecord, MatchRecord, Player, ThrowRecord, TurnRecord, TurnWithThrows } from '@/lib/match/types';
 import type { SegmentResult } from '@/utils/dartboard';
+import type { FairEndingState } from '@/utils/fairEnding';
+import { getNextFairEndingPlayer } from '@/utils/fairEnding';
 
 type LocalTurn = {
   playerId: string | null;
@@ -52,6 +54,8 @@ export function selectPlayerStats(
   }
 
   for (const turn of turns) {
+    if (turn.tiebreak_round != null) continue;
+
     const playerId = turn.player_id;
     if (!playerIdSet.has(playerId)) continue;
 
@@ -208,4 +212,32 @@ export function canEditPlayers(params: {
 
 export function canReorderPlayers(turns: TurnRecord[], matchWinnerId: string | null): boolean {
   return turns.length === 0 && !matchWinnerId;
+}
+
+/**
+ * When fair ending is active and the phase is not 'normal',
+ * use the fair ending logic to determine the current player.
+ */
+export function selectCurrentPlayerWithFairEnding(params: {
+  fairEndingState: FairEndingState;
+  orderPlayers: Player[];
+  turns: TurnRecord[];
+  fallback: Player | null;
+}): Player | null {
+  const { fairEndingState, orderPlayers, turns, fallback } = params;
+  if (fairEndingState.phase === 'normal') return fallback;
+  if (fairEndingState.phase === 'resolved') return null;
+
+  const nextId = getNextFairEndingPlayer(
+    fairEndingState,
+    orderPlayers,
+    turns.map((t) => ({
+      player_id: t.player_id,
+      total_scored: t.total_scored,
+      busted: t.busted,
+      tiebreak_round: t.tiebreak_round,
+    }))
+  );
+  if (!nextId) return null; // All expected players have thrown; don't fall back to standard rotation
+  return orderPlayers.find((p) => p.id === nextId) ?? null;
 }

@@ -22,7 +22,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ mat
   try {
     const { matchId } = await params;
     let body:
-      | { turnId?: string; dartIndex?: number; segment?: string; scored?: number; legId?: string; playerId?: string }
+      | { turnId?: string; dartIndex?: number; segment?: string; scored?: number; legId?: string; playerId?: string; tiebreakRound?: number }
       | null = null;
     try {
       body = (await request.json()) as {
@@ -32,6 +32,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ mat
         scored?: number;
         legId?: string;
         playerId?: string;
+        tiebreakRound?: number;
       };
     } catch {
       return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
@@ -44,6 +45,18 @@ export async function POST(request: Request, { params }: { params: Promise<{ mat
     const match = await loadMatch(supabase, matchId);
     if (!match) return NextResponse.json({ error: 'Match not found' }, { status: 404 });
     if (!isMatchActive(match)) return NextResponse.json({ error: 'Match is not active' }, { status: 409 });
+
+    // Only allow tiebreakRound when match has fair_ending enabled and value is valid
+    let tiebreakRound: number | undefined;
+    if (body.tiebreakRound != null) {
+      if (!match.fair_ending) {
+        return NextResponse.json({ error: 'tiebreakRound not allowed without fair_ending' }, { status: 400 });
+      }
+      if (typeof body.tiebreakRound !== 'number' || !Number.isInteger(body.tiebreakRound) || body.tiebreakRound < 1) {
+        return NextResponse.json({ error: 'tiebreakRound must be a positive integer' }, { status: 400 });
+      }
+      tiebreakRound = body.tiebreakRound;
+    }
 
     let resolvedTurnId: string | null = null;
     if (body.turnId) {
@@ -72,7 +85,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ mat
         return NextResponse.json({ error: 'Player not found for match' }, { status: 404 });
       }
 
-      const resolved = await resolveOrCreateTurnForPlayer(supabase, body.legId, body.playerId);
+      const resolved = await resolveOrCreateTurnForPlayer(supabase, body.legId, body.playerId, tiebreakRound);
       if ('error' in resolved) {
         return NextResponse.json({ error: resolved.error }, { status: resolved.status });
       }

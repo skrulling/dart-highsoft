@@ -201,6 +201,8 @@ type MergedPlayer = {
   display_name: string;
   location: string | null;
   wins: number | null;
+  games_played: number | null;
+  game_win_rate: number | null;
   avg_per_turn: number | null;
   elo_1v1: number | null;
   elo_multi: number | null;
@@ -221,7 +223,15 @@ function loadLeaderboardLocations(): LocationValue[] {
 }
 
 export function GridLeaderboard() {
-  const { leaders, eloLeaders, eloMultiLeaders, recentWinsByPlayer, playerLocations, loading } = useLeaderboardData();
+  const {
+    leaders,
+    eloLeaders,
+    eloMultiLeaders,
+    recentWinsByPlayer,
+    playerGameStats,
+    playerLocations,
+    loading,
+  } = useLeaderboardData();
   const [eloHistory, setEloHistory] = useState<Map<string, number[]>>(new Map());
   const [multiEloHistory, setMultiEloHistory] = useState<Map<string, number[]>>(new Map());
   const [enabledLocations, setEnabledLocations] = useState<LocationValue[]>(loadLeaderboardLocations);
@@ -246,6 +256,8 @@ export function GridLeaderboard() {
           display_name: name,
           location: playerLocations.get(id) ?? null,
           wins: null,
+          games_played: null,
+          game_win_rate: null,
           avg_per_turn: null,
           elo_1v1: null,
           elo_multi: null,
@@ -258,6 +270,9 @@ export function GridLeaderboard() {
       const p = getOrCreate(row.player_id, row.display_name);
       p.wins = row.wins;
       p.avg_per_turn = row.avg_per_turn;
+      const gameStats = playerGameStats.get(row.player_id);
+      p.games_played = gameStats?.games_played ?? null;
+      p.game_win_rate = gameStats?.game_win_rate ?? null;
     }
 
     for (const entry of eloLeaders) {
@@ -271,7 +286,7 @@ export function GridLeaderboard() {
     }
 
     return Array.from(map.values());
-  }, [leaders, eloLeaders, eloMultiLeaders, playerLocations]);
+  }, [leaders, eloLeaders, eloMultiLeaders, playerGameStats, playerLocations]);
 
   const filteredMerged = useMemo(() => {
     return merged.filter(
@@ -301,6 +316,8 @@ export function GridLeaderboard() {
     const elo1v1Trend: string[] = [];
     const winsRaw: (number | null)[] = [];
     const winsRecent: string[] = [];
+    const gamesPlayedRaw: (number | null)[] = [];
+    const gameWinRateRaw: (number | null)[] = [];
     const avgRaw: (number | null)[] = [];
 
     filteredMerged.forEach((row) => {
@@ -313,6 +330,8 @@ export function GridLeaderboard() {
       elo1v1Trend.push(eloHistory.get(row.player_id)?.join(',') ?? '');
       winsRaw.push(row.wins);
       winsRecent.push((recentWinsByPlayer.get(row.player_id) ?? []).slice().reverse().join(','));
+      gamesPlayedRaw.push(row.games_played);
+      gameWinRateRaw.push(row.game_win_rate);
       avgRaw.push(row.avg_per_turn);
     });
 
@@ -344,6 +363,8 @@ export function GridLeaderboard() {
           elo1v1Trend,
           wins,
           winsRecent,
+          gamesPlayed: gamesPlayedRaw,
+          gameWinRate: gameWinRateRaw,
           avg,
         },
       },
@@ -421,7 +442,7 @@ export function GridLeaderboard() {
         },
         {
           id: 'wins',
-          header: { format: 'Total' },
+          header: { format: 'Wins' },
           sorting: {
             compare: (a, b) => {
               const na = typeof a === 'string' ? parseFloat(a.replace(/[^\d]/g, '')) : NaN;
@@ -447,6 +468,30 @@ export function GridLeaderboard() {
             compare: compareWinsForm,
           },
           filtering: { enabled: false },
+        },
+        {
+          id: 'gamesPlayed',
+          header: { format: 'Played' },
+          width: 90,
+          sorting: {
+            compare: compareNullableNumbers,
+          },
+        },
+        {
+          id: 'gameWinRate',
+          header: { format: 'Win Rate' },
+          width: 110,
+          cells: {
+            formatter: function () {
+              if (typeof this.value !== 'number' || !Number.isFinite(this.value)) {
+                return '–';
+              }
+              return `${this.value.toFixed(1)}%`;
+            },
+          },
+          sorting: {
+            compare: compareNullableNumbers,
+          },
         },
         {
           id: 'avg',
@@ -476,8 +521,13 @@ export function GridLeaderboard() {
           columns: [{ columnId: 'elo1v1' }, { columnId: 'elo1v1Trend' }],
         },
         {
-          format: 'Wins',
-          columns: [{ columnId: 'wins' }, { columnId: 'winsRecent' }],
+          format: 'Games',
+          columns: [
+            { columnId: 'wins' },
+            { columnId: 'gamesPlayed' },
+            { columnId: 'gameWinRate' },
+            { columnId: 'winsRecent' },
+          ],
         },
         { columnId: 'avg' },
       ],

@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { decorateAvg } from '@/utils/playerStats';
 import type { Player, ThrowRecord, TurnRecord, TurnWithThrows } from '@/lib/match/types';
+import type { FairEndingState } from '@/utils/fairEnding';
 import { useMemo } from 'react';
 
 type LocalTurn = {
@@ -21,6 +22,8 @@ type Props = {
   turnThrowCounts: Record<string, number>;
   getScoreForPlayer: (playerId: string) => number;
   getAvgForPlayer: (playerId: string) => number;
+  checkedOutPlayerIds?: string[];
+  fairEndingState?: FairEndingState;
 };
 
 export function MatchPlayersCard({
@@ -33,6 +36,8 @@ export function MatchPlayersCard({
   turnThrowCounts,
   getScoreForPlayer,
   getAvgForPlayer,
+  checkedOutPlayerIds,
+  fairEndingState,
 }: Props) {
   const latestTurnByPlayer = useMemo(() => {
     const byPlayer: Record<string, TurnRecord> = {};
@@ -56,7 +61,15 @@ export function MatchPlayersCard({
       <CardContent>
         <div className="grid grid-cols-1 gap-2">
           {orderPlayers.map((p) => {
-            const score = getScoreForPlayer(p.id);
+            const isTiebreak = fairEndingState?.phase === 'tiebreak';
+            const isTiebreakPlayer = isTiebreak && fairEndingState.tiebreakPlayerIds.includes(p.id);
+            const tiebreakBase = isTiebreakPlayer ? (fairEndingState.tiebreakScores[p.id] ?? 0) : 0;
+            const localTiebreakAdd = isTiebreakPlayer && localTurn.playerId === p.id
+              ? localTurn.darts.reduce((s, d) => s + d.scored, 0)
+              : 0;
+            const score = isTiebreakPlayer
+              ? tiebreakBase + localTiebreakAdd
+              : getScoreForPlayer(p.id);
             const avg = getAvgForPlayer(p.id);
             const deco = decorateAvg(avg);
             const isCurrent = currentPlayerId === p.id;
@@ -84,6 +97,9 @@ export function MatchPlayersCard({
               >
                 <div className="flex items-center gap-2">
                   {isCurrent && !matchWinnerId && <Badge>Up</Badge>}
+                  {checkedOutPlayerIds?.includes(p.id) && (
+                    <Badge variant="outline" className="border-green-500 text-green-600 dark:text-green-400">Checked out</Badge>
+                  )}
                   <div className="font-medium">{p.display_name}</div>
                 </div>
                 <div className="flex items-center gap-3">
@@ -122,8 +138,8 @@ export function MatchPlayersCard({
                   )}
                   <div className="flex flex-col items-end">
                     <div className="text-2xl font-mono min-w-[3ch] text-right">{score}</div>
-                    <div className={`text-xs ${deco.cls}`}>
-                      {deco.emoji} {avg.toFixed(2)} avg
+                    <div className={`text-xs ${isTiebreakPlayer ? 'text-amber-600 dark:text-amber-400' : deco.cls}`}>
+                      {isTiebreakPlayer ? `Round ${fairEndingState!.tiebreakRound} score` : `${deco.emoji} ${avg.toFixed(2)} avg`}
                     </div>
                   </div>
                 </div>

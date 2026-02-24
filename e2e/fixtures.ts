@@ -29,6 +29,7 @@ type TestFixtures = {
     legsToWin?: number;
     playerIds?: string[];
     legWinnerId?: string | null;
+    fairEnding?: boolean;
   }) => Promise<{ matchId: string; legId: string }>;
   cleanupMatch: (matchId: string) => Promise<void>;
 };
@@ -56,12 +57,14 @@ export const test = base.extend<TestFixtures>({
       legsToWin?: number;
       playerIds?: string[];
       legWinnerId?: string | null;
+      fairEnding?: boolean;
     }) => {
       const startScore = options?.startScore ?? 501;
       const finish = options?.finish ?? 'double_out';
       const legsToWin = options?.legsToWin ?? 1;
       const playerIds = options?.playerIds ?? [TEST_PLAYERS.ONE, TEST_PLAYERS.TWO];
       const legWinnerId = options?.legWinnerId ?? null;
+      const fairEnding = options?.fairEnding ?? false;
 
       await ensurePlayersExist(supabase, playerIds);
 
@@ -73,6 +76,7 @@ export const test = base.extend<TestFixtures>({
           start_score: startScore.toString(),
           finish,
           legs_to_win: legsToWin,
+          fair_ending: fairEnding,
         })
         .select()
         .single();

@@ -352,4 +352,78 @@ test.describe('Fair Ending', () => {
     // Should immediately show winner, NOT "Completing round"
     await expectWinner(page, PLAYER_NAMES.ONE);
   });
+
+  test('Elo is only applied once after fair ending win', async ({
+    page,
+    supabase,
+    createMatch,
+  }) => {
+    const { matchId, legId } = await createMatch({
+      startScore: 201,
+      finish: 'single_out',
+      fairEnding: true,
+    });
+    await seedBothPlayersAt20(supabase, matchId, legId);
+
+    // Record Elo before the game
+    const { data: beforeP1 } = await supabase
+      .from('players')
+      .select('elo_rating')
+      .eq('id', TEST_PLAYERS.ONE)
+      .single();
+    const { data: beforeP2 } = await supabase
+      .from('players')
+      .select('elo_rating')
+      .eq('id', TEST_PLAYERS.TWO)
+      .single();
+    const eloBefore1 = beforeP1?.elo_rating ?? 1200;
+    const eloBefore2 = beforeP2?.elo_rating ?? 1200;
+
+    await page.goto(`/match/${matchId}`);
+    await waitForMatchLoad(page);
+
+    // Player One checks out
+    await expectCurrentPlayer(page, PLAYER_NAMES.ONE);
+    await throwDart(page, '20');
+
+    // Player Two completes round without checking out
+    await expectBanner(page, 'Completing round');
+    await expectCurrentPlayer(page, PLAYER_NAMES.TWO);
+    await throwDart(page, '1');
+    await throwDart(page, '1');
+    await throwDart(page, '1');
+
+    // Wait for winner and Elo to settle
+    await expectWinner(page, PLAYER_NAMES.ONE);
+    // Small delay to ensure Elo RPC has completed
+    await page.waitForTimeout(2000);
+
+    // Check Elo was applied exactly once
+    const { data: afterP1 } = await supabase
+      .from('players')
+      .select('elo_rating')
+      .eq('id', TEST_PLAYERS.ONE)
+      .single();
+    const { data: afterP2 } = await supabase
+      .from('players')
+      .select('elo_rating')
+      .eq('id', TEST_PLAYERS.TWO)
+      .single();
+    const eloAfter1 = afterP1?.elo_rating ?? 1200;
+    const eloAfter2 = afterP2?.elo_rating ?? 1200;
+
+    const delta1 = eloAfter1 - eloBefore1;
+    const delta2 = eloAfter2 - eloBefore2;
+
+    // Winner gains, loser loses, and they should be symmetric
+    expect(delta1).toBeGreaterThan(0);
+    expect(delta2).toBeLessThan(0);
+
+    // With K=32, the max change is 32. Double application would give > 32.
+    expect(delta1).toBeLessThanOrEqual(32);
+    expect(delta2).toBeGreaterThanOrEqual(-32);
+
+    // Sum should be approximately zero (Elo is zero-sum)
+    expect(Math.abs(delta1 + delta2)).toBeLessThanOrEqual(1);
+  });
 });

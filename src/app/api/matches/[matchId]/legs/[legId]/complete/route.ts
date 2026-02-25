@@ -23,6 +23,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ mat
       return NextResponse.json({ error: 'Leg not found for match' }, { status: 404 });
     }
 
+    // Idempotency guard: if leg already has a winner, don't re-process (prevents double Elo)
+    if (leg.winner_player_id) {
+      const alreadyCompleted = !!match.completed_at;
+      return NextResponse.json({ matchCompleted: alreadyCompleted });
+    }
+
     const { error: legErr } = await supabase
       .from('legs')
       .update({ winner_player_id: body.winnerPlayerId })

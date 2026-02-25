@@ -29,6 +29,7 @@ type TurnInput = {
   total_scored: number;
   busted: boolean;
   tiebreak_round?: number | null;
+  throw_count?: number;
 };
 
 const NORMAL_STATE: FairEndingState = {
@@ -62,6 +63,9 @@ function computeScores(
 
 /**
  * Determine how many completed turns each player has in normal (non-tiebreak) play.
+ * A turn is considered complete if it has 3+ throws, is busted, or has a non-zero total.
+ * This prevents newly-created turns (total_scored=0, 1 dart thrown) from being counted
+ * before the player finishes throwing.
  */
 function completedTurnCounts(
   turns: TurnInput[],
@@ -71,6 +75,9 @@ function completedTurnCounts(
   for (const id of playerIds) counts[id] = 0;
   for (const t of turns) {
     if (t.tiebreak_round != null) continue;
+    // Skip incomplete turns: total_scored=0, not busted, and fewer than 3 throws
+    const throwCount = t.throw_count ?? 3; // default to 3 for backward compat (no throw_count = assume complete)
+    if (!t.busted && t.total_scored === 0 && throwCount < 3) continue;
     if (counts[t.player_id] !== undefined) {
       counts[t.player_id]++;
     }
@@ -226,12 +233,7 @@ export function getNextFairEndingPlayer(
 
   if (state.phase === 'completing_round') {
     // Find which players haven't completed the round yet
-    const normalTurns = turns.filter((t) => t.tiebreak_round == null);
-    const counts: Record<string, number> = {};
-    for (const id of playerIds) counts[id] = 0;
-    for (const t of normalTurns) {
-      if (counts[t.player_id] !== undefined) counts[t.player_id]++;
-    }
+    const counts = completedTurnCounts(turns, playerIds);
     const maxCount = Math.max(...playerIds.map((id) => counts[id]));
 
     // Next player in order who hasn't completed this round

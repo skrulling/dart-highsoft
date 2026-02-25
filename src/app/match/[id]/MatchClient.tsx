@@ -291,12 +291,13 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         total_scored: t.total_scored,
         busted: t.busted,
         tiebreak_round: t.tiebreak_round,
+        throw_count: turnThrowCounts[t.id] ?? 0,
       })),
       orderPlayers,
       startScore,
       true
     );
-  }, [match?.fair_ending, turns, orderPlayers, startScore]);
+  }, [match?.fair_ending, turns, orderPlayers, startScore, turnThrowCounts]);
 
   const standardCurrentPlayer = useMemo(
     () =>

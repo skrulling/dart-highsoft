@@ -11,22 +11,25 @@ type TurnInput = {
   total_scored: number;
   busted: boolean;
   tiebreak_round?: number | null;
+  throw_count?: number;
 };
 
 const playerA = { id: 'a' };
 const playerB = { id: 'b' };
 const playerC = { id: 'c' };
+const playerD = { id: 'd' };
 
 function makeTurn(
   playerId: string,
   totalScored: number,
-  opts?: { busted?: boolean; tiebreakRound?: number }
+  opts?: { busted?: boolean; tiebreakRound?: number; throwCount?: number }
 ): TurnInput {
   return {
     player_id: playerId,
     total_scored: totalScored,
     busted: opts?.busted ?? false,
     tiebreak_round: opts?.tiebreakRound ?? null,
+    throw_count: opts?.throwCount ?? 3,
   };
 }
 
@@ -304,6 +307,64 @@ describe('Fair Ending Logic', () => {
       expect(isTiebreakPhase({ phase: 'normal' } as FairEndingState)).toBe(false);
       expect(isTiebreakPhase({ phase: 'completing_round' } as FairEndingState)).toBe(false);
       expect(isTiebreakPhase({ phase: 'resolved' } as FairEndingState)).toBe(false);
+    });
+
+    it('Incomplete turn (1 dart thrown) is not counted as completed turn', () => {
+      // 4-player game: A checks out, B and C throw, D starts but only 1 dart thrown
+      const turns = [
+        makeTurn('a', 50),
+        makeTurn('b', 30),
+        makeTurn('c', 20),
+        makeTurn('d', 40),
+        makeTurn('a', 51),  // A: 0 - checked out
+        makeTurn('b', 30),  // B: completed round
+        makeTurn('c', 30),  // C: completed round
+        // D's incomplete turn: only 1 dart (5 points), total_scored=0 (not finalized)
+        { player_id: 'd', total_scored: 0, busted: false, tiebreak_round: null, throw_count: 1 },
+      ];
+      const state = computeFairEndingState(
+        turns,
+        [playerA, playerB, playerC, playerD],
+        101,
+        true
+      );
+      // D hasn't completed their turn yet - should still be completing_round, NOT resolved
+      expect(state.phase).toBe('completing_round');
+      expect(state.winnerId).toBeNull();
+
+      const next = getNextFairEndingPlayer(
+        state,
+        [playerA, playerB, playerC, playerD],
+        turns
+      );
+      expect(next).toBe('d');
+    });
+
+    it('Turn with 3 misses (total_scored=0, throw_count=3) IS counted as completed', () => {
+      const turns = [
+        makeTurn('a', 60),
+        makeTurn('b', 45),
+        makeTurn('a', 41),  // A: 0
+        // B threw 3 misses - total is 0 but the turn is complete
+        { player_id: 'b', total_scored: 0, busted: false, tiebreak_round: null, throw_count: 3 },
+      ];
+      const state = computeFairEndingState(turns, [playerA, playerB], 101, true);
+      // Round is complete, only A checked out → A wins
+      expect(state.phase).toBe('resolved');
+      expect(state.winnerId).toBe('a');
+    });
+
+    it('Without throw_count (backward compat), turns are treated as completed', () => {
+      const turns = [
+        makeTurn('a', 60),
+        makeTurn('b', 45),
+        makeTurn('a', 41),  // A: 0
+        // Old-style turn without throw_count
+        { player_id: 'b', total_scored: 30, busted: false, tiebreak_round: null },
+      ];
+      const state = computeFairEndingState(turns, [playerA, playerB], 101, true);
+      expect(state.phase).toBe('resolved');
+      expect(state.winnerId).toBe('a');
     });
   });
 

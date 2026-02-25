@@ -353,6 +353,49 @@ test.describe('Fair Ending', () => {
     await expectWinner(page, PLAYER_NAMES.ONE);
   });
 
+  test('Game does not end prematurely when last player starts throwing during completing_round', async ({
+    page,
+    supabase,
+    createMatch,
+  }) => {
+    // Regression: reproduces a bug where the game ended after the last player threw their
+    // first dart during completing_round. The realtime-inserted turn (total_scored=0, 1 throw)
+    // was incorrectly counted as a completed turn, making the fair ending logic think the
+    // round was over and immediately resolving the winner.
+    const { matchId, legId } = await createMatch({
+      startScore: 201,
+      finish: 'single_out',
+      fairEnding: true,
+    });
+    await seedBothPlayersAt20(supabase, matchId, legId);
+
+    await page.goto(`/match/${matchId}`);
+    await waitForMatchLoad(page);
+
+    // Player One checks out: S20 (20 -> 0)
+    await expectCurrentPlayer(page, PLAYER_NAMES.ONE);
+    await throwDart(page, '20');
+
+    // Completing round: Player Two is up with 20 remaining
+    await expectBanner(page, 'Completing round');
+    await expectCurrentPlayer(page, PLAYER_NAMES.TWO);
+    await expectMatchScore(page, PLAYER_NAMES.TWO, 20);
+
+    // Player Two throws first dart (S5 -> 15 remaining)
+    await throwDart(page, '5');
+
+    // BUG: the game used to end here. It should NOT have ended.
+    // Player Two should still be throwing (15 remaining, dart 2 of 3)
+    await expectMatchScore(page, PLAYER_NAMES.TWO, 15, { timeout: 5000 });
+
+    // Player Two can throw darts 2 and 3
+    await throwDart(page, '1');
+    await throwDart(page, '1');
+
+    // NOW the round is complete (P2 finished their turn without checking out) → P1 wins
+    await expectWinner(page, PLAYER_NAMES.ONE);
+  });
+
   test('Elo is only applied once after fair ending win', async ({
     page,
     supabase,
@@ -364,20 +407,6 @@ test.describe('Fair Ending', () => {
       fairEnding: true,
     });
     await seedBothPlayersAt20(supabase, matchId, legId);
-
-    // Record Elo before the game
-    const { data: beforeP1 } = await supabase
-      .from('players')
-      .select('elo_rating')
-      .eq('id', TEST_PLAYERS.ONE)
-      .single();
-    const { data: beforeP2 } = await supabase
-      .from('players')
-      .select('elo_rating')
-      .eq('id', TEST_PLAYERS.TWO)
-      .single();
-    const eloBefore1 = beforeP1?.elo_rating ?? 1200;
-    const eloBefore2 = beforeP2?.elo_rating ?? 1200;
 
     await page.goto(`/match/${matchId}`);
     await waitForMatchLoad(page);
@@ -395,35 +424,25 @@ test.describe('Fair Ending', () => {
 
     // Wait for winner and Elo to settle
     await expectWinner(page, PLAYER_NAMES.ONE);
-    // Small delay to ensure Elo RPC has completed
     await page.waitForTimeout(2000);
 
-    // Check Elo was applied exactly once
-    const { data: afterP1 } = await supabase
-      .from('players')
-      .select('elo_rating')
-      .eq('id', TEST_PLAYERS.ONE)
-      .single();
-    const { data: afterP2 } = await supabase
-      .from('players')
-      .select('elo_rating')
-      .eq('id', TEST_PLAYERS.TWO)
-      .single();
-    const eloAfter1 = afterP1?.elo_rating ?? 1200;
-    const eloAfter2 = afterP2?.elo_rating ?? 1200;
+    // Check elo_ratings records for this specific match - should be exactly 1 per player
+    const { data: eloRecords } = await supabase
+      .from('elo_ratings')
+      .select('player_id, rating_change, is_winner')
+      .eq('match_id', matchId);
 
-    const delta1 = eloAfter1 - eloBefore1;
-    const delta2 = eloAfter2 - eloBefore2;
+    // Exactly 2 records (1 winner + 1 loser), not 4 (which would mean double application)
+    expect(eloRecords).toHaveLength(2);
 
-    // Winner gains, loser loses, and they should be symmetric
-    expect(delta1).toBeGreaterThan(0);
-    expect(delta2).toBeLessThan(0);
+    const winnerRecord = eloRecords?.find((r: { is_winner: boolean }) => r.is_winner);
+    const loserRecord = eloRecords?.find((r: { is_winner: boolean }) => !r.is_winner);
 
-    // With K=32, the max change is 32. Double application would give > 32.
-    expect(delta1).toBeLessThanOrEqual(32);
-    expect(delta2).toBeGreaterThanOrEqual(-32);
-
-    // Sum should be approximately zero (Elo is zero-sum)
-    expect(Math.abs(delta1 + delta2)).toBeLessThanOrEqual(1);
+    expect(winnerRecord).toBeDefined();
+    expect(loserRecord).toBeDefined();
+    expect(winnerRecord!.rating_change).toBeGreaterThan(0);
+    expect(winnerRecord!.rating_change).toBeLessThanOrEqual(32);
+    expect(loserRecord!.rating_change).toBeLessThan(0);
+    expect(loserRecord!.rating_change).toBeGreaterThanOrEqual(-32);
   });
 });

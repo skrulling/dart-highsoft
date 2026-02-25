@@ -222,9 +222,10 @@ export function selectCurrentPlayerWithFairEnding(params: {
   fairEndingState: FairEndingState;
   orderPlayers: Player[];
   turns: TurnRecord[];
+  turnThrowCounts: Record<string, number>;
   fallback: Player | null;
 }): Player | null {
-  const { fairEndingState, orderPlayers, turns, fallback } = params;
+  const { fairEndingState, orderPlayers, turns, turnThrowCounts, fallback } = params;
   if (fairEndingState.phase === 'normal') return fallback;
   if (fairEndingState.phase === 'resolved') return null;
 
@@ -236,6 +237,7 @@ export function selectCurrentPlayerWithFairEnding(params: {
       total_scored: t.total_scored,
       busted: t.busted,
       tiebreak_round: t.tiebreak_round,
+      throw_count: turnThrowCounts[t.id] ?? 0,
     }))
   );
   if (!nextId) return null; // All expected players have thrown; don't fall back to standard rotation

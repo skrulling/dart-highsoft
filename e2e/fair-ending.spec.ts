@@ -3,6 +3,7 @@ import { test, expect, TEST_PLAYERS, addThrowsToTurn, createTurn } from './fixtu
 const PLAYER_NAMES = {
   ONE: 'E2E Player One',
   TWO: 'E2E Player Two',
+  THREE: 'E2E Player Three',
 } as const;
 
 async function waitForMatchLoad(page: import('@playwright/test').Page) {
@@ -100,6 +101,47 @@ async function seedBothPlayersAt20(
     { segment: 'Miss', scored: 0, dart_index: 3 },
   ]);
   await supabase.from('turns').update({ total_scored: 1, busted: false }).eq('id', turn4.id);
+}
+
+/**
+ * Seeds a 3-player game so all players have 20 remaining.
+ * 201 single_out:
+ * - Turn 1 (P1): T20+T20+T20 = 180 -> score 21
+ * - Turn 2 (P2): T20+T20+T20 = 180 -> score 21
+ * - Turn 3 (P3): T20+T20+T20 = 180 -> score 21
+ * - Turn 4 (P1): S1+Miss+Miss = 1 -> score 20
+ * - Turn 5 (P2): S1+Miss+Miss = 1 -> score 20
+ * - Turn 6 (P3): S1+Miss+Miss = 1 -> score 20
+ * Player One is next (turn 7).
+ */
+async function seedThreePlayersAt20(
+  supabase: import('@supabase/supabase-js').SupabaseClient,
+  matchId: string,
+  legId: string
+) {
+  const playerIds = [TEST_PLAYERS.ONE, TEST_PLAYERS.TWO, TEST_PLAYERS.THREE];
+
+  // Round 1: all players score 180 (T20+T20+T20)
+  for (let i = 0; i < 3; i++) {
+    const turn = await createTurn(supabase, legId, playerIds[i], i + 1);
+    await addThrowsToTurn(supabase, turn.id, matchId, [
+      { segment: 'T20', scored: 60, dart_index: 1 },
+      { segment: 'T20', scored: 60, dart_index: 2 },
+      { segment: 'T20', scored: 60, dart_index: 3 },
+    ]);
+    await supabase.from('turns').update({ total_scored: 180, busted: false }).eq('id', turn.id);
+  }
+
+  // Round 2: all players score 1 (S1+Miss+Miss)
+  for (let i = 0; i < 3; i++) {
+    const turn = await createTurn(supabase, legId, playerIds[i], i + 4);
+    await addThrowsToTurn(supabase, turn.id, matchId, [
+      { segment: 'S1', scored: 1, dart_index: 1 },
+      { segment: 'Miss', scored: 0, dart_index: 2 },
+      { segment: 'Miss', scored: 0, dart_index: 3 },
+    ]);
+    await supabase.from('turns').update({ total_scored: 1, busted: false }).eq('id', turn.id);
+  }
 }
 
 test.describe('Fair Ending', () => {
@@ -393,6 +435,173 @@ test.describe('Fair Ending', () => {
     await throwDart(page, '1');
 
     // NOW the round is complete (P2 finished their turn without checking out) → P1 wins
+    await expectWinner(page, PLAYER_NAMES.ONE);
+  });
+
+  test('3-player: P1 checks out, P2 and P3 complete round → P1 wins', async ({
+    page,
+    supabase,
+    createMatch,
+  }) => {
+    const { matchId, legId } = await createMatch({
+      startScore: 201,
+      finish: 'single_out',
+      fairEnding: true,
+      playerIds: [TEST_PLAYERS.ONE, TEST_PLAYERS.TWO, TEST_PLAYERS.THREE],
+    });
+    await seedThreePlayersAt20(supabase, matchId, legId);
+
+    await page.goto(`/match/${matchId}`);
+    await waitForMatchLoad(page);
+
+    // Player One is up with 20 remaining
+    await expectCurrentPlayer(page, PLAYER_NAMES.ONE);
+    await expectMatchScore(page, PLAYER_NAMES.ONE, 20);
+
+    // Player One checks out: S20 (20 -> 0)
+    await throwDart(page, '20');
+
+    // Fair ending: completing round
+    await expectBanner(page, 'Completing round');
+    await expectCheckedOutBadge(page, PLAYER_NAMES.ONE);
+
+    // Player Two throws without checking out
+    await expectCurrentPlayer(page, PLAYER_NAMES.TWO);
+    await throwDart(page, '1');
+    await throwDart(page, '1');
+    await throwDart(page, '1');
+
+    // Player Three throws without checking out
+    await expectCurrentPlayer(page, PLAYER_NAMES.THREE);
+    await throwDart(page, '1');
+    await throwDart(page, '1');
+    await throwDart(page, '1');
+
+    // Player One wins
+    await expectWinner(page, PLAYER_NAMES.ONE);
+  });
+
+  test('3-player: P1 and P3 check out → tiebreak, P3 wins', async ({
+    page,
+    supabase,
+    createMatch,
+  }) => {
+    const { matchId, legId } = await createMatch({
+      startScore: 201,
+      finish: 'single_out',
+      fairEnding: true,
+      playerIds: [TEST_PLAYERS.ONE, TEST_PLAYERS.TWO, TEST_PLAYERS.THREE],
+    });
+    await seedThreePlayersAt20(supabase, matchId, legId);
+
+    await page.goto(`/match/${matchId}`);
+    await waitForMatchLoad(page);
+
+    // Player One checks out: S20
+    await expectCurrentPlayer(page, PLAYER_NAMES.ONE);
+    await throwDart(page, '20');
+
+    // Completing round
+    await expectBanner(page, 'Completing round');
+
+    // Player Two does NOT check out
+    await expectCurrentPlayer(page, PLAYER_NAMES.TWO);
+    await throwDart(page, '1');
+    await throwDart(page, '1');
+    await throwDart(page, '1');
+
+    // Player Three checks out: S20
+    await expectCurrentPlayer(page, PLAYER_NAMES.THREE);
+    await throwDart(page, '20');
+
+    // Tiebreak between P1 and P3
+    await expectBanner(page, 'Tiebreak');
+
+    // P1 throws low (3 x S1 = 3)
+    await expectCurrentPlayer(page, PLAYER_NAMES.ONE);
+    await throwDart(page, '1');
+    await throwDart(page, '1');
+    await throwDart(page, '1');
+
+    // P3 throws high (3 x S20 = 60)
+    await expectCurrentPlayer(page, PLAYER_NAMES.THREE);
+    await throwDart(page, '20');
+    await throwDart(page, '20');
+    await throwDart(page, '20');
+
+    // P3 wins (60 > 3)
+    await expectWinner(page, PLAYER_NAMES.THREE);
+  });
+
+  test('All misses during completing round still resolves winner', async ({
+    page,
+    supabase,
+    createMatch,
+  }) => {
+    const { matchId, legId } = await createMatch({
+      startScore: 201,
+      finish: 'single_out',
+      fairEnding: true,
+    });
+    await seedBothPlayersAt20(supabase, matchId, legId);
+
+    await page.goto(`/match/${matchId}`);
+    await waitForMatchLoad(page);
+
+    // Player One checks out: S20
+    await expectCurrentPlayer(page, PLAYER_NAMES.ONE);
+    await throwDart(page, '20');
+
+    // Completing round
+    await expectBanner(page, 'Completing round');
+    await expectCurrentPlayer(page, PLAYER_NAMES.TWO);
+
+    // Player Two throws 3 misses (0 button = miss)
+    await throwDart(page, '0 (Miss)');
+    await throwDart(page, '0 (Miss)');
+    await throwDart(page, '0 (Miss)');
+
+    // P1 wins (3 misses = complete turn, P2 didn't check out)
+    await expectWinner(page, PLAYER_NAMES.ONE);
+  });
+
+  test('Completing round player can throw all 3 darts (selector passes throw_count)', async ({
+    page,
+    supabase,
+    createMatch,
+  }) => {
+    // Regression: validates the selector passes throw_count correctly.
+    // Without the fix, the game gets stuck after the completing-round player's first dart.
+    const { matchId, legId } = await createMatch({
+      startScore: 201,
+      finish: 'single_out',
+      fairEnding: true,
+    });
+    await seedBothPlayersAt20(supabase, matchId, legId);
+
+    await page.goto(`/match/${matchId}`);
+    await waitForMatchLoad(page);
+
+    // Player One checks out: S20
+    await expectCurrentPlayer(page, PLAYER_NAMES.ONE);
+    await throwDart(page, '20');
+
+    // Completing round: Player Two is up
+    await expectBanner(page, 'Completing round');
+    await expectCurrentPlayer(page, PLAYER_NAMES.TWO);
+
+    // Player Two throws first dart (S5 -> 15 remaining)
+    await throwDart(page, '5');
+
+    // Player Two should still be current player (can throw darts 2 and 3)
+    await expectCurrentPlayer(page, PLAYER_NAMES.TWO);
+    await expectMatchScore(page, PLAYER_NAMES.TWO, 15, { timeout: 5000 });
+
+    // Player Two throws darts 2 and 3
+    await throwDart(page, '1');
+    await throwDart(page, '1');
+
+    // Round complete, P1 wins
     await expectWinner(page, PLAYER_NAMES.ONE);
   });
 

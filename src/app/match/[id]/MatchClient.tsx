@@ -318,10 +318,11 @@ export default function MatchClient({ matchId }: { matchId: string }) {
             fairEndingState,
             orderPlayers,
             turns,
+            turnThrowCounts,
             fallback: standardCurrentPlayer,
           })
         : standardCurrentPlayer,
-    [match?.fair_ending, fairEndingState, orderPlayers, turns, standardCurrentPlayer]
+    [match?.fair_ending, fairEndingState, orderPlayers, turns, turnThrowCounts, standardCurrentPlayer]
   );
 
   // For spectator mode, determine current player based on incomplete turns
@@ -343,10 +344,11 @@ export default function MatchClient({ matchId }: { matchId: string }) {
             fairEndingState,
             orderPlayers,
             turns,
+            turnThrowCounts,
             fallback: standardSpectatorCurrentPlayer,
           })
         : standardSpectatorCurrentPlayer,
-    [match?.fair_ending, fairEndingState, orderPlayers, turns, standardSpectatorCurrentPlayer]
+    [match?.fair_ending, fairEndingState, orderPlayers, turns, turnThrowCounts, standardSpectatorCurrentPlayer]
   );
 
   const currentLegId = currentLeg?.id;

@@ -133,7 +133,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   const debugRealtime =
     process.env.NODE_ENV !== 'production' &&
     (searchParams.get('debugRealtime') === '1' || searchParams.get('debug') === 'realtime');
-  const debugPerf = process.env.NODE_ENV !== 'production';
+  const debugPerf = process.env.NODE_ENV !== 'production' && process.env.NEXT_PUBLIC_DISABLE_DEBUG !== '1';
 
   useEffect(() => {
     if (isSpectatorMode) {

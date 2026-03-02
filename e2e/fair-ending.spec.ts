@@ -605,6 +605,57 @@ test.describe('Fair Ending', () => {
     await expectWinner(page, PLAYER_NAMES.ONE);
   });
 
+  test('Tiebreak does not resolve prematurely after first dart', async ({
+    page,
+    supabase,
+    createMatch,
+  }) => {
+    const { matchId, legId } = await createMatch({
+      startScore: 201,
+      finish: 'single_out',
+      fairEnding: true,
+    });
+    await seedBothPlayersAt20(supabase, matchId, legId);
+
+    await page.goto(`/match/${matchId}`);
+    await waitForMatchLoad(page);
+
+    // Both players check out to enter tiebreak
+    await expectCurrentPlayer(page, PLAYER_NAMES.ONE);
+    await throwDart(page, '20'); // P1 checks out
+
+    await expectBanner(page, 'Completing round');
+    await expectCurrentPlayer(page, PLAYER_NAMES.TWO);
+    await throwDart(page, '20'); // P2 checks out
+
+    // Tiebreak round 1
+    await expectBanner(page, 'Tiebreak');
+    await expectCurrentPlayer(page, PLAYER_NAMES.ONE);
+
+    // Player One throws 1 dart — should still be Player One's turn
+    await throwDart(page, '20');
+    await expectCurrentPlayer(page, PLAYER_NAMES.ONE);
+
+    // Player One throws remaining 2 darts to complete turn
+    await throwDart(page, '20');
+    await throwDart(page, '20');
+
+    // Now Player Two should be up
+    await expectCurrentPlayer(page, PLAYER_NAMES.TWO);
+
+    // Player Two throws 1 dart — should still be in tiebreak, Player Two still current
+    await throwDart(page, '1');
+    await expectCurrentPlayer(page, PLAYER_NAMES.TWO);
+    await expectBanner(page, 'Tiebreak');
+
+    // Player Two completes their turn
+    await throwDart(page, '1');
+    await throwDart(page, '1');
+
+    // Player One wins (60 > 3)
+    await expectWinner(page, PLAYER_NAMES.ONE);
+  });
+
   test('Elo is only applied once after fair ending win', async ({
     page,
     supabase,

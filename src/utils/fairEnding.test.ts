@@ -532,6 +532,68 @@ describe('Fair Ending Logic', () => {
     });
   });
 
+  describe('Tiebreak incomplete turn handling', () => {
+    // Base game where both A and B check out from 101
+    function twoPlayerTieBase(): TurnInput[] {
+      return [
+        makeTurn('a', 60),
+        makeTurn('b', 45),
+        makeTurn('a', 41), // A: 0
+        makeTurn('b', 56), // B: 0
+      ];
+    }
+
+    it('Incomplete tiebreak turn keeps same player', () => {
+      // Player A has thrown 1 dart in tiebreak round 1 (turn exists but incomplete)
+      const turns = [
+        ...twoPlayerTieBase(),
+        { player_id: 'a', total_scored: 0, busted: false, tiebreak_round: 1, throw_count: 1 },
+      ];
+      const state = computeFairEndingState(turns, [playerA, playerB], 101, true);
+      expect(state.phase).toBe('tiebreak');
+      expect(state.tiebreakRound).toBe(1);
+
+      const next = getNextFairEndingPlayer(state, [playerA, playerB], turns);
+      expect(next).toBe('a'); // Still A's turn — not B!
+    });
+
+    it('Does not resolve when second player has incomplete turn', () => {
+      // Player A completed tiebreak (total_scored=26, 3 darts), Player B has 1 dart thrown
+      const turns = [
+        ...twoPlayerTieBase(),
+        makeTurn('a', 26, { tiebreakRound: 1, throwCount: 3 }),
+        { player_id: 'b', total_scored: 0, busted: false, tiebreak_round: 1, throw_count: 1 },
+      ];
+      const state = computeFairEndingState(turns, [playerA, playerB], 101, true);
+      // Should still be tiebreak — B hasn't finished their turn
+      expect(state.phase).toBe('tiebreak');
+      expect(state.winnerId).toBeNull();
+    });
+
+    it('Resolves only after both complete', () => {
+      const turns = [
+        ...twoPlayerTieBase(),
+        makeTurn('a', 26, { tiebreakRound: 1, throwCount: 3 }),
+        makeTurn('b', 60, { tiebreakRound: 1, throwCount: 3 }),
+      ];
+      const state = computeFairEndingState(turns, [playerA, playerB], 101, true);
+      expect(state.phase).toBe('resolved');
+      expect(state.winnerId).toBe('b'); // 60 > 26
+    });
+
+    it('Busted turn with throw_count < 3 is complete', () => {
+      // A busted tiebreak turn should count as done even with < 3 darts
+      const turns = [
+        ...twoPlayerTieBase(),
+        { player_id: 'a', total_scored: 0, busted: true, tiebreak_round: 1, throw_count: 2 },
+        makeTurn('b', 60, { tiebreakRound: 1, throwCount: 3 }),
+      ];
+      const state = computeFairEndingState(turns, [playerA, playerB], 101, true);
+      expect(state.phase).toBe('resolved');
+      expect(state.winnerId).toBe('b'); // A busted (0), B scored 60
+    });
+  });
+
   describe('Tiebreak - next player order', () => {
     it('Respects play order during tiebreak', () => {
       const baseTurns = [

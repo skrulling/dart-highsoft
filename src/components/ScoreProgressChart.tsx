@@ -129,7 +129,7 @@ export function ScoreProgressChart({ players, turns, startScore, currentLegId }:
       },
       legend: {
         align: 'center',
-        verticalAlign: 'bottom',
+        verticalAlign: 'top',
         layout: 'horizontal',
         itemStyle: {
           fontWeight: '500',

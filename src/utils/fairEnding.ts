@@ -172,9 +172,9 @@ export function computeFairEndingState(
       }
     }
 
-    // Check if all tiebreak players have thrown this round
+    // Check if all tiebreak players have completed this round
     const allThrown = currentTiebreakPlayers.every(
-      (pid) => roundTurns.some((t) => t.player_id === pid)
+      (pid) => roundTurns.some((t) => t.player_id === pid && ((t.throw_count ?? 3) >= 3 || t.busted))
     );
 
     if (!allThrown) {
@@ -248,7 +248,11 @@ export function getNextFairEndingPlayer(
     const currentRoundTurns = turns.filter(
       (t) => t.tiebreak_round === state.tiebreakRound
     );
-    const thrownIds = new Set(currentRoundTurns.map((t) => t.player_id));
+    const thrownIds = new Set(
+      currentRoundTurns
+        .filter((t) => (t.throw_count ?? 3) >= 3 || t.busted)
+        .map((t) => t.player_id)
+    );
 
     // Use play order among tiebreak players
     for (const p of orderPlayers) {

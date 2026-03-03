@@ -192,11 +192,13 @@ export function useMatchActions(args: UseMatchActionsArgs): UseMatchActionsResul
       const ongoing = ongoingTurnRef.current;
       if (!ongoing) return;
       const total = ongoing.darts.reduce((s, d) => s + d.scored, 0);
+      let legCompleted = false;
       try {
-        await apiRequest(`/api/matches/${matchId}/turns/${ongoing.turnId}`, {
-          method: 'PATCH',
-          body: { totalScored: total, busted },
-        });
+        const result = await apiRequest<{ ok: boolean; legCompleted?: boolean; matchCompleted?: boolean }>(
+          `/api/matches/${matchId}/turns/${ongoing.turnId}`,
+          { method: 'PATCH', body: { totalScored: total, busted } },
+        );
+        legCompleted = !!result.legCompleted;
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to update turn';
         alert(message);
@@ -205,6 +207,11 @@ export function useMatchActions(args: UseMatchActionsArgs): UseMatchActionsResul
       }
       ongoingTurnRef.current = null;
       setLocalTurn({ playerId: null, darts: [] });
+      if (legCompleted) {
+        // Server already resolved the fair ending — just refresh to pick up new state
+        await loadAll();
+        return;
+      }
       if (!opts?.skipReload) {
         if (currentLeg?.id) {
           await loadTurnsForLeg(currentLeg.id);
@@ -385,11 +392,6 @@ export function useMatchActions(args: UseMatchActionsArgs): UseMatchActionsResul
     [currentLeg, match, matchId, players, loadAll, commentaryEnabled, triggerMatchRecap]
   );
 
-  const recomputeFairEndingAndResolve = useCallback(async () => {
-    if (!match?.fair_ending || !currentLeg) return;
-    await loadAll();
-  }, [match?.fair_ending, currentLeg, loadAll]);
-
   const processBoardClick = useCallback(
     async (_x: number, _y: number, result: SegmentResult) => {
       if (matchWinnerId) return; // match over
@@ -488,7 +490,6 @@ export function useMatchActions(args: UseMatchActionsArgs): UseMatchActionsResul
 
       if (outcome.busted) {
         await finishTurn(true);
-        if (match?.fair_ending) await recomputeFairEndingAndResolve();
         return;
       }
 
@@ -507,7 +508,6 @@ export function useMatchActions(args: UseMatchActionsArgs): UseMatchActionsResul
       }
       if (newDartIndex >= 3) {
         await finishTurn(false);
-        if (match?.fair_ending) await recomputeFairEndingAndResolve();
         return;
       }
     },
@@ -526,7 +526,6 @@ export function useMatchActions(args: UseMatchActionsArgs): UseMatchActionsResul
       matchId,
       match?.fair_ending,
       fairEndingState,
-      recomputeFairEndingAndResolve,
       loadAll,
     ]
   );

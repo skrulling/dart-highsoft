@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -74,6 +75,7 @@ type Props = {
   eloChanges: MatchEloChange[];
   eloChangesLoading: boolean;
   fairEndingState?: FairEndingState;
+  tournamentId?: string | null;
 };
 
 export function MatchScoringView({
@@ -125,6 +127,7 @@ export function MatchScoringView({
   eloChanges,
   eloChangesLoading,
   fairEndingState,
+  tournamentId,
 }: Props) {
   const currentPlayerLastTurn = useMemo(() => {
     if (!currentPlayer) return null;
@@ -360,7 +363,12 @@ export function MatchScoringView({
                   </DialogContent>
                 </Dialog>
               )}
-              {matchWinnerId && (
+              {matchWinnerId && tournamentId && (
+                <Button asChild size="sm" className="text-xs whitespace-nowrap">
+                  <Link href={`/tournament/${tournamentId}`}>Back to Bracket</Link>
+                </Button>
+              )}
+              {matchWinnerId && !tournamentId && (
                 <Button onClick={onStartRematch} disabled={rematchLoading} size="sm" className="text-xs whitespace-nowrap">
                   {rematchLoading ? 'Starting…' : 'Rematch'}
                 </Button>
@@ -393,9 +401,15 @@ export function MatchScoringView({
                       <div className="text-sm text-green-700/80 dark:text-green-200/80">wins the match!</div>
                     </div>
                   </div>
-                  <Button onClick={onStartRematch} disabled={rematchLoading}>
-                    {rematchLoading ? 'Starting…' : 'Rematch'}
-                  </Button>
+                  {tournamentId ? (
+                    <Button asChild>
+                      <Link href={`/tournament/${tournamentId}`}>Back to Bracket</Link>
+                    </Button>
+                  ) : (
+                    <Button onClick={onStartRematch} disabled={rematchLoading}>
+                      {rematchLoading ? 'Starting…' : 'Rematch'}
+                    </Button>
+                  )}
                 </div>
                 <EloChangesDisplay
                   eloChanges={eloChanges}

@@ -3,6 +3,7 @@ import { getSupabaseServerClient } from '@/lib/supabaseServer';
 import { isMatchActive, loadMatch } from '@/lib/server/matchGuards';
 import { completeLeg } from '@/lib/server/completeLeg';
 import { computeFairEndingState } from '@/utils/fairEnding';
+import { advanceTournament } from '@/lib/tournament/advance';
 
 async function ensureTurnInMatch(
   supabase: ReturnType<typeof getSupabaseServerClient>,
@@ -82,6 +83,31 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ma
         if (state.phase === 'resolved' && state.winnerId) {
           try {
             const result = await completeLeg(supabase, matchId, legId, state.winnerId, match);
+
+            // ── Tournament advancement ─────────────────────────────────
+            if (result.matchCompleted && match.tournament_match_id) {
+              try {
+                const { data: tm, error: tmErr } = await supabase
+                  .from('tournament_matches')
+                  .select('player1_id, player2_id')
+                  .eq('id', match.tournament_match_id)
+                  .single();
+
+                if (tmErr) {
+                  console.error('Failed to load tournament match for advancement:', tmErr);
+                } else if (tm) {
+                  const loserId = tm.player1_id === state.winnerId
+                    ? tm.player2_id
+                    : tm.player1_id;
+                  if (loserId) {
+                    await advanceTournament(supabase, match.tournament_match_id, state.winnerId, loserId);
+                  }
+                }
+              } catch (advErr) {
+                console.error('Tournament advancement error (fair ending):', advErr);
+              }
+            }
+
             return NextResponse.json({ ok: true, legCompleted: true, matchCompleted: result.matchCompleted });
           } catch (err) {
             console.error('Fair ending completeLeg error:', err);

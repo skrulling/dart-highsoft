@@ -398,4 +398,61 @@ test.describe('Tournament', () => {
     await page.goto(`/tournament/${tournamentId}`);
     await expect(page.getByText('Winners Bracket')).toBeVisible({ timeout: 15000 });
   });
+
+  test('API advancement leaves slot unlinked when match setup fails', async ({
+    supabase,
+    createTournament,
+  }) => {
+    const { tournamentId } = await createTournament();
+
+    let state = await getTournamentState(supabase, tournamentId);
+    const wbR1 = state
+      .filter((m) => m.bracket === 'winners' && m.round === 1 && !m.is_bye)
+      .sort((a, b) => a.position - b.position);
+    expect(wbR1).toHaveLength(2);
+
+    // Complete WB R1 match 0 so WB R2 exists with one occupied slot.
+    await completeTournamentMatchViaApi(supabase, wbR1[0].id, wbR1[0].player1_id!);
+
+    state = await getTournamentState(supabase, tournamentId);
+    const wbR2 = state.find((m) => m.bracket === 'winners' && m.round === 2);
+    expect(wbR2).toBeTruthy();
+
+    // Force a duplicate-player destination so createMatchForSlot attempts
+    // to insert duplicate match_players rows (same player twice), which fails.
+    const forcedWinner = wbR1[1].player1_id!;
+    const { error: tamperErr } = await supabase
+      .from('tournament_matches')
+      .update({
+        player1_id: forcedWinner,
+        player2_id: null,
+        winner_id: null,
+        loser_id: null,
+        match_id: null,
+        is_bye: false,
+      })
+      .eq('id', wbR2!.id);
+    expect(tamperErr).toBeNull();
+
+    // Complete WB R1 match 1 via API; advancement should NOT link WB R2 match_id.
+    await completeTournamentMatchViaApi(supabase, wbR1[1].id, forcedWinner);
+
+    const { data: destAfter, error: destErr } = await supabase
+      .from('tournament_matches')
+      .select('id, player1_id, player2_id, match_id')
+      .eq('id', wbR2!.id)
+      .single();
+    expect(destErr).toBeNull();
+    expect(destAfter?.player1_id).toBe(forcedWinner);
+    expect(destAfter?.player2_id).toBe(forcedWinner);
+    expect(destAfter?.match_id).toBeNull();
+
+    // No orphan/linked match should remain for the destination slot.
+    const { data: linkedMatches, error: linkedErr } = await supabase
+      .from('matches')
+      .select('id')
+      .eq('tournament_match_id', wbR2!.id);
+    expect(linkedErr).toBeNull();
+    expect(linkedMatches ?? []).toHaveLength(0);
+  });
 });

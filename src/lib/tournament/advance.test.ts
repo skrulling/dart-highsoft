@@ -22,6 +22,7 @@ function createMockSupabase(data: {
   tournamentMatches: Record<string, TournamentMatchRecord>;
   tournament?: TournamentRow;
   tournamentPlayers?: TournamentPlayerRow[];
+  insertErrors?: Partial<Record<string, string>>;
 }) {
   const updates: { table: string; filters: JsonMap; data: unknown }[] = [];
   const inserts: { table: string; data: unknown }[] = [];
@@ -201,15 +202,29 @@ function createMockSupabase(data: {
       update: (updateData: unknown) => makeBuilder(table, 'update', updateData),
       insert: (insertData: unknown) => {
         inserts.push({ table, data: insertData });
+        const insertError = data.insertErrors?.[table];
         const insertRow = Array.isArray(insertData) ? insertData[0] : insertData;
+
+        if (table !== 'matches' && insertError) {
+          return { error: { message: insertError } };
+        }
+
         return {
           select: () => ({
-            single: async () => ({
-              data: { id: 'new-match-id', ...((insertRow as object | null) ?? {}) },
-              error: null,
-            }),
+            single: async () => {
+              if (insertError) {
+                return {
+                  data: null,
+                  error: { message: insertError },
+                };
+              }
+              return {
+                data: { id: 'new-match-id', ...((insertRow as object | null) ?? {}) },
+                error: null,
+              };
+            },
           }),
-          error: null,
+          error: insertError ? { message: insertError } : null,
         };
       },
       delete: () => {
@@ -667,6 +682,175 @@ describe('advanceTournament', () => {
 
     const matchInsert = supabase._inserts.find((i) => i.table === 'matches');
     expect(matchInsert).toBeDefined();
+  });
+
+  it('does not link destination slot when match_players insert fails', async () => {
+    const tmId = 'tm-1';
+    const destId = 'dest-1';
+    const supabase = createMockSupabase({
+      tournamentMatches: {
+        [tmId]: {
+          id: tmId,
+          tournament_id: 'tour-1',
+          bracket: 'winners',
+          round: 1,
+          position: 0,
+          player1_id: 'p1',
+          player2_id: 'p2',
+          winner_id: null,
+          loser_id: null,
+          match_id: 'match-1',
+          is_bye: false,
+          next_winner_tm_id: destId,
+          next_loser_tm_id: 'lb-dest',
+        },
+        [destId]: {
+          id: destId,
+          tournament_id: 'tour-1',
+          bracket: 'winners',
+          round: 2,
+          position: 0,
+          player1_id: 'p3',
+          player2_id: null,
+          winner_id: null,
+          loser_id: null,
+          match_id: null,
+          is_bye: false,
+          next_winner_tm_id: null,
+          next_loser_tm_id: null,
+        },
+        'lb-dest': {
+          id: 'lb-dest',
+          tournament_id: 'tour-1',
+          bracket: 'losers',
+          round: 1,
+          position: 0,
+          player1_id: null,
+          player2_id: null,
+          winner_id: null,
+          loser_id: null,
+          match_id: null,
+          is_bye: false,
+          next_winner_tm_id: null,
+          next_loser_tm_id: null,
+        },
+      },
+      tournament: {
+        id: 'tour-1',
+        status: 'in_progress',
+        start_score: '501',
+        finish: 'double_out',
+        legs_to_win: 1,
+        fair_ending: false,
+      },
+      insertErrors: {
+        match_players: 'insert failed',
+      },
+    });
+
+    await advanceTournament(supabase as unknown as SupabaseClient, tmId, 'p1', 'p2');
+
+    const linkUpdate = supabase._updates.find(
+      (u) =>
+        u.table === 'tournament_matches' &&
+        u.filters?.id === destId &&
+        u.data &&
+        typeof u.data === 'object' &&
+        'match_id' in (u.data as object)
+    );
+    expect(linkUpdate).toBeUndefined();
+
+    const cleanupDelete = supabase._deletes.find(
+      (d) => d.table === 'matches' && d.filters?.id === 'new-match-id'
+    );
+    expect(cleanupDelete).toBeDefined();
+  });
+
+  it('does not link destination slot when first leg insert fails', async () => {
+    const tmId = 'tm-1';
+    const destId = 'dest-1';
+    const supabase = createMockSupabase({
+      tournamentMatches: {
+        [tmId]: {
+          id: tmId,
+          tournament_id: 'tour-1',
+          bracket: 'winners',
+          round: 1,
+          position: 0,
+          player1_id: 'p1',
+          player2_id: 'p2',
+          winner_id: null,
+          loser_id: null,
+          match_id: 'match-1',
+          is_bye: false,
+          next_winner_tm_id: destId,
+          next_loser_tm_id: 'lb-dest',
+        },
+        [destId]: {
+          id: destId,
+          tournament_id: 'tour-1',
+          bracket: 'winners',
+          round: 2,
+          position: 0,
+          player1_id: 'p3',
+          player2_id: null,
+          winner_id: null,
+          loser_id: null,
+          match_id: null,
+          is_bye: false,
+          next_winner_tm_id: null,
+          next_loser_tm_id: null,
+        },
+        'lb-dest': {
+          id: 'lb-dest',
+          tournament_id: 'tour-1',
+          bracket: 'losers',
+          round: 1,
+          position: 0,
+          player1_id: null,
+          player2_id: null,
+          winner_id: null,
+          loser_id: null,
+          match_id: null,
+          is_bye: false,
+          next_winner_tm_id: null,
+          next_loser_tm_id: null,
+        },
+      },
+      tournament: {
+        id: 'tour-1',
+        status: 'in_progress',
+        start_score: '501',
+        finish: 'double_out',
+        legs_to_win: 1,
+        fair_ending: false,
+      },
+      insertErrors: {
+        legs: 'insert failed',
+      },
+    });
+
+    await advanceTournament(supabase as unknown as SupabaseClient, tmId, 'p1', 'p2');
+
+    const linkUpdate = supabase._updates.find(
+      (u) =>
+        u.table === 'tournament_matches' &&
+        u.filters?.id === destId &&
+        u.data &&
+        typeof u.data === 'object' &&
+        'match_id' in (u.data as object)
+    );
+    expect(linkUpdate).toBeUndefined();
+
+    const playersCleanup = supabase._deletes.find(
+      (d) => d.table === 'match_players' && d.filters?.match_id === 'new-match-id'
+    );
+    expect(playersCleanup).toBeDefined();
+
+    const matchCleanup = supabase._deletes.find(
+      (d) => d.table === 'matches' && d.filters?.id === 'new-match-id'
+    );
+    expect(matchCleanup).toBeDefined();
   });
 
   it('auto-advances when the only remaining feeder is an empty bye', async () => {

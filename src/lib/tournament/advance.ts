@@ -247,20 +247,29 @@ async function createMatchForSlot(
     : [player2Id, player1Id];
 
   // Create match_players
-  await supabase.from('match_players').insert(
+  const { error: playersErr } = await supabase.from('match_players').insert(
     players.map((pid, idx) => ({
       match_id: match.id,
       player_id: pid,
       play_order: idx,
     }))
   );
+  if (playersErr) {
+    await supabase.from('matches').delete().eq('id', match.id);
+    return;
+  }
 
   // Create first leg
-  await supabase.from('legs').insert({
+  const { error: legErr } = await supabase.from('legs').insert({
     match_id: match.id,
     leg_number: 1,
     starting_player_id: players[0],
   });
+  if (legErr) {
+    await supabase.from('match_players').delete().eq('match_id', match.id);
+    await supabase.from('matches').delete().eq('id', match.id);
+    return;
+  }
 
   // Link match to tournament_match (atomic: only if no match linked yet)
   const { data: linked } = await supabase

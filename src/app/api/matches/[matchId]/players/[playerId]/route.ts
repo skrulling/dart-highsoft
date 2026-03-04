@@ -9,6 +9,9 @@ export async function DELETE(_: Request, { params }: { params: Promise<{ matchId
     const match = await loadMatch(supabase, matchId);
     if (!match) return NextResponse.json({ error: 'Match not found' }, { status: 404 });
     if (!isMatchActive(match)) return NextResponse.json({ error: 'Match is not active' }, { status: 409 });
+    if (match.tournament_match_id) {
+      return NextResponse.json({ error: 'Cannot edit players in a tournament match' }, { status: 403 });
+    }
 
     const { data: players } = await supabase.from('match_players').select('player_id').eq('match_id', matchId);
     if ((players ?? []).length <= 2) {

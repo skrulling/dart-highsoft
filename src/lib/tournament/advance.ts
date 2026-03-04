@@ -124,18 +124,48 @@ async function autoAdvanceIfBye(
   tm: TournamentMatchRecord,
   tournamentId: string
 ): Promise<void> {
-  // Count unresolved non-bye matches that will still send a player here
-  const { count, error: countErr } = await supabase
+  const { data: currentTm, error: tmErr } = await supabase
     .from('tournament_matches')
-    .select('id', { count: 'exact', head: true })
-    .or(`next_winner_tm_id.eq.${tmId},next_loser_tm_id.eq.${tmId}`)
-    .is('winner_id', null)
-    .eq('is_bye', false);
+    .select('*')
+    .eq('id', tmId)
+    .single();
 
-  if (countErr || count === null) return; // Fail safe — don't auto-advance on DB errors
-  if (count > 0) return; // More players will arrive — wait
+  if (tmErr || !currentTm) return;
+  if (
+    currentTm.winner_id ||
+    currentTm.match_id ||
+    (currentTm.player1_id && currentTm.player2_id)
+  ) {
+    return;
+  }
 
-  const soloPlayerId = tm.player1_id || tm.player2_id;
+  // Find feeders that can still place a player in this slot.
+  // This includes already-resolved feeders whose player has not been placed yet.
+  const { data: feeders, error: feederErr } = await supabase
+    .from('tournament_matches')
+    .select('id, next_winner_tm_id, next_loser_tm_id, winner_id, loser_id, is_bye')
+    .or(`next_winner_tm_id.eq.${tmId},next_loser_tm_id.eq.${tmId}`);
+
+  if (feederErr || !feeders) return;
+
+  const pendingFeeders = feeders.filter((feeder) => {
+    const isWinnerPath = feeder.next_winner_tm_id === tmId;
+    const incomingPlayerId = isWinnerPath ? feeder.winner_id : feeder.loser_id;
+
+    if (incomingPlayerId) {
+      const alreadyPlaced =
+        currentTm.player1_id === incomingPlayerId || currentTm.player2_id === incomingPlayerId;
+      return !alreadyPlaced;
+    }
+
+    // Bye matches never produce a loser, so next_loser feeders from byes are not pending.
+    if (!isWinnerPath && feeder.is_bye) return false;
+    return true;
+  });
+
+  if (pendingFeeders.length > 0) return;
+
+  const soloPlayerId = currentTm.player1_id || currentTm.player2_id;
   if (!soloPlayerId) return;
 
   // Mark as bye and set winner (atomic)
@@ -353,21 +383,11 @@ async function assignFinalRank(
   tournamentId: string,
   playerId: string
 ): Promise<void> {
-  // Count total players and already-ranked players
-  const { data: allPlayers } = await supabase
-    .from('tournament_players')
-    .select('player_id, final_rank')
-    .eq('tournament_id', tournamentId);
-
-  if (!allPlayers) return;
-
-  const totalPlayers = allPlayers.length;
-  const alreadyRanked = allPlayers.filter((p) => p.final_rank !== null).length;
-  const rank = totalPlayers - alreadyRanked;
-
-  await supabase
-    .from('tournament_players')
-    .update({ final_rank: rank })
-    .eq('tournament_id', tournamentId)
-    .eq('player_id', playerId);
+  const { error } = await supabase.rpc('assign_elimination_rank', {
+    p_tournament_id: tournamentId,
+    p_player_id: playerId,
+  });
+  if (error) {
+    console.error('Failed to assign elimination rank:', error);
+  }
 }

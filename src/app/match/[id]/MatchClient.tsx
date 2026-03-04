@@ -157,11 +157,16 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     }
     (async () => {
       const supabase = await getSupabaseClient();
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('tournament_matches')
         .select('tournament_id')
         .eq('id', match.tournament_match_id!)
         .single();
+      if (error) {
+        console.error('Failed to resolve tournament id for match:', error);
+        setTournamentId(null);
+        return;
+      }
       setTournamentId(data?.tournament_id ?? null);
     })();
   }, [match?.tournament_match_id]);
@@ -292,8 +297,8 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         players,
         turns,
         matchWinnerId,
-      }),
-    [currentLeg, players, turns, matchWinnerId]
+      }) && !match?.tournament_match_id,
+    [currentLeg, players, turns, matchWinnerId, match?.tournament_match_id]
   );
 
   // Check if game hasn't started yet (no turns/throws registered)
@@ -591,6 +596,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         eloChanges={eloChanges}
         eloChangesLoading={eloChangesLoading}
         fairEndingState={fairEndingState}
+        isTournamentMatch={Boolean(match?.tournament_match_id)}
         tournamentId={tournamentId}
       />
       <RealtimeDebugPanel

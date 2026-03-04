@@ -96,6 +96,14 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ma
                 if (tmErr) {
                   console.error('Failed to load tournament match for advancement:', tmErr);
                 } else if (tm) {
+                  const isParticipant = tm.player1_id === state.winnerId || tm.player2_id === state.winnerId;
+                  if (!isParticipant) {
+                    console.error(
+                      'Skipping tournament advancement: winner is not one of tournament match players',
+                      { tournamentMatchId: match.tournament_match_id, winnerId: state.winnerId }
+                    );
+                    return NextResponse.json({ ok: true, legCompleted: true, matchCompleted: result.matchCompleted });
+                  }
                   const loserId = tm.player1_id === state.winnerId
                     ? tm.player2_id
                     : tm.player1_id;

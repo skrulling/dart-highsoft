@@ -4,6 +4,7 @@ import type { TournamentRecord, TournamentMatchRecord, TournamentPlayerRecord } 
 import type { SupabaseClient, RealtimeChannel } from '@supabase/supabase-js';
 
 type PlayerInfo = { id: string; display_name: string };
+type TournamentPlayerRow = TournamentPlayerRecord & { players: PlayerInfo };
 
 export function useTournamentData(tournamentId: string) {
   const [loading, setLoading] = useState(true);
@@ -42,12 +43,12 @@ export function useTournamentData(tournamentId: string) {
       setTournament(tourRes.data as TournamentRecord);
       setMatches((matchRes.data ?? []) as TournamentMatchRecord[]);
       setPlayers(
-        (playerRes.data ?? []).map((row: any) => ({
+        ((playerRes.data ?? []) as TournamentPlayerRow[]).map((row) => ({
           tournament_id: row.tournament_id,
           player_id: row.player_id,
           seed: row.seed,
           final_rank: row.final_rank,
-          player: row.players as PlayerInfo,
+          player: row.players,
         }))
       );
     } catch (err) {
@@ -62,7 +63,7 @@ export function useTournamentData(tournamentId: string) {
     void loadAll();
   }, [loadAll]);
 
-  // Real-time subscription for tournament_matches changes
+  // Real-time subscription for tournament state changes
   useEffect(() => {
     let cancelled = false;
 
@@ -80,6 +81,30 @@ export function useTournamentData(tournamentId: string) {
             event: '*',
             schema: 'public',
             table: 'tournament_matches',
+            filter: `tournament_id=eq.${tournamentId}`,
+          },
+          () => {
+            void loadAll();
+          }
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'tournaments',
+            filter: `id=eq.${tournamentId}`,
+          },
+          () => {
+            void loadAll();
+          }
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'tournament_players',
             filter: `tournament_id=eq.${tournamentId}`,
           },
           () => {

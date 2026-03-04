@@ -1,30 +1,50 @@
 import { describe, it, expect } from 'vitest';
 import { advanceTournament } from './advance';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import type { TournamentMatchRecord } from './types';
+
+type JsonMap = Record<string, unknown>;
+type TournamentRow = {
+  id: string;
+  status: string;
+  start_score?: string;
+  finish?: string;
+  legs_to_win?: number;
+  fair_ending?: boolean;
+};
+type TournamentPlayerRow = { player_id: string; seed: number; final_rank: number | null };
 
 /**
  * Build a chainable mock that supports Supabase's fluent query builder.
  * Supports the atomic update pattern: .update(data).eq().is().select().single()
  */
 function createMockSupabase(data: {
-  tournamentMatches: Record<string, any>;
-  tournament?: any;
-  tournamentPlayers?: any[];
+  tournamentMatches: Record<string, TournamentMatchRecord>;
+  tournament?: TournamentRow;
+  tournamentPlayers?: TournamentPlayerRow[];
 }) {
-  const updates: { table: string; filters: Record<string, any>; data: any }[] = [];
-  const inserts: { table: string; data: any }[] = [];
+  const updates: { table: string; filters: JsonMap; data: unknown }[] = [];
+  const inserts: { table: string; data: unknown }[] = [];
 
-  function makeBuilder(table: string, mode: 'select' | 'update' | 'insert', payload?: any) {
-    const filters: Record<string, any> = {};
-    let isFilterMode = false; // tracks if .is() was used (for conditional updates)
+  function makeBuilder(table: string, mode: 'select' | 'update' | 'insert', payload?: unknown) {
+    const filters: JsonMap = {};
 
-    const builder: any = {
-      eq(col: string, val: any) {
+    const builder: {
+      eq: (col: string, val: unknown) => typeof builder;
+      is: (col: string, val: unknown) => typeof builder;
+      order: () => typeof builder;
+      or: (_filter: string) => typeof builder;
+      select: (_cols?: string, _opts?: unknown) => unknown;
+      single: () => Promise<{ data?: unknown; error: unknown }>;
+      then?: (resolve: (value: { count: number; error: null; data: null }) => void) => void;
+      data?: unknown;
+    } = {
+      eq(col: string, val: unknown) {
         filters[col] = val;
         return builder;
       },
-      is(col: string, val: any) {
+      is(col: string, val: unknown) {
         filters[`_is_${col}`] = val;
-        isFilterMode = true;
         return builder;
       },
       order() {
@@ -33,13 +53,13 @@ function createMockSupabase(data: {
       or(_filter: string) {
         return builder;
       },
-      select(_cols?: string, _opts?: any) {
+      select(_cols?: string, _opts?: unknown) {
         if (mode === 'update') {
           // Chain: update().eq().is().select().single()/maybeSingle()
           function resolveUpdate() {
             const id = filters['id'];
-            if (table === 'tournament_matches' && id && data.tournamentMatches[id]) {
-              const tm = data.tournamentMatches[id];
+            if (table === 'tournament_matches' && typeof id === 'string' && data.tournamentMatches[id]) {
+              const tm = data.tournamentMatches[id] as unknown as JsonMap;
               // Check all .is() filters
               for (const [key, val] of Object.entries(filters)) {
                 if (!key.startsWith('_is_')) continue;
@@ -76,12 +96,13 @@ function createMockSupabase(data: {
         if (mode === 'select') {
           if (table === 'tournament_matches') {
             const id = filters['id'];
-            if (id && data.tournamentMatches[id]) {
+            if (typeof id === 'string' && data.tournamentMatches[id]) {
               return { data: { ...data.tournamentMatches[id] }, error: null };
             }
             // Try matching by multiple filters (for GF reset lookup)
-            const matches = Object.values(data.tournamentMatches).filter((tm: any) => {
-              return Object.entries(filters).every(([k, v]) => tm[k] === v);
+            const matches = Object.values(data.tournamentMatches).filter((tm) => {
+              const row = tm as unknown as JsonMap;
+              return Object.entries(filters).every(([k, v]) => row[k] === v);
             });
             return { data: matches[0] ?? null, error: null };
           }
@@ -92,8 +113,8 @@ function createMockSupabase(data: {
         if (mode === 'update') {
           const id = filters['id'];
           updates.push({ table, filters: { ...filters }, data: payload });
-          if (table === 'tournament_matches' && id && data.tournamentMatches[id]) {
-            Object.assign(data.tournamentMatches[id], payload);
+          if (table === 'tournament_matches' && typeof id === 'string' && data.tournamentMatches[id]) {
+            Object.assign(data.tournamentMatches[id], payload as object);
           }
           return { error: null };
         }
@@ -102,13 +123,13 @@ function createMockSupabase(data: {
     };
 
     // For update without single() — awaiting the builder directly
-    builder.then = (resolve: any, reject?: any) => {
+    builder.then = (resolve: (value: { count: number; error: null; data: null }) => void) => {
       if (mode === 'update') {
         updates.push({ table, filters: { ...filters }, data: payload });
         if (table === 'tournament_matches') {
           const id = filters['id'];
-          if (id && data.tournamentMatches[id]) {
-            Object.assign(data.tournamentMatches[id], payload);
+          if (typeof id === 'string' && data.tournamentMatches[id]) {
+            Object.assign(data.tournamentMatches[id], payload as object);
           }
         }
       }
@@ -129,29 +150,41 @@ function createMockSupabase(data: {
     return builder;
   }
 
-  const deletes: { table: string; filters: Record<string, any> }[] = [];
+  const deletes: { table: string; filters: JsonMap }[] = [];
+  const rpcs: { fn: string; params: unknown }[] = [];
 
   const mockClient = {
+    rpc: async (fn: string, params: unknown) => {
+      rpcs.push({ fn, params });
+      return { error: null };
+    },
     from: (table: string) => ({
       select: (cols?: string) => makeBuilder(table, 'select'),
-      update: (updateData: any) => makeBuilder(table, 'update', updateData),
-      insert: (insertData: any) => {
+      update: (updateData: unknown) => makeBuilder(table, 'update', updateData),
+      insert: (insertData: unknown) => {
         inserts.push({ table, data: insertData });
+        const insertRow = Array.isArray(insertData) ? insertData[0] : insertData;
         return {
           select: () => ({
-            single: async () => ({ data: { id: 'new-match-id', ...(Array.isArray(insertData) ? insertData[0] : insertData) }, error: null }),
+            single: async () => ({
+              data: { id: 'new-match-id', ...((insertRow as object | null) ?? {}) },
+              error: null,
+            }),
           }),
           error: null,
         };
       },
       delete: () => {
-        const deleteFilters: Record<string, any> = {};
-        const deleteBuilder: any = {
-          eq(col: string, val: any) {
+        const deleteFilters: JsonMap = {};
+        const deleteBuilder: {
+          eq: (col: string, val: unknown) => typeof deleteBuilder;
+          then: (resolve: (value: { error: null }) => void) => void;
+        } = {
+          eq(col: string, val: unknown) {
             deleteFilters[col] = val;
             return deleteBuilder;
           },
-          then(resolve: any) {
+          then(resolve: (value: { error: null }) => void) {
             deletes.push({ table, filters: { ...deleteFilters } });
             resolve({ error: null });
           },
@@ -162,6 +195,7 @@ function createMockSupabase(data: {
     _updates: updates,
     _inserts: inserts,
     _deletes: deletes,
+    _rpcs: rpcs,
   };
 
   return mockClient;
@@ -222,7 +256,7 @@ describe('advanceTournament', () => {
       tournament: { id: 'tour-1', status: 'in_progress' },
     });
 
-    const result = await advanceTournament(supabase as any, tmId, 'p1', 'p2');
+    const result = await advanceTournament(supabase as unknown as SupabaseClient, tmId, 'p1', 'p2');
     expect(result.tournamentCompleted).toBe(false);
 
     // Winner placed in next_winner dest
@@ -287,7 +321,7 @@ describe('advanceTournament', () => {
       tournament: { id: 'tour-1', status: 'in_progress' },
     });
 
-    await advanceTournament(supabase as any, tmId, 'p1', 'p2');
+    await advanceTournament(supabase as unknown as SupabaseClient, tmId, 'p1', 'p2');
 
     const loserUpdate = supabase._updates.find(
       (u) => u.table === 'tournament_matches' && u.filters?.id === lbDestId
@@ -319,7 +353,7 @@ describe('advanceTournament', () => {
       tournament: { id: 'tour-1', status: 'in_progress' },
     });
 
-    const result = await advanceTournament(supabase as any, tmId, 'p1', 'p2');
+    const result = await advanceTournament(supabase as unknown as SupabaseClient, tmId, 'p1', 'p2');
     expect(result.tournamentCompleted).toBe(false);
     // The conditional update (is winner_id null) should not match,
     // so no updates at all
@@ -370,7 +404,7 @@ describe('advanceTournament', () => {
       ],
     });
 
-    await advanceTournament(supabase as any, tmId, 'p1', 'p2');
+    await advanceTournament(supabase as unknown as SupabaseClient, tmId, 'p1', 'p2');
 
     // The conditional update should have set winner and loser
     const tmUpdate = supabase._updates.find(
@@ -379,6 +413,12 @@ describe('advanceTournament', () => {
     expect(tmUpdate).toBeDefined();
     expect(tmUpdate!.data.winner_id).toBe('p1');
     expect(tmUpdate!.data.loser_id).toBe('p2');
+
+    // Eliminated player should be ranked via RPC
+    const rpcCall = supabase._rpcs.find((r) => r.fn === 'assign_elimination_rank');
+    expect(rpcCall).toBeDefined();
+    expect(rpcCall!.params.p_tournament_id).toBe('tour-1');
+    expect(rpcCall!.params.p_player_id).toBe('p2');
   });
 
   it('GF match 1: WB champ wins → tournament complete', async () => {
@@ -411,7 +451,7 @@ describe('advanceTournament', () => {
       },
     });
 
-    const result = await advanceTournament(supabase as any, gf1Id, 'wb-champ', 'lb-champ');
+    const result = await advanceTournament(supabase as unknown as SupabaseClient, gf1Id, 'wb-champ', 'lb-champ');
     expect(result.tournamentCompleted).toBe(true);
 
     const tournamentUpdate = supabase._updates.find(
@@ -468,7 +508,7 @@ describe('advanceTournament', () => {
       },
     });
 
-    const result = await advanceTournament(supabase as any, gf1Id, 'lb-champ', 'wb-champ');
+    const result = await advanceTournament(supabase as unknown as SupabaseClient, gf1Id, 'lb-champ', 'wb-champ');
     expect(result.tournamentCompleted).toBe(false);
 
     // GF reset should have both players set
@@ -514,7 +554,7 @@ describe('advanceTournament', () => {
       },
     });
 
-    const result = await advanceTournament(supabase as any, gfResetId, 'lb-champ', 'wb-champ');
+    const result = await advanceTournament(supabase as unknown as SupabaseClient, gfResetId, 'lb-champ', 'wb-champ');
     expect(result.tournamentCompleted).toBe(true);
 
     const tournamentUpdate = supabase._updates.find(
@@ -585,7 +625,7 @@ describe('advanceTournament', () => {
       },
     });
 
-    await advanceTournament(supabase as any, tmId, 'p1', 'p2');
+    await advanceTournament(supabase as unknown as SupabaseClient, tmId, 'p1', 'p2');
 
     const matchInsert = supabase._inserts.find((i) => i.table === 'matches');
     expect(matchInsert).toBeDefined();

@@ -1,7 +1,33 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseServerClient } from '@/lib/supabaseServer';
-import { generateBracket, type BracketSlot } from '@/lib/tournament/bracket';
+import { generateBracket } from '@/lib/tournament/bracket';
 import { fisherYatesShuffle } from '@/lib/tournament/shuffle';
+
+async function cleanupTournament(
+  supabase: ReturnType<typeof getSupabaseServerClient>,
+  tournamentId: string
+) {
+  const { data: tournamentMatches } = await supabase
+    .from('tournament_matches')
+    .select('id')
+    .eq('tournament_id', tournamentId);
+
+  const tournamentMatchIds = (tournamentMatches ?? [])
+    .map((row) => row.id)
+    .filter((id): id is string => typeof id === 'string');
+
+  if (tournamentMatchIds.length > 0) {
+    // Remove linked matches first so matches.tournament_match_id doesn't block tournament cleanup.
+    await supabase.from('matches').delete().in('tournament_match_id', tournamentMatchIds);
+  }
+
+  // Nullify self-referential FKs before cascade delete
+  await supabase
+    .from('tournament_matches')
+    .update({ next_winner_tm_id: null, next_loser_tm_id: null })
+    .eq('tournament_id', tournamentId);
+  await supabase.from('tournaments').delete().eq('id', tournamentId);
+}
 
 type CreateTournamentRequest = {
   name: string;
@@ -13,6 +39,9 @@ type CreateTournamentRequest = {
 };
 
 export async function POST(request: Request) {
+  const supabase = getSupabaseServerClient();
+  let tournamentId: string | null = null;
+
   try {
     const body = (await request.json()) as CreateTournamentRequest;
 
@@ -34,8 +63,6 @@ export async function POST(request: Request) {
     if (new Set(body.playerIds).size !== body.playerIds.length) {
       return NextResponse.json({ error: 'Duplicate player IDs' }, { status: 400 });
     }
-
-    const supabase = getSupabaseServerClient();
     const startScore = String(body.startScore) as '201' | '301' | '501';
     const fairEnding = body.fairEnding && body.legsToWin === 1 ? true : false;
 
@@ -61,6 +88,7 @@ export async function POST(request: Request) {
       console.error('Tournament insert error:', tourErr);
       return NextResponse.json({ error: tourErr?.message ?? 'Failed to create tournament' }, { status: 500 });
     }
+    tournamentId = tournament.id;
 
     // ── Insert tournament_players ─────────────────────────────────────
     const { error: tpErr } = await supabase.from('tournament_players').insert(
@@ -72,6 +100,7 @@ export async function POST(request: Request) {
     );
 
     if (tpErr) {
+      await cleanupTournament(supabase, tournament.id);
       return NextResponse.json({ error: 'Failed to add players to tournament' }, { status: 500 });
     }
 
@@ -101,6 +130,7 @@ export async function POST(request: Request) {
 
       if (tmErr || !tmRow) {
         console.error('Failed to insert tournament match:', tmErr);
+        await cleanupTournament(supabase, tournament.id);
         return NextResponse.json({ error: 'Failed to create bracket' }, { status: 500 });
       }
 
@@ -151,6 +181,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ tournamentId: tournament.id }, { status: 201 });
   } catch (error) {
     console.error('POST /api/tournaments error:', error);
+    if (tournamentId) {
+      try {
+        await cleanupTournament(supabase, tournamentId);
+      } catch { /* ignore cleanup errors */ }
+    }
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
@@ -183,25 +218,40 @@ async function createMatchForTournament(
     .select()
     .single();
 
-  if (matchErr || !match) return;
+  if (matchErr || !match) {
+    throw new Error(`Failed to create seeded match: ${matchErr?.message ?? 'unknown error'}`);
+  }
 
-  await supabase.from('match_players').insert(
+  const { error: playersErr } = await supabase.from('match_players').insert(
     players.map((pid, idx) => ({
       match_id: match.id,
       player_id: pid,
       play_order: idx,
     }))
   );
+  if (playersErr) {
+    await supabase.from('matches').delete().eq('id', match.id);
+    throw new Error(`Failed to create seeded match players: ${playersErr.message}`);
+  }
 
-  await supabase.from('legs').insert({
+  const { error: legErr } = await supabase.from('legs').insert({
     match_id: match.id,
     leg_number: 1,
     starting_player_id: players[0],
   });
+  if (legErr) {
+    await supabase.from('matches').delete().eq('id', match.id);
+    throw new Error(`Failed to create seeded first leg: ${legErr.message}`);
+  }
 
-  // Link match to tournament_match
-  await supabase
+  // Link match to tournament_match (atomic: only if still unlinked)
+  const { count: linkedCount, error: linkErr } = await supabase
     .from('tournament_matches')
-    .update({ match_id: match.id })
-    .eq('id', tournamentMatchId);
+    .update({ match_id: match.id }, { count: 'exact' })
+    .eq('id', tournamentMatchId)
+    .is('match_id', null);
+  if (linkErr || linkedCount !== 1) {
+    await supabase.from('matches').delete().eq('id', match.id);
+    throw new Error(linkErr?.message ?? 'Failed to link seeded match to tournament slot');
+  }
 }

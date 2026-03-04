@@ -28,15 +28,63 @@ function createMockSupabase(data: {
 
   function makeBuilder(table: string, mode: 'select' | 'update' | 'insert', payload?: unknown) {
     const filters: JsonMap = {};
+    let orFilter: string | null = null;
+
+    function rowMatches(row: JsonMap) {
+      for (const [key, value] of Object.entries(filters)) {
+        if (key.startsWith('_is_')) {
+          const col = key.slice(4);
+          if (value === null) {
+            if (row[col] !== null && row[col] !== undefined) return false;
+          } else if (row[col] !== value) {
+            return false;
+          }
+          continue;
+        }
+        if (row[key] !== value) return false;
+      }
+
+      if (!orFilter) return true;
+
+      const clauses = orFilter
+        .split(',')
+        .map((clause) => clause.trim())
+        .filter(Boolean);
+
+      return clauses.some((clause) => {
+        const [col, op, ...rest] = clause.split('.');
+        if (!col || op !== 'eq' || rest.length === 0) return false;
+        const expected = rest.join('.');
+        return String(row[col] ?? '') === expected;
+      });
+    }
+
+    function selectRows() {
+      if (table === 'tournament_matches') {
+        return Object.values(data.tournamentMatches)
+          .map((row) => ({ ...row }) as JsonMap)
+          .filter((row) => rowMatches(row));
+      }
+      if (table === 'tournaments') {
+        const row = data.tournament ? ({ ...data.tournament } as JsonMap) : null;
+        return row && rowMatches(row) ? [row] : [];
+      }
+      if (table === 'tournament_players') {
+        return (data.tournamentPlayers ?? [])
+          .map((row) => ({ ...row }) as JsonMap)
+          .filter((row) => rowMatches(row));
+      }
+      return [];
+    }
 
     const builder: {
       eq: (col: string, val: unknown) => typeof builder;
       is: (col: string, val: unknown) => typeof builder;
       order: () => typeof builder;
-      or: (_filter: string) => typeof builder;
+      or: (filter: string) => typeof builder;
       select: (_cols?: string, _opts?: unknown) => unknown;
       single: () => Promise<{ data?: unknown; error: unknown }>;
-      then?: (resolve: (value: { count: number; error: null; data: null }) => void) => void;
+      then?: (resolve: (value: unknown) => void) => void;
       data?: unknown;
     } = {
       eq(col: string, val: unknown) {
@@ -50,7 +98,8 @@ function createMockSupabase(data: {
       order() {
         return builder;
       },
-      or(_filter: string) {
+      or(filter: string) {
+        orFilter = filter;
         return builder;
       },
       select(_cols?: string, _opts?: unknown) {
@@ -89,26 +138,12 @@ function createMockSupabase(data: {
             },
           };
         }
-        // mode === 'select' — return self for chaining
-        return makeBuilder(table, 'select');
+        return builder;
       },
       async single() {
         if (mode === 'select') {
-          if (table === 'tournament_matches') {
-            const id = filters['id'];
-            if (typeof id === 'string' && data.tournamentMatches[id]) {
-              return { data: { ...data.tournamentMatches[id] }, error: null };
-            }
-            // Try matching by multiple filters (for GF reset lookup)
-            const matches = Object.values(data.tournamentMatches).filter((tm) => {
-              const row = tm as unknown as JsonMap;
-              return Object.entries(filters).every(([k, v]) => row[k] === v);
-            });
-            return { data: matches[0] ?? null, error: null };
-          }
-          if (table === 'tournaments') {
-            return { data: data.tournament ?? null, error: null };
-          }
+          const rows = selectRows();
+          return { data: rows[0] ?? null, error: null };
         }
         if (mode === 'update') {
           const id = filters['id'];
@@ -123,7 +158,12 @@ function createMockSupabase(data: {
     };
 
     // For update without single() — awaiting the builder directly
-    builder.then = (resolve: (value: { count: number; error: null; data: null }) => void) => {
+    builder.then = (resolve: (value: unknown) => void) => {
+      if (mode === 'select') {
+        resolve({ data: selectRows(), error: null });
+        return;
+      }
+
       if (mode === 'update') {
         updates.push({ table, filters: { ...filters }, data: payload });
         if (table === 'tournament_matches') {
@@ -133,8 +173,6 @@ function createMockSupabase(data: {
           }
         }
       }
-      // Return count: 1 for count queries (used by autoAdvanceIfBye) so it
-      // thinks there are always pending feeders and never auto-advances.
       resolve({ count: 1, error: null, data: null });
     };
 
@@ -629,5 +667,82 @@ describe('advanceTournament', () => {
 
     const matchInsert = supabase._inserts.find((i) => i.table === 'matches');
     expect(matchInsert).toBeDefined();
+  });
+
+  it('auto-advances when the only remaining feeder is an empty bye', async () => {
+    const sourceId = 'wb-source';
+    const byeFeederId = 'lb-empty-bye';
+    const destId = 'lb-dest';
+
+    const supabase = createMockSupabase({
+      tournamentMatches: {
+        [sourceId]: {
+          id: sourceId,
+          tournament_id: 'tour-1',
+          bracket: 'winners',
+          round: 2,
+          position: 0,
+          player1_id: 'winner',
+          player2_id: 'loser',
+          winner_id: null,
+          loser_id: null,
+          match_id: 'match-1',
+          is_bye: false,
+          next_winner_tm_id: null,
+          next_loser_tm_id: destId,
+        },
+        [byeFeederId]: {
+          id: byeFeederId,
+          tournament_id: 'tour-1',
+          bracket: 'losers',
+          round: 1,
+          position: 0,
+          player1_id: null,
+          player2_id: null,
+          winner_id: null,
+          loser_id: null,
+          match_id: null,
+          is_bye: true,
+          next_winner_tm_id: destId,
+          next_loser_tm_id: null,
+        },
+        [destId]: {
+          id: destId,
+          tournament_id: 'tour-1',
+          bracket: 'losers',
+          round: 2,
+          position: 0,
+          player1_id: null,
+          player2_id: null,
+          winner_id: null,
+          loser_id: null,
+          match_id: null,
+          is_bye: false,
+          next_winner_tm_id: null,
+          next_loser_tm_id: null,
+        },
+      },
+      tournament: {
+        id: 'tour-1',
+        status: 'in_progress',
+        start_score: '501',
+        finish: 'double_out',
+        legs_to_win: 1,
+        fair_ending: false,
+      },
+    });
+
+    await advanceTournament(supabase as unknown as SupabaseClient, sourceId, 'winner', 'loser');
+
+    const autoAdvanceUpdate = supabase._updates.find(
+      (u) =>
+        u.table === 'tournament_matches' &&
+        u.filters?.id === destId &&
+        u.data &&
+        typeof u.data === 'object' &&
+        (u.data as { winner_id?: string }).winner_id === 'loser'
+    );
+
+    expect(autoAdvanceUpdate).toBeDefined();
   });
 });

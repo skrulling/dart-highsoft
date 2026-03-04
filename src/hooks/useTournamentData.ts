@@ -40,6 +40,7 @@ export function useTournamentData(tournamentId: string) {
       if (matchRes.error) throw new Error(matchRes.error.message);
       if (playerRes.error) throw new Error(playerRes.error.message);
 
+      setError(null);
       setTournament(tourRes.data as TournamentRecord);
       setMatches((matchRes.data ?? []) as TournamentMatchRecord[]);
       setPlayers(

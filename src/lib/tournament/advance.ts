@@ -158,8 +158,8 @@ async function autoAdvanceIfBye(
       return !alreadyPlaced;
     }
 
-    // Bye matches never produce a loser, so next_loser feeders from byes are not pending.
-    if (!isWinnerPath && feeder.is_bye) return false;
+    // Empty byes won't emit any incoming player on either path.
+    if (feeder.is_bye) return false;
     return true;
   });
 

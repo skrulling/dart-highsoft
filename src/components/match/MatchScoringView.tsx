@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -74,6 +75,8 @@ type Props = {
   eloChanges: MatchEloChange[];
   eloChangesLoading: boolean;
   fairEndingState?: FairEndingState;
+  isTournamentMatch?: boolean;
+  tournamentId?: string | null;
 };
 
 export function MatchScoringView({
@@ -125,6 +128,8 @@ export function MatchScoringView({
   eloChanges,
   eloChangesLoading,
   fairEndingState,
+  isTournamentMatch = false,
+  tournamentId,
 }: Props) {
   const currentPlayerLastTurn = useMemo(() => {
     if (!currentPlayer) return null;
@@ -320,19 +325,21 @@ export function MatchScoringView({
               >
                 Edit throws
               </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={onOpenEditPlayersModal}
-                disabled={!canEditPlayers}
-                className="text-xs whitespace-nowrap"
-              >
-                Edit players
-              </Button>
+              {!isTournamentMatch && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={onOpenEditPlayersModal}
+                  disabled={!canEditPlayers}
+                  className="text-xs whitespace-nowrap"
+                >
+                  Edit players
+                </Button>
+              )}
               <Button variant="outline" size="sm" onClick={onToggleSpectatorMode} className="text-xs whitespace-nowrap">
                 Spectator
               </Button>
-              {!matchWinnerId && (
+              {!matchWinnerId && !isTournamentMatch && (
                 <Dialog open={endGameDialogOpen} onOpenChange={onEndGameDialogOpenChange}>
                   <DialogTrigger asChild>
                     <Button variant="destructive" size="sm" className="text-xs whitespace-nowrap">
@@ -360,7 +367,12 @@ export function MatchScoringView({
                   </DialogContent>
                 </Dialog>
               )}
-              {matchWinnerId && (
+              {matchWinnerId && isTournamentMatch && (
+                <Button asChild size="sm" className="text-xs whitespace-nowrap">
+                  <Link href={tournamentId ? `/tournament/${tournamentId}` : '/games'}>Back to Bracket</Link>
+                </Button>
+              )}
+              {matchWinnerId && !isTournamentMatch && (
                 <Button onClick={onStartRematch} disabled={rematchLoading} size="sm" className="text-xs whitespace-nowrap">
                   {rematchLoading ? 'Starting…' : 'Rematch'}
                 </Button>
@@ -375,9 +387,11 @@ export function MatchScoringView({
             <Button variant="outline" size="sm" onClick={onOpenEditModal} disabled={!currentLeg} className="text-xs sm:text-sm">
               Edit throws
             </Button>
-            <Button variant="outline" size="sm" onClick={onOpenEditPlayersModal} disabled={!canEditPlayers} className="text-xs sm:text-sm">
-              Edit players
-            </Button>
+            {!isTournamentMatch && (
+              <Button variant="outline" size="sm" onClick={onOpenEditPlayersModal} disabled={!canEditPlayers} className="text-xs sm:text-sm">
+                Edit players
+              </Button>
+            )}
           </div>
           {matchWinnerId && (
             <Card className="mt-4 overflow-hidden border-2 border-green-500/80 shadow-md ring-2 ring-green-400/30 bg-gradient-to-br from-emerald-50 to-green-50 dark:from-emerald-900/20 dark:to-green-900/10 md:hidden">
@@ -393,9 +407,15 @@ export function MatchScoringView({
                       <div className="text-sm text-green-700/80 dark:text-green-200/80">wins the match!</div>
                     </div>
                   </div>
-                  <Button onClick={onStartRematch} disabled={rematchLoading}>
-                    {rematchLoading ? 'Starting…' : 'Rematch'}
-                  </Button>
+                  {isTournamentMatch ? (
+                    <Button asChild>
+                      <Link href={tournamentId ? `/tournament/${tournamentId}` : '/games'}>Back to Bracket</Link>
+                    </Button>
+                  ) : (
+                    <Button onClick={onStartRematch} disabled={rematchLoading}>
+                      {rematchLoading ? 'Starting…' : 'Rematch'}
+                    </Button>
+                  )}
                 </div>
                 <EloChangesDisplay
                   eloChanges={eloChanges}
@@ -509,7 +529,7 @@ export function MatchScoringView({
       </div>
       {/* Action Buttons - Mobile only */}
       <div className="flex flex-col sm:flex-row gap-2 pt-4 md:hidden">
-        {!matchWinnerId && (
+        {!matchWinnerId && !isTournamentMatch && (
           <Dialog open={endGameDialogOpen} onOpenChange={onEndGameDialogOpenChange}>
             <DialogTrigger asChild>
               <Button variant="destructive" className="flex-1 sm:max-w-xs">

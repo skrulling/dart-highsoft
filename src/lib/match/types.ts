@@ -10,6 +10,7 @@ export type MatchRecord = {
   legs_to_win: number;
   ended_early?: boolean;
   fair_ending?: boolean;
+  tournament_match_id?: string | null;
 };
 
 export type LegRecord = {

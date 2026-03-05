@@ -13,6 +13,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ mat
     const match = await loadMatch(supabase, matchId);
     if (!match) return NextResponse.json({ error: 'Match not found' }, { status: 404 });
     if (!isMatchActive(match)) return NextResponse.json({ error: 'Match is not active' }, { status: 409 });
+    if (match.tournament_match_id) {
+      return NextResponse.json({ error: 'Cannot edit players in a tournament match' }, { status: 403 });
+    }
 
     const [{ data: existing }, { data: maxOrder }] = await Promise.all([
       supabase

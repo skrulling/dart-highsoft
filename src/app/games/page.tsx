@@ -6,7 +6,8 @@ import { getSupabaseClient } from '@/lib/supabaseClient';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Play, Eye, Trophy, Clock, Users } from 'lucide-react';
+import { Play, Eye, Trophy, Clock, Users, Swords } from 'lucide-react';
+import Link from 'next/link';
 
 type MatchWithDetails = {
   id: string;
@@ -29,14 +30,27 @@ type MatchWithDetails = {
   winner_name?: string;
 };
 
+type TournamentSummary = {
+  id: string;
+  name: string;
+  status: string;
+  start_score: string;
+  finish: string;
+  legs_to_win: number;
+  created_at: string;
+  player_count: number;
+};
+
 export default function GamesPage() {
   const [liveGames, setLiveGames] = useState<MatchWithDetails[]>([]);
   const [recentGames, setRecentGames] = useState<MatchWithDetails[]>([]);
+  const [tournaments, setTournaments] = useState<TournamentSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
   useEffect(() => {
     loadGames();
+    loadTournaments();
   }, []);
 
   const loadGames = async () => {
@@ -124,6 +138,41 @@ export default function GamesPage() {
     }
   };
 
+  const loadTournaments = async () => {
+    try {
+      const supabase = await getSupabaseClient();
+      const { data } = await supabase
+        .from('tournaments')
+        .select('id, name, status, start_score, finish, legs_to_win, created_at')
+        .in('status', ['in_progress', 'completed'])
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+      if (!data) return;
+
+      // Get player counts
+      const tourIds = data.map((t) => t.id);
+      const { data: playerCounts } = await supabase
+        .from('tournament_players')
+        .select('tournament_id')
+        .in('tournament_id', tourIds);
+
+      const countMap = new Map<string, number>();
+      for (const row of playerCounts ?? []) {
+        countMap.set(row.tournament_id, (countMap.get(row.tournament_id) ?? 0) + 1);
+      }
+
+      setTournaments(
+        data.map((t) => ({
+          ...t,
+          player_count: countMap.get(t.id) ?? 0,
+        }))
+      );
+    } catch {
+      setTournaments([]);
+    }
+  };
+
   const handleJoinLiveGame = (matchId: string) => {
     router.push(`/match/${matchId}?spectator=true`);
   };
@@ -174,6 +223,44 @@ export default function GamesPage() {
         <h1 className="text-3xl font-bold">Games</h1>
         <p className="text-muted-foreground">Live and recent dart matches</p>
       </div>
+
+      {/* Active Tournaments */}
+      {tournaments.length > 0 && (
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <Swords className="h-5 w-5 text-purple-500" />
+            <h2 className="text-2xl font-semibold">Tournaments</h2>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {tournaments.map((t) => (
+              <Link key={t.id} href={`/tournament/${t.id}`}>
+                <Card className="hover:shadow-md transition-shadow cursor-pointer">
+                  <CardHeader className="pb-3">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-lg">{t.name}</CardTitle>
+                      <Badge variant={t.status === 'in_progress' ? 'default' : 'secondary'} className={t.status === 'in_progress' ? 'animate-pulse' : ''}>
+                        {t.status === 'in_progress' ? 'Live' : 'Done'}
+                      </Badge>
+                    </div>
+                    <CardDescription>
+                      {t.start_score} X01 &middot; {t.finish === 'double_out' ? 'Double Out' : 'Single Out'}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Users className="h-4 w-4" />
+                      <span>{t.player_count} players</span>
+                      <span>&middot;</span>
+                      <Clock className="h-4 w-4" />
+                      <span>{formatTimeAgo(t.created_at)}</span>
+                    </div>
+                  </CardContent>
+                </Card>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Live Games Section */}
       <div className="space-y-4">

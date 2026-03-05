@@ -25,9 +25,12 @@ export default function Home() {
         <Image src="/favicon.ico" alt="Dart Scoreboard" width={32} height={32} className="rounded" />
         <h1 className="text-2xl font-semibold">Dart Scoreboard</h1>
       </div>
-      <div className="flex gap-3">
+      <div className="flex flex-wrap gap-3">
         <Button asChild>
           <Link href="/new">New Match</Link>
+        </Button>
+        <Button asChild variant="outline">
+          <Link href="/tournament/new">New Tournament</Link>
         </Button>
         <Button asChild variant="outline">
           <Link href="/practice">Practice</Link>

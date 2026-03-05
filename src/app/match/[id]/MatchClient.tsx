@@ -16,6 +16,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useRealtime } from '@/hooks/useRealtime';
 import type { LegRecord, MatchRecord, Player, TurnRecord } from '@/lib/match/types';
 import { PendingThrowBuffer } from '@/lib/match/realtime';
+import { getSupabaseClient } from '@/lib/supabaseClient';
 import { incrementRealtimeMetric } from '@/lib/match/realtimeMetrics';
 import {
   selectCurrentLeg,
@@ -41,6 +42,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const spectatorParam = searchParams.get('spectator') === 'true';
+  const [tournamentId, setTournamentId] = useState<string | null>(null);
   const [origin, setOrigin] = useState('');
   
   // Spectator mode state
@@ -146,6 +148,28 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   useEffect(() => {
     setOrigin(window.location.origin);
   }, []);
+
+  // Resolve tournament_match_id → tournament_id from DB
+  useEffect(() => {
+    if (!match?.tournament_match_id) {
+      setTournamentId(null);
+      return;
+    }
+    (async () => {
+      const supabase = await getSupabaseClient();
+      const { data, error } = await supabase
+        .from('tournament_matches')
+        .select('tournament_id')
+        .eq('id', match.tournament_match_id!)
+        .single();
+      if (error) {
+        console.error('Failed to resolve tournament id for match:', error);
+        setTournamentId(null);
+        return;
+      }
+      setTournamentId(data?.tournament_id ?? null);
+    })();
+  }, [match?.tournament_match_id]);
 
   // Compute playerById memo
   const playerById = useMemo(() => Object.fromEntries(players.map((p) => [p.id, p])), [players]);
@@ -273,8 +297,8 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         players,
         turns,
         matchWinnerId,
-      }),
-    [currentLeg, players, turns, matchWinnerId]
+      }) && !match?.tournament_match_id,
+    [currentLeg, players, turns, matchWinnerId, match?.tournament_match_id]
   );
 
   // Check if game hasn't started yet (no turns/throws registered)
@@ -577,6 +601,8 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         eloChanges={eloChanges}
         eloChangesLoading={eloChangesLoading}
         fairEndingState={fairEndingState}
+        isTournamentMatch={Boolean(match?.tournament_match_id)}
+        tournamentId={tournamentId}
       />
       <RealtimeDebugPanel
         matchId={matchId}

@@ -11,6 +11,9 @@ export async function PATCH(_: Request, { params }: { params: Promise<{ matchId:
     if (match.ended_early || match.winner_player_id || match.completed_at) {
       return NextResponse.json({ error: 'Match is already completed' }, { status: 409 });
     }
+    if (match.tournament_match_id) {
+      return NextResponse.json({ error: 'Cannot end a tournament match early' }, { status: 403 });
+    }
     const { error } = await supabase
       .from('matches')
       .update({ ended_early: true, completed_at: new Date().toISOString() })

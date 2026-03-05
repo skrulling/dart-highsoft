@@ -53,7 +53,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ma
         await Promise.all([
           supabase
             .from('turns')
-            .select('id, player_id, total_scored, busted, tiebreak_round, throws:throws(id)')
+            .select('id, player_id, total_scored, busted, tiebreak_round, throws:throws(id, scored)')
             .eq('leg_id', legId)
             .order('turn_number'),
           supabase
@@ -64,13 +64,17 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ma
         ]);
 
       if (!turnsErr && legTurns && !mpErr && mpData) {
-        const turnsForState = legTurns.map((t) => ({
-          player_id: t.player_id as string,
-          total_scored: t.total_scored as number,
-          busted: t.busted as boolean,
-          tiebreak_round: t.tiebreak_round as number | null,
-          throw_count: Array.isArray(t.throws) ? t.throws.length : 0,
-        }));
+        const turnsForState = legTurns.map((t) => {
+          const throws = Array.isArray(t.throws) ? t.throws as { id: string; scored: number }[] : [];
+          return {
+            player_id: t.player_id as string,
+            total_scored: t.total_scored as number,
+            busted: t.busted as boolean,
+            tiebreak_round: t.tiebreak_round as number | null,
+            throw_count: throws.length,
+            throws_total: throws.reduce((sum, thr) => sum + thr.scored, 0),
+          };
+        });
 
         const orderPlayers = (mpData as { player_id: string; play_order: number }[]).map(
           (r) => ({ id: r.player_id })

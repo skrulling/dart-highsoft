@@ -30,6 +30,8 @@ type TurnInput = {
   busted: boolean;
   tiebreak_round?: number | null;
   throw_count?: number;
+  /** Sum of individual throw scores. Used for tiebreak scoring to avoid stale total_scored. */
+  throws_total?: number;
 };
 
 const NORMAL_STATE: FairEndingState = {
@@ -168,7 +170,7 @@ export function computeFairEndingState(
 
     for (const t of roundTurns) {
       if (currentTiebreakPlayers.includes(t.player_id)) {
-        roundScores[t.player_id] = t.busted ? 0 : t.total_scored;
+        roundScores[t.player_id] = t.busted ? 0 : (t.throws_total ?? t.total_scored);
       }
     }
 

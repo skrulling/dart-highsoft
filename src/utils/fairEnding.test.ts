@@ -12,6 +12,7 @@ type TurnInput = {
   busted: boolean;
   tiebreak_round?: number | null;
   throw_count?: number;
+  throws_total?: number;
 };
 
 const playerA = { id: 'a' };
@@ -591,6 +592,72 @@ describe('Fair Ending Logic', () => {
       const state = computeFairEndingState(turns, [playerA, playerB], 101, true);
       expect(state.phase).toBe('resolved');
       expect(state.winnerId).toBe('b'); // A busted (0), B scored 60
+    });
+  });
+
+  describe('Tiebreak stale total_scored (race condition)', () => {
+    // Reproduces production bug: when both players tie in tiebreak round 1 (e.g. both score 22),
+    // a realtime refresh can see throw_count=3 but total_scored=0 (stale) for the last player's turn.
+    // Without the fix, this incorrectly resolves the first player as winner (22 > 0).
+
+    function twoPlayerTieBase(): TurnInput[] {
+      return [
+        makeTurn('a', 60),
+        makeTurn('b', 45),
+        makeTurn('a', 41), // A: 0
+        makeTurn('b', 56), // B: 0
+      ];
+    }
+
+    it('Uses throws_total instead of stale total_scored for tiebreak scoring', () => {
+      const turns = [
+        ...twoPlayerTieBase(),
+        makeTurn('a', 22, { tiebreakRound: 1, throwCount: 3 }),
+        // B has thrown 3 darts but total_scored is stale (still 0). throws_total has the real score.
+        {
+          player_id: 'b',
+          total_scored: 0,  // stale!
+          busted: false,
+          tiebreak_round: 1,
+          throw_count: 3,
+          throws_total: 22,  // actual score from throws
+        },
+      ];
+      const state = computeFairEndingState(turns, [playerA, playerB], 101, true);
+      // Should be tiebreak round 2, NOT resolved with A as winner
+      expect(state.phase).toBe('tiebreak');
+      expect(state.tiebreakRound).toBe(2);
+      expect(state.winnerId).toBeNull();
+    });
+
+    it('Falls back to total_scored when throws_total is not available', () => {
+      const turns = [
+        ...twoPlayerTieBase(),
+        makeTurn('a', 22, { tiebreakRound: 1, throwCount: 3 }),
+        {
+          player_id: 'b',
+          total_scored: 22,
+          busted: false,
+          tiebreak_round: 1,
+          throw_count: 3,
+          // no throws_total
+        },
+      ];
+      const state = computeFairEndingState(turns, [playerA, playerB], 101, true);
+      expect(state.phase).toBe('tiebreak');
+      expect(state.tiebreakRound).toBe(2);
+      expect(state.winnerId).toBeNull();
+    });
+
+    it('Correctly resolves winner using throws_total when scores differ', () => {
+      const turns = [
+        ...twoPlayerTieBase(),
+        { player_id: 'a', total_scored: 0, busted: false, tiebreak_round: 1, throw_count: 3, throws_total: 60 },
+        { player_id: 'b', total_scored: 0, busted: false, tiebreak_round: 1, throw_count: 3, throws_total: 30 },
+      ];
+      const state = computeFairEndingState(turns, [playerA, playerB], 101, true);
+      expect(state.phase).toBe('resolved');
+      expect(state.winnerId).toBe('a'); // 60 > 30
     });
   });
 

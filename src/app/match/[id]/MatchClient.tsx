@@ -286,13 +286,18 @@ export default function MatchClient({ matchId }: { matchId: string }) {
       return { phase: 'normal' as const, checkedOutPlayerIds: [], tiebreakRound: 0, tiebreakPlayerIds: [], tiebreakScores: {}, winnerId: null };
     }
     return computeFairEndingState(
-      turns.map((t) => ({
-        player_id: t.player_id,
-        total_scored: t.total_scored,
-        busted: t.busted,
-        tiebreak_round: t.tiebreak_round,
-        throw_count: turnThrowCounts[t.id] ?? 0,
-      })),
+      turns.map((t) => {
+        const tw = t as import('@/lib/match/types').TurnWithThrows;
+        const throwsTotal = tw.throws?.reduce((sum, thr) => sum + thr.scored, 0);
+        return {
+          player_id: t.player_id,
+          total_scored: t.total_scored,
+          busted: t.busted,
+          tiebreak_round: t.tiebreak_round,
+          throw_count: turnThrowCounts[t.id] ?? 0,
+          throws_total: throwsTotal,
+        };
+      }),
       orderPlayers,
       startScore,
       true

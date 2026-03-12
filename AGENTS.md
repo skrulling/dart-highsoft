@@ -78,7 +78,7 @@ Help make small, correct changes in a TypeScript Next.js + Supabase dart scoring
 | File | Purpose |
 |------|---------|
 | `useMatchData.ts` | All match state loading: `loadAll()`, `loadAllSpectator()`, per-entity loaders |
-| `useMatchActions.ts` | Player actions: `handleBoardClick`, `undoLastThrow`, `endLegAndMaybeMatch`, rematch, player management. Serializes concurrent throws via queue. |
+| `useMatchActions.ts` | Player actions: `handleBoardClick`, checkout confirmation modal state, `undoLastThrow`, `endLegAndMaybeMatch`, rematch, player management. Serializes concurrent throws via queue. |
 | `useMatchRealtime.ts` | Connects Supabase realtime events to state; uses spectator reducer for incremental updates |
 | `useRealtime.ts` | Low-level Supabase channel subscription, DOM custom events, connection lifecycle |
 | `useCommentary.ts` | Commentary feature state, persona selection, TTS, localStorage persistence |
@@ -105,7 +105,7 @@ Help make small, correct changes in a TypeScript Next.js + Supabase dart scoring
 ### Components (`src/components`)
 | File | Purpose |
 |------|---------|
-| `match/MatchScoringView.tsx` | Active scoring view — scores, dartboard/keypad, actions |
+| `match/MatchScoringView.tsx` | Active scoring view — scores, dartboard/keypad, actions, pending checkout confirmation modal |
 | `match/MatchSpectatorView.tsx` | Read-only spectator view |
 | `match/MatchPlayersCard.tsx` | Player list with scores, averages, legs won |
 | `match/EditThrowsModal.tsx` | Edit recorded throws in current leg |
@@ -191,7 +191,7 @@ Help make small, correct changes in a TypeScript Next.js + Supabase dart scoring
 ### Key Flows
 
 **Throw recording:**
-`handleBoardClick` (useMatchActions) → optimistic local state → `POST /api/matches/:id/throws` → `resolveOrCreateTurnForPlayer` (turnLifecycle.ts) → insert throw → on 3rd dart: `PATCH /api/matches/:id/turns/:id` → if fair ending: `computeFairEndingState` → if resolved: `completeLeg` → Elo RPC.
+`handleBoardClick` (useMatchActions) → if dart is a checkout: hold client-side in pending confirmation modal → on confirm continue with normal persistence; on cancel discard pending dart. Non-checkout darts still go optimistic local state → `POST /api/matches/:id/throws` → `resolveOrCreateTurnForPlayer` (turnLifecycle.ts) → insert throw → on 3rd dart or confirmed checkout: `PATCH /api/matches/:id/turns/:id` → if fair ending: `computeFairEndingState` → if resolved: `completeLeg` → Elo RPC.
 
 **Spectator realtime:**
 `useRealtime` subscribes to Supabase channel → dispatches DOM custom events → `useMatchRealtime` listens → `applyThrowChange/applyTurnChange` (spectatorRealtimeReducer) updates state incrementally → on `needsReconcile`: `loadAll()` full refresh.

@@ -121,7 +121,6 @@ describe('useMatchActions', () => {
         },
         broadcastRematch: async () => {},
         fairEndingState: { phase: 'normal' as const, checkedOutPlayerIds: [], tiebreakRound: 0, tiebreakPlayerIds: [], tiebreakScores: {}, winnerId: null },
-        startScore: 501,
       });
 
       return { actions, localTurn, ongoingTurnRef };
@@ -248,7 +247,6 @@ describe('useMatchActions', () => {
         },
         broadcastRematch: async () => {},
         fairEndingState: { phase: 'normal' as const, checkedOutPlayerIds: [], tiebreakRound: 0, tiebreakPlayerIds: [], tiebreakScores: {}, winnerId: null },
-        startScore: 501,
       });
 
       return { actions, localTurn };
@@ -348,7 +346,6 @@ describe('useMatchActions', () => {
         },
         broadcastRematch: async () => {},
         fairEndingState: { phase: 'normal' as const, checkedOutPlayerIds: [], tiebreakRound: 0, tiebreakPlayerIds: [], tiebreakScores: {}, winnerId: null },
-        startScore: 501,
       });
 
       return { actions, localTurn };
@@ -480,7 +477,6 @@ describe('useMatchActions', () => {
         },
         broadcastRematch: async () => {},
         fairEndingState: { phase: 'normal' as const, checkedOutPlayerIds: [], tiebreakRound: 0, tiebreakPlayerIds: [], tiebreakScores: {}, winnerId: null },
-        startScore: 501,
       });
 
       return { actions, localTurn };
@@ -576,7 +572,6 @@ describe('useMatchActions', () => {
         },
         broadcastRematch: async () => {},
         fairEndingState: { phase: 'normal' as const, checkedOutPlayerIds: [], tiebreakRound: 0, tiebreakPlayerIds: [], tiebreakScores: {}, winnerId: null },
-        startScore: 501,
       });
 
       return { actions, localTurn };
@@ -589,5 +584,333 @@ describe('useMatchActions', () => {
     expect(result.current.localTurn).toEqual({ playerId: null, darts: [] });
     expect(alertSpy).toHaveBeenCalledWith('turn create failed');
     vi.unstubAllGlobals();
+  });
+
+  it('holds a checkout dart in pending confirmation without persisting it', async () => {
+    const players: Player[] = [
+      { id: 'player-1', display_name: 'Player One' },
+      { id: 'player-2', display_name: 'Player Two' },
+    ];
+
+    const match: MatchRecord = {
+      id: 'match-1',
+      mode: 'x01',
+      start_score: '301',
+      finish: 'double_out',
+      legs_to_win: 1,
+    };
+
+    const currentLeg: LegRecord = {
+      id: 'leg-1',
+      match_id: 'match-1',
+      leg_number: 1,
+      starting_player_id: 'player-1',
+      winner_player_id: null,
+    };
+
+    const throwResult: SegmentResult = { kind: 'Double', label: 'D5', scored: 10 };
+
+    const { result } = renderHook(() => {
+      const [localTurn, setLocalTurn] = useState<{
+        playerId: string | null;
+        darts: { scored: number; label: string; kind: SegmentResult['kind'] }[];
+      }>({ playerId: null, darts: [] });
+
+      const ongoingTurnRef = useRef<{
+        turnId: string;
+        playerId: string;
+        darts: { scored: number; label: string; kind: SegmentResult['kind'] }[];
+        startScore: number;
+      } | null>(null);
+
+      const actions = useMatchActions({
+        matchId: 'match-1',
+        match,
+        players,
+        legs: [currentLeg],
+        turns: [],
+        turnThrowCounts: {},
+        currentLeg,
+        currentPlayer: players[0],
+        orderPlayers: players,
+        finishRule: 'double_out',
+        matchWinnerId: null,
+        localTurn,
+        ongoingTurnRef,
+        setLocalTurn,
+        loadAll: async () => {},
+        loadTurnsForLeg: async () => [],
+        routerPush: () => {},
+        getScoreForPlayer: () => 10,
+        canEditPlayers: false,
+        canReorderPlayers: false,
+        commentaryEnabled: false,
+        personaId: 'chad',
+        setCurrentCommentary: () => {},
+        setCommentaryLoading: () => {},
+        setCommentaryPlaying: () => {},
+        ttsServiceRef: {
+          current: {
+            getSettings: () => ({ enabled: false }),
+            queueCommentary: async () => {},
+            getIsPlaying: () => false,
+          },
+        },
+        broadcastRematch: async () => {},
+        fairEndingState: { phase: 'normal' as const, checkedOutPlayerIds: [], tiebreakRound: 0, tiebreakPlayerIds: [], tiebreakScores: {}, winnerId: null },
+      });
+
+      return { actions, localTurn, ongoingTurnRef };
+    });
+
+    await act(async () => {
+      await result.current.actions.handleBoardClick(0, 0, throwResult);
+    });
+
+    expect(result.current.actions.pendingCheckout).toMatchObject({
+      playerId: 'player-1',
+      playerName: 'Player One',
+      segment: 'D5',
+      scored: 10,
+      startScoreBeforeDart: 10,
+      consequence: 'match',
+    });
+    expect(result.current.localTurn).toEqual({ playerId: null, darts: [] });
+    expect(result.current.ongoingTurnRef.current).toBeNull();
+    expect(apiRequestMock).not.toHaveBeenCalled();
+  });
+
+  it('cancels a pending checkout without changing the turn state', async () => {
+    const players: Player[] = [
+      { id: 'player-1', display_name: 'Player One' },
+      { id: 'player-2', display_name: 'Player Two' },
+    ];
+
+    const match: MatchRecord = {
+      id: 'match-1',
+      mode: 'x01',
+      start_score: '301',
+      finish: 'double_out',
+      legs_to_win: 1,
+    };
+
+    const currentLeg: LegRecord = {
+      id: 'leg-1',
+      match_id: 'match-1',
+      leg_number: 1,
+      starting_player_id: 'player-1',
+      winner_player_id: null,
+    };
+
+    const turns: TurnWithThrows[] = [
+      {
+        id: 'turn-1',
+        leg_id: 'leg-1',
+        player_id: 'player-1',
+        turn_number: 1,
+        total_scored: 20,
+        busted: false,
+        throws: [
+          {
+            id: 'throw-1',
+            turn_id: 'turn-1',
+            dart_index: 1,
+            segment: 'D20',
+            scored: 40,
+          },
+        ],
+      },
+    ];
+
+    const throwResult: SegmentResult = { kind: 'Double', label: 'D20', scored: 40 };
+
+    const { result } = renderHook(() => {
+      const [localTurn, setLocalTurn] = useState<{
+        playerId: string | null;
+        darts: { scored: number; label: string; kind: SegmentResult['kind'] }[];
+      }>({ playerId: null, darts: [] });
+
+      const ongoingTurnRef = useRef<{
+        turnId: string;
+        playerId: string;
+        darts: { scored: number; label: string; kind: SegmentResult['kind'] }[];
+        startScore: number;
+      } | null>(null);
+
+      const actions = useMatchActions({
+        matchId: 'match-1',
+        match,
+        players,
+        legs: [currentLeg],
+        turns,
+        turnThrowCounts: { 'turn-1': 1 },
+        currentLeg,
+        currentPlayer: players[0],
+        orderPlayers: players,
+        finishRule: 'double_out',
+        matchWinnerId: null,
+        localTurn,
+        ongoingTurnRef,
+        setLocalTurn,
+        loadAll: async () => {},
+        loadTurnsForLeg: async () => [],
+        routerPush: () => {},
+        getScoreForPlayer: () => 40,
+        canEditPlayers: false,
+        canReorderPlayers: false,
+        commentaryEnabled: false,
+        personaId: 'chad',
+        setCurrentCommentary: () => {},
+        setCommentaryLoading: () => {},
+        setCommentaryPlaying: () => {},
+        ttsServiceRef: {
+          current: {
+            getSettings: () => ({ enabled: false }),
+            queueCommentary: async () => {},
+            getIsPlaying: () => false,
+          },
+        },
+        broadcastRematch: async () => {},
+        fairEndingState: { phase: 'normal' as const, checkedOutPlayerIds: [], tiebreakRound: 0, tiebreakPlayerIds: [], tiebreakScores: {}, winnerId: null },
+      });
+
+      return { actions, localTurn, ongoingTurnRef };
+    });
+
+    await act(async () => {
+      await result.current.actions.handleBoardClick(0, 0, throwResult);
+    });
+
+    expect(result.current.localTurn.darts.map((dart) => dart.label)).toEqual(['D20']);
+    expect(result.current.ongoingTurnRef.current?.darts.map((dart) => dart.label)).toEqual(['D20']);
+
+    act(() => {
+      result.current.actions.cancelPendingCheckout();
+    });
+
+    expect(result.current.actions.pendingCheckout).toBeNull();
+    expect(result.current.localTurn.darts.map((dart) => dart.label)).toEqual(['D20']);
+    expect(result.current.ongoingTurnRef.current?.darts.map((dart) => dart.label)).toEqual(['D20']);
+    expect(apiRequestMock).not.toHaveBeenCalled();
+  });
+
+  it('confirms a pending checkout and then persists and finishes it', async () => {
+    const players: Player[] = [
+      { id: 'player-1', display_name: 'Player One' },
+      { id: 'player-2', display_name: 'Player Two' },
+    ];
+
+    const match: MatchRecord = {
+      id: 'match-1',
+      mode: 'x01',
+      start_score: '301',
+      finish: 'double_out',
+      legs_to_win: 1,
+    };
+
+    const currentLeg: LegRecord = {
+      id: 'leg-1',
+      match_id: 'match-1',
+      leg_number: 1,
+      starting_player_id: 'player-1',
+      winner_player_id: null,
+    };
+
+    apiRequestMock.mockImplementation((url: string) => {
+      if (url.endsWith('/throws')) {
+        return Promise.resolve({ turnId: 'turn-new' });
+      }
+      if (url.endsWith('/turns/turn-new')) {
+        return Promise.resolve({ ok: true, legCompleted: false, matchCompleted: false });
+      }
+      if (url.endsWith('/legs/leg-1/complete')) {
+        return Promise.resolve({ matchCompleted: true });
+      }
+      return Promise.resolve({ ok: true });
+    });
+
+    const loadAllMock = vi.fn(async () => {});
+
+    const { result } = renderHook(() => {
+      const [localTurn, setLocalTurn] = useState<{
+        playerId: string | null;
+        darts: { scored: number; label: string; kind: SegmentResult['kind'] }[];
+      }>({ playerId: null, darts: [] });
+
+      const ongoingTurnRef = useRef<{
+        turnId: string;
+        playerId: string;
+        darts: { scored: number; label: string; kind: SegmentResult['kind'] }[];
+        startScore: number;
+      } | null>(null);
+
+      const actions = useMatchActions({
+        matchId: 'match-1',
+        match,
+        players,
+        legs: [currentLeg],
+        turns: [],
+        turnThrowCounts: {},
+        currentLeg,
+        currentPlayer: players[0],
+        orderPlayers: players,
+        finishRule: 'double_out',
+        matchWinnerId: null,
+        localTurn,
+        ongoingTurnRef,
+        setLocalTurn,
+        loadAll: loadAllMock,
+        loadTurnsForLeg: async () => [],
+        routerPush: () => {},
+        getScoreForPlayer: () => 10,
+        canEditPlayers: false,
+        canReorderPlayers: false,
+        commentaryEnabled: false,
+        personaId: 'chad',
+        setCurrentCommentary: () => {},
+        setCommentaryLoading: () => {},
+        setCommentaryPlaying: () => {},
+        ttsServiceRef: {
+          current: {
+            getSettings: () => ({ enabled: false }),
+            queueCommentary: async () => {},
+            getIsPlaying: () => false,
+          },
+        },
+        broadcastRematch: async () => {},
+        fairEndingState: { phase: 'normal' as const, checkedOutPlayerIds: [], tiebreakRound: 0, tiebreakPlayerIds: [], tiebreakScores: {}, winnerId: null },
+      });
+
+      return { actions, localTurn };
+    });
+
+    await act(async () => {
+      await result.current.actions.handleBoardClick(0, 0, { kind: 'Double', label: 'D5', scored: 10 });
+    });
+
+    expect(result.current.actions.pendingCheckout).not.toBeNull();
+
+    await act(async () => {
+      await result.current.actions.confirmPendingCheckout();
+    });
+
+    expect(result.current.actions.pendingCheckout).toBeNull();
+    expect(apiRequestMock).toHaveBeenCalledWith('/api/matches/match-1/throws', {
+      body: {
+        legId: 'leg-1',
+        playerId: 'player-1',
+        dartIndex: 1,
+        segment: 'D5',
+        scored: 10,
+      },
+    });
+    expect(apiRequestMock).toHaveBeenCalledWith('/api/matches/match-1/turns/turn-new', {
+      method: 'PATCH',
+      body: { totalScored: 10, busted: false },
+    });
+    expect(apiRequestMock).toHaveBeenCalledWith('/api/matches/match-1/legs/leg-1/complete', {
+      body: { winnerPlayerId: 'player-1' },
+    });
+    expect(loadAllMock).toHaveBeenCalled();
   });
 });

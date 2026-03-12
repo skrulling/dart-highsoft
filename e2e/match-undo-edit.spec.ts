@@ -47,6 +47,49 @@ async function expectCurrentPlayer(page: import('@playwright/test').Page, name: 
   await expect(upContainer.getByText(name)).toBeVisible({ timeout: 10000 });
 }
 
+async function expectPendingCheckoutModal(page: import('@playwright/test').Page, consequenceText: string) {
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByRole('heading', { name: 'Confirm checkout', exact: true })).toBeVisible({ timeout: 10000 });
+  await expect(dialog.getByText(consequenceText, { exact: false })).toBeVisible({ timeout: 10000 });
+}
+
+async function seedPlayerOneAt10AndUp(
+  supabase: import('@supabase/supabase-js').SupabaseClient,
+  matchId: string,
+  legId: string
+) {
+  const turn1 = await createTurn(supabase, legId, TEST_PLAYERS.ONE, 1);
+  await addThrowsToTurn(supabase, turn1.id, matchId, [
+    { segment: 'T20', scored: 60, dart_index: 1 },
+    { segment: 'T20', scored: 60, dart_index: 2 },
+    { segment: 'T20', scored: 60, dart_index: 3 },
+  ]);
+  await supabase.from('turns').update({ total_scored: 180, busted: false }).eq('id', turn1.id);
+
+  const turn2 = await createTurn(supabase, legId, TEST_PLAYERS.TWO, 2);
+  await addThrowsToTurn(supabase, turn2.id, matchId, [
+    { segment: 'S20', scored: 20, dart_index: 1 },
+    { segment: 'S20', scored: 20, dart_index: 2 },
+    { segment: 'S20', scored: 20, dart_index: 3 },
+  ]);
+  await supabase.from('turns').update({ total_scored: 60, busted: false }).eq('id', turn2.id);
+
+  const turn3 = await createTurn(supabase, legId, TEST_PLAYERS.ONE, 3);
+  await addThrowsToTurn(supabase, turn3.id, matchId, [
+    { segment: 'T20', scored: 60, dart_index: 1 },
+    { segment: 'T17', scored: 51, dart_index: 2 },
+  ]);
+  await supabase.from('turns').update({ total_scored: 111, busted: false }).eq('id', turn3.id);
+
+  const turn4 = await createTurn(supabase, legId, TEST_PLAYERS.TWO, 4);
+  await addThrowsToTurn(supabase, turn4.id, matchId, [
+    { segment: 'S20', scored: 20, dart_index: 1 },
+    { segment: 'S20', scored: 20, dart_index: 2 },
+    { segment: 'S20', scored: 20, dart_index: 3 },
+  ]);
+  await supabase.from('turns').update({ total_scored: 60, busted: false }).eq('id', turn4.id);
+}
+
 async function expectMatchScore(
   page: import('@playwright/test').Page,
   name: string,
@@ -280,14 +323,15 @@ test.describe('Match Undo/Edit Functionality', () => {
 
       // Should see S20 throws
       const modal = page.locator('div.fixed.inset-0').filter({ hasText: 'Edit throws' }).first();
-      const s20Elements = modal.getByText('S20');
-      await expect(s20Elements).toHaveCount(3);
+      const throwButtons = modal.getByRole('button', { name: /^Dart [123] S20$/ });
+      await expect(throwButtons).toHaveCount(3);
 
       // Select a throw and change it
-      await s20Elements.first().click();
-      await modal.getByRole('button', { name: '19', exact: true }).click();
-      await expect(modal.getByText('S19').first()).toBeVisible();
-      await expect(s20Elements).toHaveCount(2);
+      await modal.getByRole('button', { name: 'Dart 1 S20', exact: true }).press('Enter');
+      await expect(modal.getByText('Select a new segment:', { exact: true })).toBeVisible({ timeout: 10000 });
+      await modal.getByRole('button', { name: '19', exact: true }).press('Enter');
+      await expect(modal.getByRole('button', { name: 'Dart 1 S19', exact: true })).toBeVisible();
+      await expect(throwButtons).toHaveCount(2);
 
       // Close modal
       await page.keyboard.press('Escape');
@@ -362,31 +406,30 @@ test.describe('Match Undo/Edit Functionality', () => {
 
       await expect(modal.getByText('Turn 1', { exact: true })).toBeVisible({ timeout: 15000 });
 
-      const turn1Section = modal.getByText('Turn 1', { exact: true }).locator('..').locator('..');
-      const turn1DartButton = (dartIndex: number) =>
-        turn1Section.getByText(`Dart ${dartIndex}`, { exact: true }).locator('..');
-      const turn1DartSegment = (dartIndex: number) =>
-        turn1DartButton(dartIndex).locator('div.font-mono');
+      const turn1Dart1Button = (segment: string) =>
+        modal.getByRole('button', { name: `Dart 1 ${segment}`, exact: true }).first();
+      const turn1Dart2Button = (segment: string) =>
+        modal.getByRole('button', { name: `Dart 2 ${segment}`, exact: true }).first();
 
-      await expect(turn1DartSegment(1)).toHaveText('S20', { timeout: 15000 });
-      await expect(turn1DartSegment(2)).toHaveText('S20', { timeout: 15000 });
+      await expect(turn1Dart1Button('S20')).toBeVisible({ timeout: 15000 });
+      await expect(turn1Dart2Button('S20')).toBeVisible({ timeout: 15000 });
 
       // Change historical throw Turn 1 / Dart 1: S20 -> T20.
-      await turn1DartButton(1).click();
+      await turn1Dart1Button('S20').press('Enter');
       await expect(modal.getByText('Select a new segment:', { exact: true })).toBeVisible({ timeout: 15000 });
-      await modal.getByRole('button', { name: 'Triple' }).click();
-      await modal.getByRole('button', { name: '20', exact: true }).click();
-      await expect(turn1DartSegment(1)).toHaveText('T20', { timeout: 15000 });
+      await modal.getByRole('button', { name: 'Triple' }).press('Enter');
+      await modal.getByRole('button', { name: '20', exact: true }).press('Enter');
+      await expect(turn1Dart1Button('T20')).toBeVisible({ timeout: 15000 });
 
       // After an edit, the modal reloads and clears selection.
       await expect(modal.getByText('Select a throw above to edit')).toBeVisible({ timeout: 15000 });
 
       // Change historical throw Turn 1 / Dart 2: S20 -> T20.
-      await turn1DartButton(2).click();
+      await turn1Dart2Button('S20').press('Enter');
       await expect(modal.getByText('Select a new segment:', { exact: true })).toBeVisible({ timeout: 15000 });
-      await modal.getByRole('button', { name: 'Triple' }).click();
-      await modal.getByRole('button', { name: '20', exact: true }).click();
-      await expect(turn1DartSegment(2)).toHaveText('T20', { timeout: 15000 });
+      await modal.getByRole('button', { name: 'Triple' }).press('Enter');
+      await modal.getByRole('button', { name: '20', exact: true }).press('Enter');
+      await expect(turn1Dart2Button('T20')).toBeVisible({ timeout: 15000 });
 
       // Close modal and verify:
       // - Current player stays Player One (incomplete turn still theirs)
@@ -435,6 +478,45 @@ test.describe('Match Undo/Edit Functionality', () => {
   });
 
   test.describe('Edge Cases', () => {
+    test('checkout requires confirmation and can be canceled back to the active game state', async ({ page, supabase, createMatch }) => {
+      const { matchId, legId } = await createMatch({ startScore: 301, finish: 'double_out', legsToWin: 1 });
+      await seedPlayerOneAt10AndUp(supabase, matchId, legId);
+
+      await page.goto(`/match/${matchId}`);
+      await waitForMatchLoad(page, 10);
+      await expectCurrentPlayer(page, PLAYER_NAMES.ONE);
+
+      await page.getByRole('button', { name: 'Double' }).click();
+      await page.getByRole('button', { name: '5', exact: true }).click();
+
+      await expectPendingCheckoutModal(page, 'win the match');
+      await expectMatchScore(page, PLAYER_NAMES.ONE, 10, { timeout: 10000 });
+
+      await page.getByRole('button', { name: 'Cancel checkout', exact: true }).click();
+
+      await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
+      await expectMatchScore(page, PLAYER_NAMES.ONE, 10, { timeout: 10000 });
+      await expectCurrentPlayer(page, PLAYER_NAMES.ONE);
+      await expect(page.getByText('wins the match', { exact: false })).not.toBeVisible();
+    });
+
+    test('confirming a checkout ends the match', async ({ page, supabase, createMatch }) => {
+      const { matchId, legId } = await createMatch({ startScore: 301, finish: 'double_out', legsToWin: 1 });
+      await seedPlayerOneAt10AndUp(supabase, matchId, legId);
+
+      await page.goto(`/match/${matchId}`);
+      await waitForMatchLoad(page, 10);
+
+      await page.getByRole('button', { name: 'Double' }).click();
+      await page.getByRole('button', { name: '5', exact: true }).click();
+
+      await expectPendingCheckoutModal(page, 'win the match');
+      await page.getByRole('button', { name: 'Confirm checkout', exact: true }).click();
+
+      await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
+      await expect(page.getByText('wins the match', { exact: false })).toBeVisible({ timeout: 15000 });
+    });
+
     test('undo is disabled when match is won', async ({ page, createMatch }) => {
       const { matchId } = await createMatch({
         startScore: 201,

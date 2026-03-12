@@ -47,6 +47,16 @@ async function expectWinner(page: import('@playwright/test').Page, name: string)
   await expect(winnerSection.getByText(name, { exact: true })).toBeVisible({ timeout: 5000 });
 }
 
+async function expectPendingCheckoutModal(page: import('@playwright/test').Page, consequenceText: string) {
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByRole('heading', { name: 'Confirm checkout', exact: true })).toBeVisible({ timeout: 10000 });
+  await expect(dialog.getByText(consequenceText, { exact: false })).toBeVisible({ timeout: 10000 });
+}
+
+async function confirmCheckout(page: import('@playwright/test').Page) {
+  await page.getByRole('button', { name: 'Confirm checkout', exact: true }).click();
+}
+
 async function throwDart(page: import('@playwright/test').Page, value: string, modifier?: 'Double' | 'Triple') {
   if (modifier) {
     await page.getByRole('button', { name: modifier }).click();
@@ -167,6 +177,9 @@ test.describe('Fair Ending', () => {
     // Player One checks out: S20 (20 -> 0)
     await throwDart(page, '20');
 
+    await expectPendingCheckoutModal(page, 'start fair ending resolution');
+    await confirmCheckout(page);
+
     // Fair ending: should show "Completing round" banner and Player Two should be up
     await expectBanner(page, 'Completing round');
     await expectCheckedOutBadge(page, PLAYER_NAMES.ONE);
@@ -199,6 +212,7 @@ test.describe('Fair Ending', () => {
     // Player One checks out: S20
     await expectCurrentPlayer(page, PLAYER_NAMES.ONE);
     await throwDart(page, '20');
+    await confirmCheckout(page);
 
     // Completing round: Player Two is up
     await expectBanner(page, 'Completing round');
@@ -206,6 +220,7 @@ test.describe('Fair Ending', () => {
 
     // Player Two also checks out: S20
     await throwDart(page, '20');
+    await confirmCheckout(page);
 
     // Both checked out -> tiebreak should start
     await expectBanner(page, 'Tiebreak');
@@ -246,9 +261,11 @@ test.describe('Fair Ending', () => {
     // Both players check out
     await expectCurrentPlayer(page, PLAYER_NAMES.ONE);
     await throwDart(page, '20'); // P1 checks out
+    await confirmCheckout(page);
 
     await expectCurrentPlayer(page, PLAYER_NAMES.TWO);
     await throwDart(page, '20'); // P2 checks out
+    await confirmCheckout(page);
 
     // Tiebreak round 1
     await expectBanner(page, 'Tiebreak');
@@ -300,6 +317,7 @@ test.describe('Fair Ending', () => {
     // Player One checks out with first dart: S20 (checkout finishes the turn immediately)
     await expectCurrentPlayer(page, PLAYER_NAMES.ONE);
     await throwDart(page, '20');
+    await confirmCheckout(page);
 
     // Should immediately go to completing_round, Player Two is up
     await expectCheckedOutBadge(page, PLAYER_NAMES.ONE);
@@ -358,6 +376,7 @@ test.describe('Fair Ending', () => {
     // Both at 20, double_out. P1 checks out with D10
     await expectCurrentPlayer(page, PLAYER_NAMES.ONE);
     await throwDart(page, '10', 'Double');
+    await confirmCheckout(page);
 
     // Completing round: P2 is up
     await expectBanner(page, 'Completing round');
@@ -390,6 +409,7 @@ test.describe('Fair Ending', () => {
     // Player One checks out: S20 -> immediate win, no completing round
     await expectCurrentPlayer(page, PLAYER_NAMES.ONE);
     await throwDart(page, '20');
+    await confirmCheckout(page);
 
     // Should immediately show winner, NOT "Completing round"
     await expectWinner(page, PLAYER_NAMES.ONE);
@@ -417,6 +437,7 @@ test.describe('Fair Ending', () => {
     // Player One checks out: S20 (20 -> 0)
     await expectCurrentPlayer(page, PLAYER_NAMES.ONE);
     await throwDart(page, '20');
+    await confirmCheckout(page);
 
     // Completing round: Player Two is up with 20 remaining
     await expectBanner(page, 'Completing round');
@@ -460,6 +481,7 @@ test.describe('Fair Ending', () => {
 
     // Player One checks out: S20 (20 -> 0)
     await throwDart(page, '20');
+    await confirmCheckout(page);
 
     // Fair ending: completing round
     await expectBanner(page, 'Completing round');
@@ -500,6 +522,7 @@ test.describe('Fair Ending', () => {
     // Player One checks out: S20
     await expectCurrentPlayer(page, PLAYER_NAMES.ONE);
     await throwDart(page, '20');
+    await confirmCheckout(page);
 
     // Completing round
     await expectBanner(page, 'Completing round');
@@ -513,6 +536,7 @@ test.describe('Fair Ending', () => {
     // Player Three checks out: S20
     await expectCurrentPlayer(page, PLAYER_NAMES.THREE);
     await throwDart(page, '20');
+    await confirmCheckout(page);
 
     // Tiebreak between P1 and P3
     await expectBanner(page, 'Tiebreak');
@@ -551,6 +575,7 @@ test.describe('Fair Ending', () => {
     // Player One checks out: S20
     await expectCurrentPlayer(page, PLAYER_NAMES.ONE);
     await throwDart(page, '20');
+    await confirmCheckout(page);
 
     // Completing round
     await expectBanner(page, 'Completing round');
@@ -585,6 +610,7 @@ test.describe('Fair Ending', () => {
     // Player One checks out: S20
     await expectCurrentPlayer(page, PLAYER_NAMES.ONE);
     await throwDart(page, '20');
+    await confirmCheckout(page);
 
     // Completing round: Player Two is up
     await expectBanner(page, 'Completing round');
@@ -623,10 +649,12 @@ test.describe('Fair Ending', () => {
     // Both players check out to enter tiebreak
     await expectCurrentPlayer(page, PLAYER_NAMES.ONE);
     await throwDart(page, '20'); // P1 checks out
+    await confirmCheckout(page);
 
     await expectBanner(page, 'Completing round');
     await expectCurrentPlayer(page, PLAYER_NAMES.TWO);
     await throwDart(page, '20'); // P2 checks out
+    await confirmCheckout(page);
 
     // Tiebreak round 1
     await expectBanner(page, 'Tiebreak');
@@ -674,6 +702,7 @@ test.describe('Fair Ending', () => {
     // Player One checks out
     await expectCurrentPlayer(page, PLAYER_NAMES.ONE);
     await throwDart(page, '20');
+    await confirmCheckout(page);
 
     // Player Two completes round without checking out
     await expectBanner(page, 'Completing round');

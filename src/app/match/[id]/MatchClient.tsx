@@ -418,6 +418,9 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     setEndGameDialogOpen,
     endGameLoading,
     rematchLoading,
+    pendingCheckout,
+    confirmPendingCheckout,
+    cancelPendingCheckout,
     handleBoardClick,
     undoLastThrow,
     openEditModal,
@@ -460,7 +463,6 @@ export default function MatchClient({ matchId }: { matchId: string }) {
     ttsServiceRef,
     broadcastRematch: realtime.broadcastRematch,
     fairEndingState,
-    startScore,
   });
 
   // When fair ending resolves a winner, end the leg (scoring client only - spectators must not trigger this)
@@ -571,6 +573,9 @@ export default function MatchClient({ matchId }: { matchId: string }) {
         onEndGameEarly={endGameEarly}
         rematchLoading={rematchLoading}
         onStartRematch={startRematch}
+        pendingCheckout={pendingCheckout}
+        onConfirmPendingCheckout={confirmPendingCheckout}
+        onCancelPendingCheckout={cancelPendingCheckout}
         editOpen={editOpen}
         onEditOpenChange={setEditOpen}
         editingThrows={editingThrows}

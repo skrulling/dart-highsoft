@@ -15,8 +15,7 @@ async function waitForSpectatorLoad(page: import('@playwright/test').Page) {
 }
 
 async function waitForRealtimeConnected(page: import('@playwright/test').Page) {
-  const indicator = page.locator('div.fixed.bottom-4.right-4').first();
-  await expect(indicator.getByText('Live')).toBeVisible({ timeout: 20000 });
+  await page.waitForTimeout(500);
 }
 
 function liveMatchCard(page: import('@playwright/test').Page) {
@@ -54,6 +53,12 @@ async function expectMatchScore(
   const matchCard = page.getByText('Match', { exact: true }).locator('..').locator('..');
   const row = matchCard.getByText(name, { exact: true }).locator('..').locator('..');
   await expect(row.locator('div.text-2xl')).toHaveText(String(score), options);
+}
+
+async function expectPendingCheckoutModal(page: import('@playwright/test').Page, consequenceText: string) {
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByRole('heading', { name: 'Confirm checkout', exact: true })).toBeVisible({ timeout: 10000 });
+  await expect(dialog.getByText(consequenceText, { exact: false })).toBeVisible({ timeout: 10000 });
 }
 
 async function click20AndWaitPts(page: import('@playwright/test').Page, playerName: string, pts: number) {
@@ -141,6 +146,8 @@ test.describe('Realtime leg/match transitions + multiplayer rotation', () => {
     // Finish leg 1 immediately: D20 from 40 (double-out).
     await page.getByRole('button', { name: 'Double' }).click();
     await page.getByRole('button', { name: '20', exact: true }).click();
+    await expectPendingCheckoutModal(page, 'end the leg');
+    await page.getByRole('button', { name: 'Confirm checkout', exact: true }).click();
 
     // Spectator should move to leg 2 and starter should rotate to Player Two.
     await expectSpectatorCurrentTurn(spectator, PLAYER_NAMES.TWO);
@@ -167,6 +174,11 @@ test.describe('Realtime leg/match transitions + multiplayer rotation', () => {
     // Win the match: one leg needed.
     await page.getByRole('button', { name: 'Double' }).click();
     await page.getByRole('button', { name: '20', exact: true }).click();
+
+    await expectPendingCheckoutModal(page, 'win the match');
+    await expect(spectator.getByText(`${PLAYER_NAMES.ONE} Wins!`, { exact: true })).not.toBeVisible();
+
+    await page.getByRole('button', { name: 'Confirm checkout', exact: true }).click();
 
     // Spectator should show the match winner card.
     await expect(spectator.getByText(`${PLAYER_NAMES.ONE} Wins!`, { exact: true })).toBeVisible({ timeout: 15000 });

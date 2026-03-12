@@ -202,6 +202,8 @@ test.describe('Tournament', () => {
 
     // Throw S20 to check out (whoever is up, both players at 20 remaining)
     await throwDart(page, '20');
+    await expect(page.getByRole('heading', { name: 'Confirm checkout', exact: true })).toBeVisible({ timeout: 10000 });
+    await page.getByRole('button', { name: 'Confirm checkout', exact: true }).click();
 
     // Verify winner modal
     await expect(page.getByText('wins the match', { exact: false })).toBeVisible({

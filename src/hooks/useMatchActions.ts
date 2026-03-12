@@ -17,6 +17,17 @@ type LocalTurn = {
   darts: { scored: number; label: string; kind: SegmentResult['kind'] }[];
 };
 
+export type PendingCheckout = {
+  playerId: string;
+  playerName: string;
+  segment: string;
+  scored: number;
+  startScoreBeforeDart: number;
+  remainingAfterDart: number;
+  consequence: 'leg' | 'match' | 'fair_ending';
+  result: SegmentResult;
+};
+
 function segmentLabelToKind(label: string): SegmentResult['kind'] {
   if (label === 'Miss') return 'Miss';
   if (label === 'SB') return 'OuterBull';
@@ -64,7 +75,6 @@ type UseMatchActionsArgs = {
   }>;
   broadcastRematch?: (newMatchId: string) => Promise<void>;
   fairEndingState: FairEndingState;
-  startScore: number;
 };
 
 type UseMatchActionsResult = {
@@ -82,6 +92,9 @@ type UseMatchActionsResult = {
   setEndGameDialogOpen: (open: boolean) => void;
   endGameLoading: boolean;
   rematchLoading: boolean;
+  pendingCheckout: PendingCheckout | null;
+  confirmPendingCheckout: () => Promise<void>;
+  cancelPendingCheckout: () => void;
   handleBoardClick: (_x: number, _y: number, result: SegmentResult) => Promise<void>;
   undoLastThrow: () => Promise<void>;
   openEditModal: () => Promise<void>;
@@ -127,7 +140,6 @@ export function useMatchActions(args: UseMatchActionsArgs): UseMatchActionsResul
     ttsServiceRef,
     broadcastRematch,
     fairEndingState,
-    startScore,
   } = args;
 
   const [editOpen, setEditOpen] = useState(false);
@@ -139,7 +151,14 @@ export function useMatchActions(args: UseMatchActionsArgs): UseMatchActionsResul
   const [endGameDialogOpen, setEndGameDialogOpen] = useState(false);
   const [endGameLoading, setEndGameLoading] = useState(false);
   const [rematchLoading, setRematchLoading] = useState(false);
+  const [pendingCheckout, setPendingCheckout] = useState<PendingCheckout | null>(null);
   const scoringQueueRef = useRef<Promise<void>>(Promise.resolve());
+
+  const enqueueScoringAction = useCallback(async (run: () => Promise<void>) => {
+    const next = scoringQueueRef.current.then(run, run);
+    scoringQueueRef.current = next.catch(() => {});
+    await next;
+  }, []);
 
   const syncTurnFromStateIfNeeded = useCallback(() => {
     if (!currentLeg || !currentPlayer) return null as string | null;
@@ -392,13 +411,47 @@ export function useMatchActions(args: UseMatchActionsArgs): UseMatchActionsResul
     [currentLeg, match, matchId, players, loadAll, commentaryEnabled, triggerMatchRecap]
   );
 
+  const getPendingCheckoutConsequence = useCallback((): PendingCheckout['consequence'] => {
+    if (match?.fair_ending) return 'fair_ending';
+    const nextLegWins = legs.reduce((count, leg) => (
+      leg.winner_player_id === currentPlayer?.id ? count + 1 : count
+    ), 0) + 1;
+    return nextLegWins >= (match?.legs_to_win ?? 1) ? 'match' : 'leg';
+  }, [currentPlayer?.id, legs, match?.fair_ending, match?.legs_to_win]);
+
   const processBoardClick = useCallback(
-    async (_x: number, _y: number, result: SegmentResult) => {
+    async (_x: number, _y: number, result: SegmentResult, opts?: { bypassCheckoutConfirmation?: boolean }) => {
       if (matchWinnerId) return; // match over
       if (!currentLeg || !currentPlayer) return;
       const isTiebreak = fairEndingState.phase === 'tiebreak';
       const clickStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
       let turnId = syncTurnFromStateIfNeeded();
+
+      // In tiebreak, there are no bust/checkout rules - just accumulate raw score
+      let outcome;
+      const currentStartScore = ongoingTurnRef.current?.startScore ?? getScoreForPlayer(currentPlayer.id);
+      const activeDarts = ongoingTurnRef.current?.darts ?? localTurn.darts;
+      const localSubtotal = activeDarts.reduce((s, d) => s + d.scored, 0);
+      if (isTiebreak) {
+        outcome = { newScore: 0, busted: false, finished: false };
+      } else {
+        outcome = applyThrow(currentStartScore - localSubtotal, result, finishRule);
+      }
+
+      if (outcome.finished && !opts?.bypassCheckoutConfirmation) {
+        setPendingCheckout({
+          playerId: currentPlayer.id,
+          playerName: currentPlayer.display_name,
+          segment: result.label,
+          scored: result.scored,
+          startScoreBeforeDart: currentStartScore - localSubtotal,
+          remainingAfterDart: outcome.newScore,
+          consequence: getPendingCheckoutConsequence(),
+          result,
+        });
+        return;
+      }
+
       if (!turnId) {
         turnId = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
         ongoingTurnRef.current = {
@@ -408,16 +461,6 @@ export function useMatchActions(args: UseMatchActionsArgs): UseMatchActionsResul
           startScore: getScoreForPlayer(currentPlayer.id),
         };
         setLocalTurn({ playerId: currentPlayer.id, darts: [] });
-      }
-
-      // In tiebreak, there are no bust/checkout rules - just accumulate raw score
-      let outcome;
-      if (isTiebreak) {
-        outcome = { newScore: 0, busted: false, finished: false };
-      } else {
-        const myScoreStart = ongoingTurnRef.current?.startScore ?? getScoreForPlayer(currentPlayer.id);
-        const localSubtotal = localTurn.darts.reduce((s, d) => s + d.scored, 0);
-        outcome = applyThrow(myScoreStart - localSubtotal, result, finishRule);
       }
       const hadPersistedTurnId = !turnId.startsWith('pending-');
 
@@ -523,6 +566,7 @@ export function useMatchActions(args: UseMatchActionsArgs): UseMatchActionsResul
       setLocalTurn,
       finishTurn,
       endLegAndMaybeMatch,
+      getPendingCheckoutConsequence,
       matchId,
       match?.fair_ending,
       fairEndingState,
@@ -532,17 +576,29 @@ export function useMatchActions(args: UseMatchActionsArgs): UseMatchActionsResul
 
   const handleBoardClick = useCallback(
     async (_x: number, _y: number, result: SegmentResult) => {
-      const run = async () => {
+      if (pendingCheckout) return;
+      await enqueueScoringAction(async () => {
         await processBoardClick(_x, _y, result);
-      };
-      const next = scoringQueueRef.current.then(run, run);
-      scoringQueueRef.current = next.catch(() => {});
-      await next;
+      });
     },
-    [processBoardClick]
+    [enqueueScoringAction, pendingCheckout, processBoardClick]
   );
 
+  const confirmPendingCheckout = useCallback(async () => {
+    if (!pendingCheckout) return;
+    const confirmedResult = pendingCheckout.result;
+    setPendingCheckout(null);
+    await enqueueScoringAction(async () => {
+      await processBoardClick(0, 0, confirmedResult, { bypassCheckoutConfirmation: true });
+    });
+  }, [enqueueScoringAction, pendingCheckout, processBoardClick]);
+
+  const cancelPendingCheckout = useCallback(() => {
+    setPendingCheckout(null);
+  }, []);
+
   const undoLastThrow = useCallback(async () => {
+    if (pendingCheckout) return;
     if (!currentLeg) return;
     const supabase = await getSupabaseClient();
     // If we have an empty local turn (no darts), remove it before undoing previous throws
@@ -709,7 +765,7 @@ export function useMatchActions(args: UseMatchActionsArgs): UseMatchActionsResul
       await loadAll();
       return;
     }
-  }, [currentLeg, ongoingTurnRef, setLocalTurn, currentPlayer, getScoreForPlayer, loadAll, legs, turns, orderPlayers, matchId]);
+  }, [currentLeg, ongoingTurnRef, pendingCheckout, setLocalTurn, currentPlayer, getScoreForPlayer, loadAll, legs, turns, orderPlayers, matchId]);
 
   const openEditModal = useCallback(async () => {
     if (!currentLeg) return;
@@ -923,6 +979,9 @@ export function useMatchActions(args: UseMatchActionsArgs): UseMatchActionsResul
     setEndGameDialogOpen,
     endGameLoading,
     rematchLoading,
+    pendingCheckout,
+    confirmPendingCheckout,
+    cancelPendingCheckout,
     handleBoardClick,
     undoLastThrow,
     openEditModal,

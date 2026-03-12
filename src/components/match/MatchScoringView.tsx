@@ -19,6 +19,7 @@ import { EditThrowsModal, type EditableThrow } from '@/components/match/EditThro
 import { TurnsHistoryCard } from '@/components/TurnsHistoryCard';
 import { EloChangesDisplay } from '@/components/match/EloChangesDisplay';
 import type { MatchEloChange } from '@/hooks/useMatchEloChanges';
+import type { PendingCheckout } from '@/hooks/useMatchActions';
 import { computeCheckoutSuggestions } from '@/utils/checkoutSuggestions';
 import { computeHit, type SegmentResult } from '@/utils/dartboard';
 import type { LegRecord, MatchRecord, Player, TurnRecord, TurnWithThrows } from '@/lib/match/types';
@@ -45,6 +46,9 @@ type Props = {
   onEndGameEarly: () => void;
   rematchLoading: boolean;
   onStartRematch: () => void;
+  pendingCheckout: PendingCheckout | null;
+  onConfirmPendingCheckout: () => void | Promise<void>;
+  onCancelPendingCheckout: () => void;
   editOpen: boolean;
   onEditOpenChange: (open: boolean) => void;
   editingThrows: EditableThrow[];
@@ -98,6 +102,9 @@ export function MatchScoringView({
   onEndGameEarly,
   rematchLoading,
   onStartRematch,
+  pendingCheckout,
+  onConfirmPendingCheckout,
+  onCancelPendingCheckout,
   editOpen,
   onEditOpenChange,
   editingThrows,
@@ -131,6 +138,7 @@ export function MatchScoringView({
   isTournamentMatch = false,
   tournamentId,
 }: Props) {
+  const inputLocked = !!matchWinnerId || !!pendingCheckout;
   const currentPlayerLastTurn = useMemo(() => {
     if (!currentPlayer) return null;
     for (let i = turns.length - 1; i >= 0; i--) {
@@ -190,6 +198,33 @@ export function MatchScoringView({
           </span>
         </div>
       </div>
+      <Dialog open={!!pendingCheckout} onOpenChange={(open) => { if (!open) onCancelPendingCheckout(); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirm checkout</DialogTitle>
+            <DialogDescription>
+              {pendingCheckout
+                ? `${pendingCheckout.playerName} hit ${pendingCheckout.segment} from ${pendingCheckout.startScoreBeforeDart} remaining.`
+                : ''}
+              <br />
+              <br />
+              {pendingCheckout?.consequence === 'match'
+                ? 'This will win the match.'
+                : pendingCheckout?.consequence === 'fair_ending'
+                  ? 'This will start fair ending resolution for the round.'
+                  : 'This will end the leg.'}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={onCancelPendingCheckout}>
+              Cancel checkout
+            </Button>
+            <Button onClick={() => void onConfirmPendingCheckout()}>
+              Confirm checkout
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       {/* Scoring input at top (mobile keypad or desktop board) */}
       <div className="w-full space-y-6 md:space-y-0 md:grid md:grid-cols-[minmax(320px,25%)_1fr] md:gap-4 lg:gap-6 md:items-start">
         <div className="space-y-3 md:col-start-2 md:row-start-1">
@@ -298,12 +333,12 @@ export function MatchScoringView({
             })()}
           </div>
           )}
-          <div className={`${matchWinnerId ? 'pointer-events-none opacity-50' : ''} md:hidden`}>
+          <div className={`${inputLocked ? 'pointer-events-none opacity-50' : ''} md:hidden`}>
             <MobileKeypad onHit={(seg) => onBoardClick(0, 0, seg as unknown as ReturnType<typeof computeHit>)} />
           </div>
           {/* Desktop: board with buttons on the right */}
           <div className="hidden md:flex items-start gap-4">
-            <div className={`flex-1 flex justify-center ${matchWinnerId ? 'pointer-events-none opacity-50' : ''}`}>
+            <div className={`flex-1 flex justify-center ${inputLocked ? 'pointer-events-none opacity-50' : ''}`}>
               <Dartboard onHit={onBoardClick} />
             </div>
             <div className="flex flex-col gap-2 pt-4">
@@ -311,7 +346,7 @@ export function MatchScoringView({
                 variant="outline"
                 size="sm"
                 onClick={onUndoLastThrow}
-                disabled={!!matchWinnerId}
+                disabled={inputLocked}
                 className="text-xs whitespace-nowrap"
               >
                 Undo dart
@@ -320,7 +355,7 @@ export function MatchScoringView({
                 variant="outline"
                 size="sm"
                 onClick={onOpenEditModal}
-                disabled={!currentLeg}
+                disabled={!currentLeg || !!pendingCheckout}
                 className="text-xs whitespace-nowrap"
               >
                 Edit throws
@@ -330,7 +365,7 @@ export function MatchScoringView({
                   variant="outline"
                   size="sm"
                   onClick={onOpenEditPlayersModal}
-                  disabled={!canEditPlayers}
+                  disabled={!canEditPlayers || !!pendingCheckout}
                   className="text-xs whitespace-nowrap"
                 >
                   Edit players
@@ -342,7 +377,7 @@ export function MatchScoringView({
               {!matchWinnerId && !isTournamentMatch && (
                 <Dialog open={endGameDialogOpen} onOpenChange={onEndGameDialogOpenChange}>
                   <DialogTrigger asChild>
-                    <Button variant="destructive" size="sm" className="text-xs whitespace-nowrap">
+                    <Button variant="destructive" size="sm" className="text-xs whitespace-nowrap" disabled={!!pendingCheckout}>
                       End Game
                     </Button>
                   </DialogTrigger>
@@ -381,14 +416,14 @@ export function MatchScoringView({
           </div>
           {/* Mobile: buttons below keypad */}
           <div className="flex flex-wrap items-center gap-2 sm:gap-3 mt-2 md:hidden">
-            <Button variant="outline" size="sm" onClick={onUndoLastThrow} disabled={!!matchWinnerId} className="text-xs sm:text-sm">
+            <Button variant="outline" size="sm" onClick={onUndoLastThrow} disabled={inputLocked} className="text-xs sm:text-sm">
               Undo dart
             </Button>
-            <Button variant="outline" size="sm" onClick={onOpenEditModal} disabled={!currentLeg} className="text-xs sm:text-sm">
+            <Button variant="outline" size="sm" onClick={onOpenEditModal} disabled={!currentLeg || !!pendingCheckout} className="text-xs sm:text-sm">
               Edit throws
             </Button>
             {!isTournamentMatch && (
-              <Button variant="outline" size="sm" onClick={onOpenEditPlayersModal} disabled={!canEditPlayers} className="text-xs sm:text-sm">
+              <Button variant="outline" size="sm" onClick={onOpenEditPlayersModal} disabled={!canEditPlayers || !!pendingCheckout} className="text-xs sm:text-sm">
                 Edit players
               </Button>
             )}
@@ -532,7 +567,7 @@ export function MatchScoringView({
         {!matchWinnerId && !isTournamentMatch && (
           <Dialog open={endGameDialogOpen} onOpenChange={onEndGameDialogOpenChange}>
             <DialogTrigger asChild>
-              <Button variant="destructive" className="flex-1 sm:max-w-xs">
+              <Button variant="destructive" className="flex-1 sm:max-w-xs" disabled={!!pendingCheckout}>
                 End Game Early
               </Button>
             </DialogTrigger>

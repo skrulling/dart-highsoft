@@ -397,6 +397,7 @@ export function GridLeaderboard() {
           sorting: {
             order: 'desc',
             compare: compareNullableNumbers,
+            orderSequence: ['desc', 'asc', null]
           },
         },
         {
@@ -410,6 +411,7 @@ export function GridLeaderboard() {
           },
           sorting: {
             compare: compareTrendStrength,
+            orderSequence: ['desc', 'asc', null]
           },
           filtering: { enabled: false },
         },
@@ -424,6 +426,7 @@ export function GridLeaderboard() {
           },
           sorting: {
             compare: compareNullableNumbers,
+            orderSequence: ['desc', 'asc', null]
           },
         },
         {
@@ -437,6 +440,7 @@ export function GridLeaderboard() {
           },
           sorting: {
             compare: compareTrendStrength,
+            orderSequence: ['desc', 'asc', null]
           },
           filtering: { enabled: false },
         },
@@ -452,6 +456,7 @@ export function GridLeaderboard() {
               if (isNaN(nb)) return 1;
               return na - nb;
             },
+            orderSequence: ['desc', 'asc', null]
           },
         },
         {
@@ -475,6 +480,7 @@ export function GridLeaderboard() {
           width: 90,
           sorting: {
             compare: compareNullableNumbers,
+            orderSequence: ['desc', 'asc', null]
           },
         },
         {
@@ -491,6 +497,7 @@ export function GridLeaderboard() {
           },
           sorting: {
             compare: compareNullableNumbers,
+            orderSequence: ['desc', 'asc', null]
           },
         },
         {
@@ -505,6 +512,7 @@ export function GridLeaderboard() {
               if (isNaN(nb)) return 1;
               return na - nb;
             },
+            orderSequence: ['desc', 'asc', null]
           },
         },
       ],

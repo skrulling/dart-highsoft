@@ -61,7 +61,7 @@ export function useStatsData() {
             .limit(100000),
           supabase
             .from('matches')
-            .select('id, created_at, winner_player_id, start_score')
+            .select('id, created_at, winner_player_id, start_score, finish')
             .eq('ended_early', false)
             .order('created_at')
             .limit(100000),

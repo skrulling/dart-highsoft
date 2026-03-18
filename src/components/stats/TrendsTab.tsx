@@ -1,6 +1,7 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   computeAvgScoreTrend,
   computeFirstNineTrend,
@@ -9,6 +10,7 @@ import {
   computeBustRateTrend,
   computeTonRateOverTime,
   computePeriodComparison,
+  computeDartsPerLegTrend,
   computeTrendLine,
   computeYBounds,
 } from '@/lib/stats/computations';
@@ -84,6 +86,7 @@ function makeAvgPlotLine(value: number, label: string): any {
 
 export function TrendsTab({ playerCoreStats, legs, matches, selectedPlayer }: TrendsTabProps) {
   const { playerTurns, playerThrows, playerLegs } = playerCoreStats;
+  const [ppdFinishFilter, setPpdFinishFilter] = useState<'all' | 'single_out' | 'double_out'>('all');
 
   const comparison = useMemo(
     () => computePeriodComparison(playerTurns, playerThrows, playerLegs, legs, matches, selectedPlayer),
@@ -99,6 +102,10 @@ export function TrendsTab({ playerCoreStats, legs, matches, selectedPlayer }: Tr
   );
   const bustTrend = useMemo(() => computeBustRateTrend(playerTurns), [playerTurns]);
   const tonRateData = useMemo(() => computeTonRateOverTime(playerTurns), [playerTurns]);
+  const dplTrend = useMemo(
+    () => computeDartsPerLegTrend(playerTurns, playerThrows, playerLegs, legs, matches, selectedPlayer, ppdFinishFilter),
+    [playerTurns, playerThrows, playerLegs, legs, matches, selectedPlayer, ppdFinishFilter]
+  );
 
   // Trendlines
   const avgScoreTrendLine = useMemo(() => computeTrendLine(avgScoreTrend.rolling), [avgScoreTrend.rolling]);
@@ -106,6 +113,7 @@ export function TrendsTab({ playerCoreStats, legs, matches, selectedPlayer }: Tr
   const checkoutTrendLine = useMemo(() => computeTrendLine(checkoutTrend.rolling), [checkoutTrend.rolling]);
   const bustTrendLine = useMemo(() => computeTrendLine(bustTrend.rolling, true), [bustTrend.rolling]);
   const accuracy20TrendLine = useMemo(() => computeTrendLine(accuracy20Trend.rollingHitPct), [accuracy20Trend.rollingHitPct]);
+  const dplTrendLine = useMemo(() => computeTrendLine(dplTrend.rolling, true), [dplTrend.rolling]);
 
   const avgScoreYBounds = useMemo(() => {
     return computeYBounds([...avgScoreTrend.cumulative, ...avgScoreTrend.daily, ...avgScoreTrend.rolling, ...avgScoreTrendLine.data]);
@@ -300,6 +308,85 @@ export function TrendsTab({ playerCoreStats, legs, matches, selectedPlayer }: Tr
               headerFormat: '<span style="font-size: 10px">{point.key}</span><br/>',
             },
           }} />
+        </CardContent>
+      </Card>
+
+      {/* Darts Per Leg (Efficiency) */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-1">
+              <CardTitle>Darts Per Leg</CardTitle>
+              <CardDescription>
+                {dplTrend.categories.length > 0
+                  ? trendDescription(dplTrendLine, 'darts', true)
+                  : 'Normalized to 501-equivalent (lower = better)'}
+              </CardDescription>
+            </div>
+            <Select value={ppdFinishFilter} onValueChange={(v) => setPpdFinishFilter(v as typeof ppdFinishFilter)}>
+              <SelectTrigger className="w-[160px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All finishes</SelectItem>
+                <SelectItem value="single_out">Single Out</SelectItem>
+                <SelectItem value="double_out">Double Out</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {dplTrend.categories.length > 0 ? (
+            <Chart options={{
+              title: { text: null },
+              chart: { height: 360 },
+              xAxis: {
+                type: 'category',
+                categories: dplTrend.categories,
+                title: { text: 'Date' },
+                tickmarkPlacement: 'on',
+                labels: {
+                  step: Math.ceil((dplTrend.categories.length || 1) / 8),
+                },
+              },
+              yAxis: {
+                title: { text: 'Darts (501-equivalent)' },
+                min: computeYBounds([...dplTrend.daily, ...dplTrend.rolling, ...dplTrendLine.data]).min,
+                max: computeYBounds([...dplTrend.daily, ...dplTrend.rolling, ...dplTrendLine.data]).max,
+                plotLines: [makeAvgPlotLine(dplTrend.allTimeAvg, 'Avg')],
+                reversed: false,
+              },
+              series: [
+                {
+                  type: 'spline',
+                  name: '7-day Rolling',
+                  data: dplTrend.rolling,
+                  color: '#8b5cf6',
+                  lineWidth: 3,
+                  marker: { radius: 4, symbol: 'circle' },
+                },
+                {
+                  type: 'spline',
+                  name: 'Daily',
+                  data: dplTrend.daily,
+                  color: '#c4b5fd',
+                  dashStyle: 'ShortDash',
+                  lineWidth: 1,
+                  marker: { radius: 2, symbol: 'circle' },
+                },
+                makeTrendSeries(dplTrendLine),
+              ].filter(Boolean),
+              legend: { enabled: true },
+              tooltip: {
+                shared: true,
+                valueDecimals: 1,
+                valueSuffix: ' darts',
+                headerFormat: '<span style="font-size: 10px">{point.key}</span><br/>',
+              },
+            }} />
+          ) : (
+            <p className="text-muted-foreground text-center py-8">No won legs found for this finish rule</p>
+          )}
         </CardContent>
       </Card>
 

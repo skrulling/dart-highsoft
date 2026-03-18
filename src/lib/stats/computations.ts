@@ -825,6 +825,105 @@ export function computeTonRateOverTime(
   };
 }
 
+export type DartsPerLegTrend = {
+  categories: string[];
+  daily: number[];
+  rolling: number[];
+  allTimeAvg: number;
+};
+
+/**
+ * Compute darts-per-leg trend, normalized to 501-equivalent.
+ * A 301 leg finished in 18 darts becomes 18 * (501/301) ≈ 30 equivalent darts.
+ * This makes 201, 301, and 501 directly comparable.
+ * Lower = better.
+ */
+export function computeDartsPerLegTrend(
+  playerTurns: TurnRow[],
+  playerThrows: ThrowRow[],
+  playerLegs: LegRow[],
+  legs: LegRow[],
+  matches: MatchRow[],
+  selectedPlayer: string,
+  finishFilter: 'all' | 'single_out' | 'double_out'
+): DartsPerLegTrend {
+  const NORMALIZE_TO = 501;
+
+  const matchById = new Map<string, MatchRow>();
+  for (const m of matches) matchById.set(m.id, m);
+
+  const wonLegs = playerLegs.filter(l => {
+    if (l.winner_player_id !== selectedPlayer) return false;
+    const match = matchById.get(l.match_id);
+    if (!match) return false;
+    if (finishFilter !== 'all' && match.finish !== finishFilter) return false;
+    return true;
+  });
+
+  if (!wonLegs.length) return { categories: [], daily: [], rolling: [], allTimeAvg: 0 };
+
+  const wonLegIds = new Set(wonLegs.map(l => l.id));
+
+  const turnsByLeg = new Map<string, TurnRow[]>();
+  for (const t of playerTurns) {
+    if (!wonLegIds.has(t.leg_id)) continue;
+    let arr = turnsByLeg.get(t.leg_id);
+    if (!arr) { arr = []; turnsByLeg.set(t.leg_id, arr); }
+    arr.push(t);
+  }
+
+  const throwCountByTurn = new Map<string, number>();
+  for (const th of playerThrows) {
+    throwCountByTurn.set(th.turn_id, (throwCountByTurn.get(th.turn_id) ?? 0) + 1);
+  }
+
+  const dayStats = new Map<string, { sum: number; count: number }>();
+  let totalNorm = 0;
+  let totalLegs = 0;
+
+  for (const leg of wonLegs) {
+    const match = matchById.get(leg.match_id);
+    if (!match) continue;
+    const startScore = parseInt(match.start_score);
+    if (!startScore || startScore <= 0) continue;
+
+    const legTurns = turnsByLeg.get(leg.id);
+    if (!legTurns || !legTurns.length) continue;
+
+    let totalDarts = 0;
+    for (const t of legTurns) {
+      totalDarts += throwCountByTurn.get(t.id) ?? 3;
+    }
+    if (totalDarts === 0) continue;
+
+    // Normalize: scale darts as if the game were 501
+    const normalizedDarts = Math.round((totalDarts * (NORMALIZE_TO / startScore)) * 10) / 10;
+    totalNorm += normalizedDarts;
+    totalLegs++;
+
+    const day = new Date(leg.created_at).toISOString().slice(0, 10);
+    const entry = dayStats.get(day) ?? { sum: 0, count: 0 };
+    entry.sum += normalizedDarts;
+    entry.count++;
+    dayStats.set(day, entry);
+  }
+
+  const allTimeAvg = totalLegs > 0 ? Math.round((totalNorm / totalLegs) * 10) / 10 : 0;
+
+  const entries = Array.from(dayStats.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  const categories = entries.map(([day]) => day);
+  const daily = entries.map(([, s]) => Math.round((s.sum / s.count) * 10) / 10);
+
+  const rolling: number[] = [];
+  for (let i = 0; i < daily.length; i++) {
+    const start = Math.max(0, i - 6);
+    const window = daily.slice(start, i + 1);
+    rolling.push(Math.round((window.reduce((a, v) => a + v, 0) / window.length) * 10) / 10);
+  }
+
+  return { categories, daily, rolling, allTimeAvg };
+}
+
 export function computeYBounds(
   values: number[],
   padding: number = 2,

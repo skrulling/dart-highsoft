@@ -8,9 +8,16 @@ export function computePlayerCoreStats(
   matches: MatchRow[]
 ): PlayerCoreStats {
   const playerTurns = turns.filter(t => t.player_id === selectedPlayer);
-  const playerThrows = throws.filter(th =>
-    playerTurns.some(t => t.id === th.turn_id)
-  );
+
+  // Build lookup sets/maps once — avoids O(n×m) .some()/.find() inside loops
+  const playerTurnIds = new Set(playerTurns.map(t => t.id));
+  const playerThrows = throws.filter(th => playerTurnIds.has(th.turn_id));
+
+  // Pre-index throws by turn_id for fast per-turn lookups
+  const throwCountByTurnId = new Map<string, number>();
+  for (const th of playerThrows) {
+    throwCountByTurnId.set(th.turn_id, (throwCountByTurnId.get(th.turn_id) ?? 0) + 1);
+  }
 
   const totalScore = playerTurns.reduce((sum, t) => sum + (t.busted ? 0 : t.total_scored), 0);
   const validTurns = playerTurns.filter(t => !t.busted);
@@ -18,15 +25,13 @@ export function computePlayerCoreStats(
   const legsWon = legs.filter(l => l.winner_player_id === selectedPlayer).length;
   const matchesWon = matches.filter(m => m.winner_player_id === selectedPlayer).length;
 
-  const playerLegs = legs.filter(l =>
-    playerTurns.some(t => t.leg_id === l.id)
-  );
-  const legsPlayed = playerLegs.length;
+  // Set-based leg/match lookups instead of nested .some()
+  const playerLegIds = new Set(playerTurns.map(t => t.leg_id));
+  const playerLegs = legs.filter(l => playerLegIds.has(l.id));
 
-  const playerMatches = matches.filter(m =>
-    playerLegs.some(l => l.match_id === m.id)
-  );
-  const gamesPlayed = playerMatches.length;
+  const playerMatchIds = new Set(playerLegs.map(l => l.match_id));
+  const gamesPlayed = matches.filter(m => playerMatchIds.has(m.id)).length;
+  const legsPlayed = playerLegs.length;
 
   const gameWinRate = gamesPlayed > 0 ? Math.round((matchesWon / gamesPlayed) * 100) : 0;
   const legWinRate = legsPlayed > 0 ? Math.round((legsWon / legsPlayed) * 100) : 0;
@@ -36,18 +41,42 @@ export function computePlayerCoreStats(
     .sort((a, b) => b.total_scored - a.total_scored)
     .slice(0, 3);
 
-  // Checkout statistics
+  // --- Checkout statistics (optimized with pre-built Maps) ---
+
+  // Map leg_id -> match for O(1) lookup
+  const legById = new Map<string, LegRow>();
+  for (const l of legs) legById.set(l.id, l);
+
+  const matchById = new Map<string, MatchRow>();
+  for (const m of matches) matchById.set(m.id, m);
+
+  // Group player turns by leg_id for O(1) leg-turn lookups
+  const playerTurnsByLeg = new Map<string, TurnRow[]>();
+  for (const t of playerTurns) {
+    let arr = playerTurnsByLeg.get(t.leg_id);
+    if (!arr) { arr = []; playerTurnsByLeg.set(t.leg_id, arr); }
+    arr.push(t);
+  }
+
   const finishingLegs = playerLegs.filter(l => l.winner_player_id === selectedPlayer);
+
+  // Pre-compute cumulative scores per leg to avoid repeated filtering
   const checkoutAttempts = playerTurns.filter(t => {
-    const leg = legs.find(l => l.id === t.leg_id);
+    const leg = legById.get(t.leg_id);
     if (!leg) return false;
-    const match = matches.find(m => m.id === leg.match_id);
+    const match = matchById.get(leg.match_id);
     if (!match) return false;
 
-    const legTurns = turns.filter(turn => turn.leg_id === t.leg_id && turn.player_id === t.player_id);
-    const turnsBeforeThis = legTurns.filter(turn => turn.turn_number < t.turn_number);
-    const scoreBefore = parseInt(match.start_score) - turnsBeforeThis.reduce((sum, turn) => sum + (turn.busted ? 0 : turn.total_scored), 0);
+    const legTurns = playerTurnsByLeg.get(t.leg_id);
+    if (!legTurns) return false;
 
+    let scoredBefore = 0;
+    for (const turn of legTurns) {
+      if (turn.turn_number < t.turn_number && !turn.busted) {
+        scoredBefore += turn.total_scored;
+      }
+    }
+    const scoreBefore = parseInt(match.start_score) - scoredBefore;
     return scoreBefore <= 170 && scoreBefore > 0;
   });
 
@@ -55,25 +84,30 @@ export function computePlayerCoreStats(
   const checkoutRate = checkoutAttempts.length > 0 ? Math.round((successfulCheckouts / checkoutAttempts.length) * 100) : 0;
 
   const checkoutTurns = finishingLegs.map(leg => {
-    const legTurns = playerTurns.filter(t => t.leg_id === leg.id);
-    const sortedTurns = legTurns.sort((a, b) => a.turn_number - b.turn_number);
-    return sortedTurns[sortedTurns.length - 1];
-  }).filter(t => t && !t.busted);
+    const legTurns = playerTurnsByLeg.get(leg.id);
+    if (!legTurns || !legTurns.length) return undefined;
+    let last = legTurns[0];
+    for (const t of legTurns) {
+      if (t.turn_number > last.turn_number) last = t;
+    }
+    return last;
+  }).filter((t): t is TurnRow => t != null && !t.busted);
 
-  const highestCheckoutTurn = checkoutTurns.sort((a, b) => b.total_scored - a.total_scored)[0];
+  const highestCheckoutTurn = checkoutTurns.length
+    ? checkoutTurns.reduce((best, t) => t.total_scored > best.total_scored ? t : best)
+    : undefined;
   const highestCheckout = highestCheckoutTurn ? highestCheckoutTurn.total_scored : 0;
   const highestCheckoutDarts = highestCheckoutTurn
-    ? playerThrows.filter(th => th.turn_id === highestCheckoutTurn.id).length
+    ? (throwCountByTurnId.get(highestCheckoutTurn.id) ?? 0)
     : 0;
 
   const checkoutCounts = { 1: 0, 2: 0, 3: 0 };
-  checkoutTurns.forEach(turn => {
-    const turnThrows = playerThrows.filter(th => th.turn_id === turn.id);
-    const dartCount = turnThrows.length;
+  for (const turn of checkoutTurns) {
+    const dartCount = throwCountByTurnId.get(turn.id) ?? 0;
     if (dartCount >= 1 && dartCount <= 3) {
       checkoutCounts[dartCount as 1 | 2 | 3]++;
     }
-  });
+  }
 
   const totalCheckouts = checkoutTurns.length;
   const checkoutBreakdown = {
@@ -82,38 +116,35 @@ export function computePlayerCoreStats(
     3: totalCheckouts > 0 ? Math.round((checkoutCounts[3] / totalCheckouts) * 100) : 0
   };
 
-  // 20 and 19 target analysis
-  const throws20Area = playerThrows.filter(th => ['20', 'S20', 'D20', 'T20', '1', 'S1', '5', 'S5'].includes(th.segment));
-  const throws19Area = playerThrows.filter(th => ['19', 'S19', 'D19', 'T19', '3', 'S3', '7', 'S7'].includes(th.segment));
+  // --- 20 and 19 target analysis (single-pass segment counting) ---
+  const segmentCounts = new Map<string, number>();
+  for (const th of playerThrows) {
+    segmentCounts.set(th.segment, (segmentCounts.get(th.segment) ?? 0) + 1);
+  }
 
-  const hits20Single = playerThrows.filter(th => th.segment === '20' || th.segment === 'S20').length;
-  const hits20Double = playerThrows.filter(th => th.segment === 'D20').length;
-  const hits20Triple = playerThrows.filter(th => th.segment === 'T20').length;
+  const getCount = (seg: string) => segmentCounts.get(seg) ?? 0;
+
+  const hits20Single = getCount('20') + getCount('S20');
+  const hits20Double = getCount('D20');
+  const hits20Triple = getCount('T20');
   const hits20Total = hits20Single + hits20Double + hits20Triple;
-  const misses20Left = playerThrows.filter(th => th.segment === '5' || th.segment === 'S5').length;
-  const misses20Right = playerThrows.filter(th => th.segment === '1' || th.segment === 'S1').length;
+  const misses20Left = getCount('5') + getCount('S5');
+  const misses20Right = getCount('1') + getCount('S1');
+  const total20Attempts = hits20Total + misses20Left + misses20Right;
 
-  const hits19Single = playerThrows.filter(th => th.segment === '19' || th.segment === 'S19').length;
-  const hits19Double = playerThrows.filter(th => th.segment === 'D19').length;
-  const hits19Triple = playerThrows.filter(th => th.segment === 'T19').length;
+  const hits19Single = getCount('19') + getCount('S19');
+  const hits19Double = getCount('D19');
+  const hits19Triple = getCount('T19');
   const hits19Total = hits19Single + hits19Double + hits19Triple;
-  const misses19Left = playerThrows.filter(th => th.segment === '7' || th.segment === 'S7').length;
-  const misses19Right = playerThrows.filter(th => th.segment === '3' || th.segment === 'S3').length;
+  const misses19Left = getCount('7') + getCount('S7');
+  const misses19Right = getCount('3') + getCount('S3');
+  const total19Attempts = hits19Total + misses19Left + misses19Right;
 
-  const total20Attempts = throws20Area.length;
-  const rate20Double = total20Attempts > 0 ? Math.round((hits20Double / total20Attempts) * 100) : 0;
-  const rate20Triple = total20Attempts > 0 ? Math.round((hits20Triple / total20Attempts) * 100) : 0;
-  const rate20Single = total20Attempts > 0 ? Math.round((hits20Single / total20Attempts) * 100) : 0;
-
-  const total19Attempts = throws19Area.length;
-  const rate19Double = total19Attempts > 0 ? Math.round((hits19Double / total19Attempts) * 100) : 0;
-  const rate19Triple = total19Attempts > 0 ? Math.round((hits19Triple / total19Attempts) * 100) : 0;
-  const rate19Single = total19Attempts > 0 ? Math.round((hits19Single / total19Attempts) * 100) : 0;
+  const pct = (num: number, den: number) => den > 0 ? Math.round((num / den) * 100) : 0;
 
   const scoreDistribution = playerTurns.reduce((acc, turn) => {
     if (!turn.busted) {
-      const score = turn.total_scored;
-      const bucket = Math.floor(score / 20) * 20;
+      const bucket = Math.floor(turn.total_scored / 20) * 20;
       acc[bucket] = (acc[bucket] || 0) + 1;
     }
     return acc;
@@ -141,10 +172,16 @@ export function computePlayerCoreStats(
     scoreDistribution,
     hits20Single, hits20Double, hits20Triple, hits20Total,
     misses20Left, misses20Right,
-    total20Attempts, rate20Double, rate20Triple, rate20Single,
+    total20Attempts,
+    rate20Double: pct(hits20Double, total20Attempts),
+    rate20Triple: pct(hits20Triple, total20Attempts),
+    rate20Single: pct(hits20Single, total20Attempts),
     hits19Single, hits19Double, hits19Triple, hits19Total,
     misses19Left, misses19Right,
-    total19Attempts, rate19Double, rate19Triple, rate19Single,
+    total19Attempts,
+    rate19Double: pct(hits19Double, total19Attempts),
+    rate19Triple: pct(hits19Triple, total19Attempts),
+    rate19Single: pct(hits19Single, total19Attempts),
   };
 }
 
@@ -169,14 +206,14 @@ export function computeHitDistribution(
 
   if (!playerThrows.length) return { categories: [], data: [] };
 
-  const segmentCounts = playerThrows.reduce((acc, th) => {
+  const segmentCounts = new Map<string, number>();
+  for (const th of playerThrows) {
     if (th.segment && th.segment !== 'MISS' && th.segment !== 'Miss') {
-      acc[th.segment] = (acc[th.segment] || 0) + 1;
+      segmentCounts.set(th.segment, (segmentCounts.get(th.segment) ?? 0) + 1);
     }
-    return acc;
-  }, {} as Record<string, number>);
+  }
 
-  const sorted = Object.entries(segmentCounts)
+  const sorted = Array.from(segmentCounts.entries())
     .sort(([, a], [, b]) => b - a)
     .slice(0, 15);
 
@@ -203,8 +240,6 @@ export function computeTrebleDoubleByNumber(
   playerSegments: PlayerSegmentRow[],
   playerThrows: ThrowRow[]
 ): { categories: string[]; doubleRates: number[]; trebleRates: number[] } {
-  const segmentRows = playerSegments.filter(ps => ps.player_id === selectedPlayer);
-  const numbers = Array.from({ length: 20 }, (_, i) => i + 1);
   const categories: string[] = [];
   const doubleRates: number[] = [];
   const trebleRates: number[] = [];
@@ -217,28 +252,33 @@ export function computeTrebleDoubleByNumber(
     trebleRates.push(Math.round((trebles / total) * 100));
   };
 
+  const segmentRows = playerSegments.filter(ps => ps.player_id === selectedPlayer);
+
   if (segmentRows.length > 0) {
-    for (const n of numbers) {
-      const singles = segmentRows
-        .filter(r => r.segment === String(n) || r.segment === `S${n}`)
-        .reduce((s, r) => s + r.total_hits, 0);
-      const doubles = segmentRows
-        .filter(r => r.segment === `D${n}`)
-        .reduce((s, r) => s + r.total_hits, 0);
-      const trebles = segmentRows
-        .filter(r => r.segment === `T${n}`)
-        .reduce((s, r) => s + r.total_hits, 0);
-      addRates(n, singles, doubles, trebles);
+    // Build a Map of segment -> total_hits (single pass)
+    const hitsBySegment = new Map<string, number>();
+    for (const r of segmentRows) {
+      hitsBySegment.set(r.segment, (hitsBySegment.get(r.segment) ?? 0) + r.total_hits);
+    }
+    const getHits = (seg: string) => hitsBySegment.get(seg) ?? 0;
+
+    for (let n = 1; n <= 20; n++) {
+      addRates(n, getHits(String(n)) + getHits(`S${n}`), getHits(`D${n}`), getHits(`T${n}`));
     }
     return { categories, doubleRates, trebleRates };
   }
 
   if (!playerThrows.length) return { categories: [], doubleRates: [], trebleRates: [] };
-  for (const n of numbers) {
-    const singles = playerThrows.filter(th => th.segment === String(n) || th.segment === `S${n}`).length;
-    const doubles = playerThrows.filter(th => th.segment === `D${n}`).length;
-    const trebles = playerThrows.filter(th => th.segment === `T${n}`).length;
-    addRates(n, singles, doubles, trebles);
+
+  // Build segment count Map in a single pass instead of 60 .filter() calls
+  const counts = new Map<string, number>();
+  for (const th of playerThrows) {
+    counts.set(th.segment, (counts.get(th.segment) ?? 0) + 1);
+  }
+  const getCount = (seg: string) => counts.get(seg) ?? 0;
+
+  for (let n = 1; n <= 20; n++) {
+    addRates(n, getCount(String(n)) + getCount(`S${n}`), getCount(`D${n}`), getCount(`T${n}`));
   }
   return { categories, doubleRates, trebleRates };
 }

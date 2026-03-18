@@ -202,6 +202,8 @@ export function useStatsData() {
   return {
     summary,
     players,
+    legs,
+    matches,
     playerSegments,
     playerAdjacency,
     selectedPlayer,

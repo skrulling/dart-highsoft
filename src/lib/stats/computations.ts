@@ -488,6 +488,297 @@ export function computeAccuracy20Trend(
   return { categories, hitPct, missLeftPct, missRightPct, rollingHitPct };
 }
 
+export type PeriodComparison = {
+  recentAvg: number;
+  previousAvg: number;
+  allTimeAvg: number;
+  delta: number;        // recent - previous
+  deltaPct: number;     // percentage change
+  recentFirst9: number;
+  previousFirst9: number;
+  deltaFirst9: number;
+  recentCheckoutRate: number;
+  previousCheckoutRate: number;
+  deltaCheckout: number;
+  recentBustRate: number;
+  previousBustRate: number;
+  deltaBust: number;
+  recentTonRate: number;
+  previousTonRate: number;
+  deltaTonRate: number;
+};
+
+export function computePeriodComparison(
+  playerTurns: TurnRow[],
+  playerThrows: ThrowRow[],
+  playerLegs: LegRow[],
+  legs: LegRow[],
+  matches: MatchRow[],
+  selectedPlayer: string,
+  periodDays: number = 30
+): PeriodComparison {
+  const now = Date.now();
+  const periodMs = periodDays * 24 * 60 * 60 * 1000;
+  const recentCutoff = now - periodMs;
+  const previousCutoff = now - periodMs * 2;
+
+  const recentTurns = playerTurns.filter(t => new Date(t.created_at).getTime() >= recentCutoff);
+  const previousTurns = playerTurns.filter(t => {
+    const ts = new Date(t.created_at).getTime();
+    return ts >= previousCutoff && ts < recentCutoff;
+  });
+
+  const avgOf = (turns: TurnRow[]) => {
+    const valid = turns.filter(t => !t.busted);
+    if (!valid.length) return 0;
+    return Math.round((valid.reduce((s, t) => s + t.total_scored, 0) / valid.length) * 100) / 100;
+  };
+
+  const allTimeAvg = avgOf(playerTurns);
+  const recentAvg = avgOf(recentTurns);
+  const previousAvg = avgOf(previousTurns);
+  const delta = Math.round((recentAvg - previousAvg) * 100) / 100;
+  const deltaPct = previousAvg > 0 ? Math.round((delta / previousAvg) * 1000) / 10 : 0;
+
+  // First 9 comparison
+  const computeFirst9ForTurns = (turns: TurnRow[]) => {
+    const throwsByTurn = new Map<string, number>();
+    const turnIds = new Set(turns.map(t => t.id));
+    for (const th of playerThrows) {
+      if (turnIds.has(th.turn_id)) {
+        throwsByTurn.set(th.turn_id, (throwsByTurn.get(th.turn_id) ?? 0) + 1);
+      }
+    }
+
+    const turnsByLeg = new Map<string, TurnRow[]>();
+    for (const t of turns) {
+      let arr = turnsByLeg.get(t.leg_id);
+      if (!arr) { arr = []; turnsByLeg.set(t.leg_id, arr); }
+      arr.push(t);
+    }
+
+    let totalF9 = 0, countF9 = 0;
+    for (const legTurns of turnsByLeg.values()) {
+      const sorted = [...legTurns].sort((a, b) => a.turn_number - b.turn_number).slice(0, 3);
+      let pts = 0, darts = 0;
+      for (const t of sorted) {
+        darts += throwsByTurn.get(t.id) ?? 3;
+        pts += t.busted ? 0 : t.total_scored;
+      }
+      if (darts > 0) {
+        totalF9 += (pts / darts) * 3;
+        countF9++;
+      }
+    }
+    return countF9 > 0 ? Math.round((totalF9 / countF9) * 100) / 100 : 0;
+  };
+
+  const recentFirst9 = computeFirst9ForTurns(recentTurns);
+  const previousFirst9 = computeFirst9ForTurns(previousTurns);
+  const deltaFirst9 = Math.round((recentFirst9 - previousFirst9) * 100) / 100;
+
+  // Checkout rate comparison
+  const computeCheckoutRate = (turns: TurnRow[]) => {
+    const legIds = new Set(turns.map(t => t.leg_id));
+    const relevantLegs = playerLegs.filter(l => legIds.has(l.id));
+    const wonLegs = relevantLegs.filter(l => l.winner_player_id === selectedPlayer);
+
+    const legById = new Map<string, LegRow>();
+    for (const l of legs) legById.set(l.id, l);
+    const matchById = new Map<string, MatchRow>();
+    for (const m of matches) matchById.set(m.id, m);
+
+    const turnsByLeg = new Map<string, TurnRow[]>();
+    for (const t of turns) {
+      let arr = turnsByLeg.get(t.leg_id);
+      if (!arr) { arr = []; turnsByLeg.set(t.leg_id, arr); }
+      arr.push(t);
+    }
+
+    let attempts = 0;
+    for (const t of turns) {
+      const leg = legById.get(t.leg_id);
+      if (!leg) continue;
+      const match = matchById.get(leg.match_id);
+      if (!match) continue;
+      const legTurns = turnsByLeg.get(t.leg_id) ?? [];
+      let scoredBefore = 0;
+      for (const turn of legTurns) {
+        if (turn.turn_number < t.turn_number && !turn.busted) scoredBefore += turn.total_scored;
+      }
+      const remaining = parseInt(match.start_score) - scoredBefore;
+      if (remaining <= 170 && remaining > 0) attempts++;
+    }
+
+    return attempts > 0 ? Math.round((wonLegs.length / attempts) * 1000) / 10 : 0;
+  };
+
+  const recentCheckoutRate = computeCheckoutRate(recentTurns);
+  const previousCheckoutRate = computeCheckoutRate(previousTurns);
+  const deltaCheckout = Math.round((recentCheckoutRate - previousCheckoutRate) * 10) / 10;
+
+  // Bust rate comparison
+  const bustRateOf = (turns: TurnRow[]) => {
+    if (!turns.length) return 0;
+    return Math.round((turns.filter(t => t.busted).length / turns.length) * 1000) / 10;
+  };
+
+  const recentBustRate = bustRateOf(recentTurns);
+  const previousBustRate = bustRateOf(previousTurns);
+  const deltaBust = Math.round((recentBustRate - previousBustRate) * 10) / 10;
+
+  // Ton rate comparison (100+ as % of valid turns)
+  const tonRateOf = (turns: TurnRow[]) => {
+    const valid = turns.filter(t => !t.busted);
+    if (!valid.length) return 0;
+    const tons = valid.filter(t => t.total_scored >= 100).length;
+    return Math.round((tons / valid.length) * 1000) / 10;
+  };
+
+  const recentTonRate = tonRateOf(recentTurns);
+  const previousTonRate = tonRateOf(previousTurns);
+  const deltaTonRate = Math.round((recentTonRate - previousTonRate) * 10) / 10;
+
+  return {
+    recentAvg, previousAvg, allTimeAvg, delta, deltaPct,
+    recentFirst9, previousFirst9, deltaFirst9,
+    recentCheckoutRate, previousCheckoutRate, deltaCheckout,
+    recentBustRate, previousBustRate, deltaBust,
+    recentTonRate, previousTonRate, deltaTonRate,
+  };
+}
+
+export function computeCheckoutRateTrend(
+  playerTurns: TurnRow[],
+  playerLegs: LegRow[],
+  legs: LegRow[],
+  matches: MatchRow[],
+  selectedPlayer: string
+): { categories: string[]; daily: number[]; rolling: number[] } {
+  const legById = new Map<string, LegRow>();
+  for (const l of legs) legById.set(l.id, l);
+  const matchById = new Map<string, MatchRow>();
+  for (const m of matches) matchById.set(m.id, m);
+
+  const turnsByLeg = new Map<string, TurnRow[]>();
+  for (const t of playerTurns) {
+    let arr = turnsByLeg.get(t.leg_id);
+    if (!arr) { arr = []; turnsByLeg.set(t.leg_id, arr); }
+    arr.push(t);
+  }
+
+  // For each turn, determine if it was a checkout attempt and if it succeeded
+  const dayStats = new Map<string, { attempts: number; successes: number }>();
+
+  for (const t of playerTurns) {
+    const leg = legById.get(t.leg_id);
+    if (!leg) continue;
+    const match = matchById.get(leg.match_id);
+    if (!match) continue;
+
+    const legTurns = turnsByLeg.get(t.leg_id) ?? [];
+    let scoredBefore = 0;
+    for (const turn of legTurns) {
+      if (turn.turn_number < t.turn_number && !turn.busted) scoredBefore += turn.total_scored;
+    }
+    const remaining = parseInt(match.start_score) - scoredBefore;
+    if (remaining > 170 || remaining <= 0) continue;
+
+    const day = new Date(t.created_at).toISOString().slice(0, 10);
+    const entry = dayStats.get(day) ?? { attempts: 0, successes: 0 };
+    entry.attempts++;
+
+    // Check if this was the winning turn of the leg
+    if (leg.winner_player_id === selectedPlayer && !t.busted) {
+      const isLastTurn = !legTurns.some(
+        other => other.turn_number > t.turn_number
+      );
+      if (isLastTurn) entry.successes++;
+    }
+    dayStats.set(day, entry);
+  }
+
+  const entries = Array.from(dayStats.entries())
+    .filter(([, s]) => s.attempts > 0)
+    .sort((a, b) => a[0].localeCompare(b[0]));
+
+  const categories = entries.map(([day]) => day);
+  const daily = entries.map(([, s]) => Math.round((s.successes / s.attempts) * 1000) / 10);
+
+  const rolling: number[] = [];
+  for (let i = 0; i < daily.length; i++) {
+    const start = Math.max(0, i - 6);
+    const window = daily.slice(start, i + 1);
+    rolling.push(Math.round((window.reduce((a, v) => a + v, 0) / window.length) * 10) / 10);
+  }
+
+  return { categories, daily, rolling };
+}
+
+export function computeBustRateTrend(
+  playerTurns: TurnRow[]
+): { categories: string[]; daily: number[]; rolling: number[] } {
+  const dayStats = new Map<string, { total: number; busts: number }>();
+
+  for (const t of playerTurns) {
+    const day = new Date(t.created_at).toISOString().slice(0, 10);
+    const entry = dayStats.get(day) ?? { total: 0, busts: 0 };
+    entry.total++;
+    if (t.busted) entry.busts++;
+    dayStats.set(day, entry);
+  }
+
+  const entries = Array.from(dayStats.entries())
+    .filter(([, s]) => s.total > 0)
+    .sort((a, b) => a[0].localeCompare(b[0]));
+
+  const categories = entries.map(([day]) => day);
+  const daily = entries.map(([, s]) => Math.round((s.busts / s.total) * 1000) / 10);
+
+  const rolling: number[] = [];
+  for (let i = 0; i < daily.length; i++) {
+    const start = Math.max(0, i - 6);
+    const window = daily.slice(start, i + 1);
+    rolling.push(Math.round((window.reduce((a, v) => a + v, 0) / window.length) * 10) / 10);
+  }
+
+  return { categories, daily, rolling };
+}
+
+export function computeTonRateOverTime(
+  playerTurns: TurnRow[]
+): { categories: string[]; series: { name: string; data: number[]; color: string }[] } {
+  const dayStats = new Map<string, { valid: number; t60: number; t80: number; t100: number; t140: number; t180: number }>();
+
+  for (const t of playerTurns) {
+    if (t.busted) continue;
+    const day = new Date(t.created_at).toISOString().slice(0, 10);
+    if (!dayStats.has(day)) dayStats.set(day, { valid: 0, t60: 0, t80: 0, t100: 0, t140: 0, t180: 0 });
+    const entry = dayStats.get(day)!;
+    entry.valid++;
+    const s = t.total_scored;
+    if (s >= 180) entry.t180++;
+    else if (s >= 140) entry.t140++;
+    else if (s >= 100) entry.t100++;
+    else if (s >= 80) entry.t80++;
+    else if (s >= 60) entry.t60++;
+  }
+
+  const categories = Array.from(dayStats.keys()).sort();
+  const pct = (val: number, total: number) => total > 0 ? Math.round((val / total) * 1000) / 10 : 0;
+
+  return {
+    categories,
+    series: [
+      { name: '60–79 %', data: categories.map(d => pct(dayStats.get(d)!.t60, dayStats.get(d)!.valid)), color: '#93c5fd' },
+      { name: '80–99 %', data: categories.map(d => pct(dayStats.get(d)!.t80, dayStats.get(d)!.valid)), color: '#60a5fa' },
+      { name: '100–139 %', data: categories.map(d => pct(dayStats.get(d)!.t100, dayStats.get(d)!.valid)), color: '#3b82f6' },
+      { name: '140–179 %', data: categories.map(d => pct(dayStats.get(d)!.t140, dayStats.get(d)!.valid)), color: '#2563eb' },
+      { name: '180 %', data: categories.map(d => pct(dayStats.get(d)!.t180, dayStats.get(d)!.valid)), color: '#1d4ed8' },
+    ]
+  };
+}
+
 export function computeYBounds(
   values: number[],
   padding: number = 2,
@@ -501,6 +792,173 @@ export function computeYBounds(
     min: Math.floor((minY - padding) * roundTo) / roundTo,
     max: Math.ceil((maxY + padding) * roundTo) / roundTo,
   };
+}
+
+export type BustAnalysis = {
+  bustRate: number;
+  totalBusts: number;
+  totalTurns: number;
+  bustScoreDistribution: { categories: string[]; data: number[] };
+};
+
+export function computeBustAnalysis(playerTurns: TurnRow[]): BustAnalysis {
+  const totalTurns = playerTurns.length;
+  const bustedTurns = playerTurns.filter(t => t.busted);
+  const totalBusts = bustedTurns.length;
+  const bustRate = totalTurns > 0 ? Math.round((totalBusts / totalTurns) * 1000) / 10 : 0;
+
+  // Bucket busted turn scores to show what scores players attempt when busting
+  const buckets = new Map<string, number>();
+  for (const t of bustedTurns) {
+    const score = t.total_scored;
+    let label: string;
+    if (score <= 20) label = '1-20';
+    else if (score <= 40) label = '21-40';
+    else if (score <= 60) label = '41-60';
+    else if (score <= 80) label = '61-80';
+    else if (score <= 100) label = '81-100';
+    else label = '100+';
+    buckets.set(label, (buckets.get(label) ?? 0) + 1);
+  }
+
+  const order = ['1-20', '21-40', '41-60', '61-80', '81-100', '100+'];
+  const categories = order.filter(k => buckets.has(k));
+  const data = categories.map(k => buckets.get(k)!);
+
+  return { bustRate, totalBusts, totalTurns, bustScoreDistribution: { categories, data } };
+}
+
+export type DartsPerLegData = {
+  categories: string[];
+  data: number[];
+  avgDarts: number;
+  bestLeg: number;
+};
+
+export function computeDartsPerLeg(
+  playerTurns: TurnRow[],
+  playerThrows: ThrowRow[],
+  playerLegs: LegRow[],
+  selectedPlayer: string
+): DartsPerLegData {
+  const wonLegs = playerLegs.filter(l => l.winner_player_id === selectedPlayer);
+  if (!wonLegs.length) return { categories: [], data: [], avgDarts: 0, bestLeg: 0 };
+
+  const turnsByLeg = new Map<string, TurnRow[]>();
+  for (const t of playerTurns) {
+    let arr = turnsByLeg.get(t.leg_id);
+    if (!arr) { arr = []; turnsByLeg.set(t.leg_id, arr); }
+    arr.push(t);
+  }
+
+  const throwCountByTurn = new Map<string, number>();
+  for (const th of playerThrows) {
+    throwCountByTurn.set(th.turn_id, (throwCountByTurn.get(th.turn_id) ?? 0) + 1);
+  }
+
+  const dartCounts: number[] = [];
+  for (const leg of wonLegs) {
+    const turns = turnsByLeg.get(leg.id);
+    if (!turns) continue;
+    let totalDarts = 0;
+    for (const t of turns) {
+      totalDarts += throwCountByTurn.get(t.id) ?? 3;
+    }
+    dartCounts.push(totalDarts);
+  }
+
+  if (!dartCounts.length) return { categories: [], data: [], avgDarts: 0, bestLeg: 0 };
+
+  const bestLeg = Math.min(...dartCounts);
+  const avgDarts = Math.round((dartCounts.reduce((s, d) => s + d, 0) / dartCounts.length) * 10) / 10;
+
+  // Bucket into ranges for histogram
+  const buckets = new Map<number, number>();
+  for (const d of dartCounts) {
+    const bucket = Math.floor(d / 3) * 3; // Group in 3-dart buckets
+    buckets.set(bucket, (buckets.get(bucket) ?? 0) + 1);
+  }
+
+  const sorted = Array.from(buckets.entries()).sort(([a], [b]) => a - b);
+  return {
+    categories: sorted.map(([b]) => `${b}-${b + 2}`),
+    data: sorted.map(([, c]) => c),
+    avgDarts,
+    bestLeg,
+  };
+}
+
+export type ScoreConsistency = {
+  stdDev: number;
+  median: number;
+  avgScore: number;
+};
+
+export function computeScoreConsistency(playerTurns: TurnRow[]): ScoreConsistency {
+  const scores = playerTurns.filter(t => !t.busted).map(t => t.total_scored);
+  if (!scores.length) return { stdDev: 0, median: 0, avgScore: 0 };
+
+  const avg = scores.reduce((s, v) => s + v, 0) / scores.length;
+  const variance = scores.reduce((s, v) => s + (v - avg) ** 2, 0) / scores.length;
+  const stdDev = Math.round(Math.sqrt(variance) * 10) / 10;
+
+  const sorted = [...scores].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  const median = sorted.length % 2 !== 0
+    ? sorted[mid]
+    : Math.round(((sorted[mid - 1] + sorted[mid]) / 2) * 10) / 10;
+
+  return { stdDev, median, avgScore: Math.round(avg * 100) / 100 };
+}
+
+export type PerDartStats = {
+  avgByDart: [number, number, number];
+  countByDart: [number, number, number];
+};
+
+export function computePerDartStats(playerThrows: ThrowRow[]): PerDartStats {
+  const sums = [0, 0, 0];
+  const counts = [0, 0, 0];
+
+  for (const th of playerThrows) {
+    const idx = th.dart_index - 1; // dart_index is 1-3
+    if (idx >= 0 && idx <= 2) {
+      sums[idx] += th.scored;
+      counts[idx] += 1;
+    }
+  }
+
+  return {
+    avgByDart: [
+      counts[0] > 0 ? Math.round((sums[0] / counts[0]) * 10) / 10 : 0,
+      counts[1] > 0 ? Math.round((sums[1] / counts[1]) * 10) / 10 : 0,
+      counts[2] > 0 ? Math.round((sums[2] / counts[2]) * 10) / 10 : 0,
+    ],
+    countByDart: [counts[0], counts[1], counts[2]],
+  };
+}
+
+export type TonCounts = {
+  ton180: number;
+  ton140: number; // 140-179
+  ton100: number; // 100-139
+  ton60: number;  // 60-99
+  tonPlus: number; // 100+
+};
+
+export function computeTonCounts(playerTurns: TurnRow[]): TonCounts {
+  let ton180 = 0, ton140 = 0, ton100 = 0, ton60 = 0;
+
+  for (const t of playerTurns) {
+    if (t.busted) continue;
+    const s = t.total_scored;
+    if (s >= 180) ton180++;
+    else if (s >= 140) ton140++;
+    else if (s >= 100) ton100++;
+    else if (s >= 60) ton60++;
+  }
+
+  return { ton180, ton140, ton100, ton60, tonPlus: ton180 + ton140 + ton100 };
 }
 
 export function computeGamesPerDay(matches: MatchRow[]): number {

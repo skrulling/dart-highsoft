@@ -2,27 +2,56 @@ import { useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
-  computeTonBandsOverTime,
   computeAvgScoreTrend,
   computeFirstNineTrend,
   computeAccuracy20Trend,
+  computeCheckoutRateTrend,
+  computeBustRateTrend,
+  computeTonRateOverTime,
+  computePeriodComparison,
   computeYBounds,
 } from '@/lib/stats/computations';
-import type { PlayerCoreStats } from '@/lib/stats/types';
+import type { PlayerCoreStats, LegRow, MatchRow } from '@/lib/stats/types';
 
 const Chart = dynamic(() => import('@/components/Chart'), { ssr: false });
 
 interface TrendsTabProps {
   playerCoreStats: PlayerCoreStats;
+  legs: LegRow[];
+  matches: MatchRow[];
+  selectedPlayer: string;
 }
 
-export function TrendsTab({ playerCoreStats }: TrendsTabProps) {
-  const { playerTurns, playerThrows } = playerCoreStats;
+function DeltaIndicator({ value, suffix = '', inverted = false }: { value: number; suffix?: string; inverted?: boolean }) {
+  if (value === 0) return <span className="text-muted-foreground text-sm">no change</span>;
+  // For inverted metrics (like bust rate), negative is good
+  const isPositive = inverted ? value < 0 : value > 0;
+  const arrow = value > 0 ? '↑' : '↓';
+  const color = isPositive ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400';
+  return (
+    <span className={`text-sm font-semibold ${color}`}>
+      {arrow} {Math.abs(value)}{suffix}
+    </span>
+  );
+}
 
-  const tonBandsOverTimeData = useMemo(() => computeTonBandsOverTime(playerTurns), [playerTurns]);
+export function TrendsTab({ playerCoreStats, legs, matches, selectedPlayer }: TrendsTabProps) {
+  const { playerTurns, playerThrows, playerLegs } = playerCoreStats;
+
+  const comparison = useMemo(
+    () => computePeriodComparison(playerTurns, playerThrows, playerLegs, legs, matches, selectedPlayer),
+    [playerTurns, playerThrows, playerLegs, legs, matches, selectedPlayer]
+  );
+
   const avgScoreTrend = useMemo(() => computeAvgScoreTrend(playerTurns), [playerTurns]);
   const firstNineTrend = useMemo(() => computeFirstNineTrend(playerTurns, playerThrows), [playerTurns, playerThrows]);
   const accuracy20Trend = useMemo(() => computeAccuracy20Trend(playerTurns, playerThrows), [playerTurns, playerThrows]);
+  const checkoutTrend = useMemo(
+    () => computeCheckoutRateTrend(playerTurns, playerLegs, legs, matches, selectedPlayer),
+    [playerTurns, playerLegs, legs, matches, selectedPlayer]
+  );
+  const bustTrend = useMemo(() => computeBustRateTrend(playerTurns), [playerTurns]);
+  const tonRateData = useMemo(() => computeTonRateOverTime(playerTurns), [playerTurns]);
 
   const avgScoreYBounds = useMemo(() => {
     return computeYBounds([...avgScoreTrend.cumulative, ...avgScoreTrend.daily, ...avgScoreTrend.rolling]);
@@ -48,8 +77,52 @@ export function TrendsTab({ playerCoreStats }: TrendsTabProps) {
     };
   }, [accuracy20Trend]);
 
+  const hasPreviousData = comparison.previousAvg > 0;
+
   return (
     <div className="space-y-6">
+      {/* Period Comparison Summary */}
+      <Card>
+        <CardHeader>
+          <CardTitle>30-Day Progress</CardTitle>
+          <CardDescription>
+            {hasPreviousData
+              ? 'Last 30 days compared to previous 30 days'
+              : 'Last 30 days (not enough history for comparison)'}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            <div className="text-center p-3 bg-muted/50 rounded-lg">
+              <div className="text-2xl font-bold">{comparison.recentAvg}</div>
+              <div className="text-xs text-muted-foreground mb-1">Avg Score</div>
+              {hasPreviousData && <DeltaIndicator value={comparison.delta} />}
+            </div>
+            <div className="text-center p-3 bg-muted/50 rounded-lg">
+              <div className="text-2xl font-bold">{comparison.recentFirst9}</div>
+              <div className="text-xs text-muted-foreground mb-1">First 9 Avg</div>
+              {hasPreviousData && <DeltaIndicator value={comparison.deltaFirst9} />}
+            </div>
+            <div className="text-center p-3 bg-muted/50 rounded-lg">
+              <div className="text-2xl font-bold">{comparison.recentCheckoutRate}%</div>
+              <div className="text-xs text-muted-foreground mb-1">Checkout Rate</div>
+              {hasPreviousData && <DeltaIndicator value={comparison.deltaCheckout} suffix="pp" />}
+            </div>
+            <div className="text-center p-3 bg-muted/50 rounded-lg">
+              <div className="text-2xl font-bold">{comparison.recentBustRate}%</div>
+              <div className="text-xs text-muted-foreground mb-1">Bust Rate</div>
+              {hasPreviousData && <DeltaIndicator value={comparison.deltaBust} suffix="pp" inverted />}
+            </div>
+            <div className="text-center p-3 bg-muted/50 rounded-lg">
+              <div className="text-2xl font-bold">{comparison.recentTonRate}%</div>
+              <div className="text-xs text-muted-foreground mb-1">Ton+ Rate</div>
+              {hasPreviousData && <DeltaIndicator value={comparison.deltaTonRate} suffix="pp" />}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Average Score Over Time */}
       <Card>
         <CardHeader>
           <CardTitle>Average Score Over Time</CardTitle>
@@ -173,6 +246,108 @@ export function TrendsTab({ playerCoreStats }: TrendsTabProps) {
         </CardContent>
       </Card>
 
+      {/* Checkout Rate Trend + Bust Rate Trend */}
+      <div className="grid md:grid-cols-2 gap-6">
+        {checkoutTrend.categories.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Checkout Rate Over Time</CardTitle>
+              <CardDescription>Finishing success when on a double</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Chart options={{
+                title: { text: null },
+                chart: { height: 320 },
+                xAxis: {
+                  type: 'category',
+                  categories: checkoutTrend.categories,
+                  title: { text: 'Date' },
+                  tickmarkPlacement: 'on',
+                  labels: {
+                    step: Math.ceil((checkoutTrend.categories.length || 1) / 8),
+                  },
+                },
+                yAxis: {
+                  title: { text: 'Checkout Rate (%)' },
+                  min: 0,
+                  max: 100,
+                },
+                series: [
+                  {
+                    type: 'spline',
+                    name: '7-day Rolling',
+                    data: checkoutTrend.rolling,
+                    color: '#10b981',
+                    lineWidth: 3,
+                    marker: { radius: 4, symbol: 'circle' },
+                  },
+                  {
+                    type: 'spline',
+                    name: 'Daily',
+                    data: checkoutTrend.daily,
+                    color: '#6ee7b7',
+                    dashStyle: 'ShortDash',
+                    lineWidth: 1,
+                    marker: { radius: 2, symbol: 'circle' },
+                  },
+                ],
+                legend: { enabled: true },
+                tooltip: { shared: true, valueSuffix: '%', valueDecimals: 1 },
+              }} />
+            </CardContent>
+          </Card>
+        )}
+
+        {bustTrend.categories.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Bust Rate Over Time</CardTitle>
+              <CardDescription>Lower is better — improving players bust less</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Chart options={{
+                title: { text: null },
+                chart: { height: 320 },
+                xAxis: {
+                  type: 'category',
+                  categories: bustTrend.categories,
+                  title: { text: 'Date' },
+                  tickmarkPlacement: 'on',
+                  labels: {
+                    step: Math.ceil((bustTrend.categories.length || 1) / 8),
+                  },
+                },
+                yAxis: {
+                  title: { text: 'Bust Rate (%)' },
+                  min: 0,
+                },
+                series: [
+                  {
+                    type: 'spline',
+                    name: '7-day Rolling',
+                    data: bustTrend.rolling,
+                    color: '#ef4444',
+                    lineWidth: 3,
+                    marker: { radius: 4, symbol: 'circle' },
+                  },
+                  {
+                    type: 'spline',
+                    name: 'Daily',
+                    data: bustTrend.daily,
+                    color: '#fca5a5',
+                    dashStyle: 'ShortDash',
+                    lineWidth: 1,
+                    marker: { radius: 2, symbol: 'circle' },
+                  },
+                ],
+                legend: { enabled: true },
+                tooltip: { shared: true, valueSuffix: '%', valueDecimals: 1 },
+              }} />
+            </CardContent>
+          </Card>
+        )}
+      </div>
+
       {/* 20 Bed Accuracy */}
       <Card>
         <CardHeader>
@@ -243,30 +418,30 @@ export function TrendsTab({ playerCoreStats }: TrendsTabProps) {
         </CardContent>
       </Card>
 
-      {/* Ton Bands Over Time */}
+      {/* Ton Rate Over Time (normalized) */}
       <Card>
         <CardHeader>
-          <CardTitle>Ton Bands Over Time</CardTitle>
-          <CardDescription>Daily distribution of high-scoring turns</CardDescription>
+          <CardTitle>Ton Rate Over Time</CardTitle>
+          <CardDescription>Percentage of valid turns in each scoring band (normalized for volume)</CardDescription>
         </CardHeader>
         <CardContent>
           <Chart options={{
             title: { text: null },
             chart: { type: 'column', height: 380 },
             xAxis: {
-              categories: tonBandsOverTimeData.categories,
+              categories: tonRateData.categories,
               type: 'category',
               title: { text: 'Date' },
               labels: {
-                step: Math.ceil((tonBandsOverTimeData.categories.length || 1) / 8),
+                step: Math.ceil((tonRateData.categories.length || 1) / 8),
               },
             },
             yAxis: {
               min: 0,
-              title: { text: 'Turns' },
+              title: { text: 'Rate (%)' },
             },
             legend: { enabled: true },
-            tooltip: { shared: true },
+            tooltip: { shared: true, valueSuffix: '%' },
             plotOptions: {
               column: {
                 stacking: 'normal',
@@ -274,7 +449,7 @@ export function TrendsTab({ playerCoreStats }: TrendsTabProps) {
               },
             },
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            series: tonBandsOverTimeData.series as any,
+            series: tonRateData.series as any,
           }} />
         </CardContent>
       </Card>

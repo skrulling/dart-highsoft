@@ -172,7 +172,12 @@ export default function StatsPage() {
               </TabsContent>
 
               <TabsContent value="trends" className="space-y-6">
-                <TrendsTab playerCoreStats={stats.playerCoreStats} />
+                <TrendsTab
+                  playerCoreStats={stats.playerCoreStats}
+                  legs={stats.legs}
+                  matches={stats.matches}
+                  selectedPlayer={stats.selectedPlayer}
+                />
               </TabsContent>
             </Tabs>
           )}

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Home, Gamepad2, BarChart3, Trophy } from "lucide-react";
 import { Analytics } from "@vercel/analytics/react";
 import { MatchSpectatorHotkey } from "@/components/MatchSpectatorHotkey";
+import { QueryProvider } from "@/components/QueryProvider";
 
 // Use system fonts as fallback when Google Fonts cannot be loaded during build
 const fontVariables = 'font-sans';
@@ -40,6 +41,7 @@ export default function RootLayout({
       <body
         className={`${fontVariables} antialiased min-h-screen h-full bg-background text-foreground`}
       >
+        <QueryProvider>
         <div className="min-h-screen pb-16 md:pb-0">
           <nav className="hidden md:flex items-center justify-between px-6 py-3 border-b bg-card">
             <div className="font-semibold">Dart Scoreboard</div>
@@ -84,6 +86,7 @@ export default function RootLayout({
             </div>
           </nav>
         </div>
+        </QueryProvider>
         <Analytics />
         <MatchSpectatorHotkey />
       </body>

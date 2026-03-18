@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { getSupabaseClient } from '@/lib/supabaseClient';
 import { getEloLeaderboard, type EloLeaderboardEntry } from '@/utils/eloRating';
 import { getMultiEloLeaderboard, type MultiEloLeaderboardEntry } from '@/utils/eloRatingMultiplayer';
@@ -43,11 +43,9 @@ type MatchParticipationRow = {
 
 function buildRecentWinsByPlayer(rows: RecentFormRow[]): Map<string, number[]> {
   const recentWinsByPlayer = new Map<string, number[]>();
-
   for (const row of rows) {
     recentWinsByPlayer.set(row.player_id, row.last_10_results ?? []);
   }
-
   return recentWinsByPlayer;
 }
 
@@ -80,120 +78,83 @@ function buildGameStatsByPlayer(rows: MatchParticipationRow[]): Map<string, Play
   return stats;
 }
 
-function collectRelevantPlayerIds(
-  leaders: PlayerSummaryEntry[],
-  avgLeaders: PlayerSummaryEntry[],
-  eloLeaders: EloLeaderboardEntry[],
-  eloMultiLeaders: MultiEloLeaderboardEntry[]
-): string[] {
-  const ids = new Set<string>();
-  for (const row of leaders) ids.add(row.player_id);
-  for (const row of avgLeaders) ids.add(row.player_id);
-  for (const row of eloLeaders) ids.add(row.player_id);
-  for (const row of eloMultiLeaders) ids.add(row.player_id);
-  return [...ids];
-}
+type LeaderboardData = {
+  leaders: PlayerSummaryEntry[];
+  avgLeaders: PlayerSummaryEntry[];
+  eloLeaders: EloLeaderboardEntry[];
+  eloMultiLeaders: MultiEloLeaderboardEntry[];
+  recentWinsByPlayer: Map<string, number[]>;
+  playerGameStats: Map<string, PlayerGameStats>;
+  playerLocations: Map<string, string | null>;
+};
 
-export function useLeaderboardData(limit?: number) {
-  const [leaders, setLeaders] = useState<PlayerSummaryEntry[]>([]);
-  const [avgLeaders, setAvgLeaders] = useState<PlayerSummaryEntry[]>([]);
-  const [eloLeaders, setEloLeaders] = useState<EloLeaderboardEntry[]>([]);
-  const [eloMultiLeaders, setEloMultiLeaders] = useState<MultiEloLeaderboardEntry[]>([]);
-  const [recentWinsByPlayer, setRecentWinsByPlayer] = useState<Map<string, number[]>>(new Map());
-  const [playerGameStats, setPlayerGameStats] = useState<Map<string, PlayerGameStats>>(new Map());
-  const [playerLocations, setPlayerLocations] = useState<Map<string, string | null>>(new Map());
-  const [loading, setLoading] = useState(true);
+async function fetchLeaderboardData(limit?: number): Promise<LeaderboardData> {
+  const supabase = await getSupabaseClient();
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const supabase = await getSupabaseClient();
-        let winnersQuery = supabase
-          .from('player_summary')
-          .select('*')
-          .order('wins', { ascending: false });
-        let avgQuery = supabase
-          .from('player_summary')
-          .select('*')
-          .order('avg_per_turn', { ascending: false });
-        const recentFormQuery = supabase
-          .from('player_recent_form')
-          .select('player_id, last_10_results');
-        const gameStatsQuery = supabase
-          .from('match_players')
-          .select('player_id, matches!inner(ended_early, winner_player_id)')
-          .eq('matches.ended_early', false);
-        const locationsQuery = supabase
-          .from('players')
-          .select('id, location');
+  const [
+    { data: summaryData },
+    eloData,
+    eloMultiData,
+    { data: locData },
+    { data: recentFormData },
+    { data: gameStatsData },
+  ] = await Promise.all([
+    supabase
+      .from('player_summary')
+      .select('*')
+      .order('wins', { ascending: false }),
+    getEloLeaderboard(limit),
+    getMultiEloLeaderboard(limit),
+    supabase
+      .from('players')
+      .select('id, location'),
+    supabase
+      .from('player_recent_form')
+      .select('player_id, last_10_results'),
+    supabase
+      .from('match_players')
+      .select('player_id, matches!inner(ended_early, winner_player_id)')
+      .eq('matches.ended_early', false),
+  ]);
 
-        if (limit) {
-          winnersQuery = winnersQuery.limit(limit);
-          avgQuery = avgQuery.limit(limit);
-        }
+  const locMap = new Map<string, string | null>();
+  for (const row of (locData as unknown as PlayerLocationRow[]) ?? []) {
+    locMap.set(row.id, row.location);
+  }
 
-        const [{ data: winnersData }, eloData, eloMultiData, { data: avgData }, { data: locData }] = await Promise.all([
-          winnersQuery,
-          getEloLeaderboard(limit),
-          getMultiEloLeaderboard(limit),
-          avgQuery,
-          locationsQuery,
-        ]);
-
-        const locMap = new Map<string, string | null>();
-        for (const row of (locData as unknown as PlayerLocationRow[]) ?? []) {
-          locMap.set(row.id, row.location);
-        }
-        setPlayerLocations(locMap);
-
-        const winnerRows = (winnersData as unknown as PlayerSummaryEntry[]) ?? [];
-        const avgRows = (avgData as unknown as PlayerSummaryEntry[]) ?? [];
-        setLeaders(winnerRows);
-        setAvgLeaders(avgRows);
-        setEloLeaders(eloData);
-        setEloMultiLeaders(eloMultiData);
-
-        const relevantPlayerIds = limit
-          ? collectRelevantPlayerIds(winnerRows, avgRows, eloData, eloMultiData)
-          : [];
-        if (limit && relevantPlayerIds.length === 0) {
-          setRecentWinsByPlayer(new Map());
-          setPlayerGameStats(new Map());
-        } else {
-          const scopedRecentFormQuery = limit
-            ? recentFormQuery.in('player_id', relevantPlayerIds)
-            : recentFormQuery;
-          const scopedGameStatsQuery = limit
-            ? gameStatsQuery.in('player_id', relevantPlayerIds)
-            : gameStatsQuery;
-          const [{ data: recentFormData }, { data: gameStatsData }] = await Promise.all([
-            scopedRecentFormQuery,
-            scopedGameStatsQuery,
-          ]);
-          setRecentWinsByPlayer(buildRecentWinsByPlayer((recentFormData as unknown as RecentFormRow[]) ?? []));
-          setPlayerGameStats(buildGameStatsByPlayer((gameStatsData as unknown as MatchParticipationRow[]) ?? []));
-        }
-      } catch {
-        setLeaders([]);
-        setAvgLeaders([]);
-        setEloLeaders([]);
-        setEloMultiLeaders([]);
-        setRecentWinsByPlayer(new Map());
-        setPlayerGameStats(new Map());
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [limit]);
+  const allSummary = (summaryData as unknown as PlayerSummaryEntry[]) ?? [];
+  const leaders = limit ? allSummary.slice(0, limit) : allSummary;
+  const avgLeaders = [...allSummary]
+    .sort((a, b) => b.avg_per_turn - a.avg_per_turn);
+  const avgLeadersLimited = limit ? avgLeaders.slice(0, limit) : avgLeaders;
 
   return {
     leaders,
-    avgLeaders,
-    eloLeaders,
-    eloMultiLeaders,
-    recentWinsByPlayer,
-    playerGameStats,
-    playerLocations,
-    loading,
+    avgLeaders: avgLeadersLimited,
+    eloLeaders: eloData,
+    eloMultiLeaders: eloMultiData,
+    recentWinsByPlayer: buildRecentWinsByPlayer((recentFormData as unknown as RecentFormRow[]) ?? []),
+    playerGameStats: buildGameStatsByPlayer((gameStatsData as unknown as MatchParticipationRow[]) ?? []),
+    playerLocations: locMap,
+  };
+}
+
+const emptyMap = new Map();
+
+export function useLeaderboardData(limit?: number) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['leaderboard', limit],
+    queryFn: () => fetchLeaderboardData(limit),
+  });
+
+  return {
+    leaders: data?.leaders ?? [],
+    avgLeaders: data?.avgLeaders ?? [],
+    eloLeaders: data?.eloLeaders ?? [],
+    eloMultiLeaders: data?.eloMultiLeaders ?? [],
+    recentWinsByPlayer: data?.recentWinsByPlayer ?? emptyMap,
+    playerGameStats: data?.playerGameStats ?? emptyMap,
+    playerLocations: data?.playerLocations ?? emptyMap,
+    loading: isLoading,
   };
 }

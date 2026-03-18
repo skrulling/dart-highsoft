@@ -23,6 +23,7 @@ import {
   createMockRouter,
   createMockRealtime,
   createMockSupabaseClient,
+  TestQueryProvider,
   type MockDb,
 } from '@/test-utils';
 
@@ -225,7 +226,7 @@ describe('MatchClient', () => {
 
   describe('basic rendering', () => {
     it('renders player names', async () => {
-      const view = render(<MatchClient matchId="match-1" />);
+      const view = render(<TestQueryProvider><MatchClient matchId="match-1" /></TestQueryProvider>);
 
       // Wait for the component to load and display player names
       const playerCards = await screen.findAllByText('Player One');
@@ -238,7 +239,7 @@ describe('MatchClient', () => {
     });
 
     it('renders dartboard and mobile keypad components', async () => {
-      const view = render(<MatchClient matchId="match-1" />);
+      const view = render(<TestQueryProvider><MatchClient matchId="match-1" /></TestQueryProvider>);
 
       // Wait for component to load
       await screen.findAllByText('Player One');
@@ -253,7 +254,7 @@ describe('MatchClient', () => {
   describe('spectator mode', () => {
     it('boots directly into spectator mode from URL params on first render', async () => {
       setSearchParams('spectator=true');
-      const view = render(<MatchClient matchId="match-1" />);
+      const view = render(<TestQueryProvider><MatchClient matchId="match-1" /></TestQueryProvider>);
 
       await screen.findByText('Live Match');
       expect(screen.queryByText('Undo dart')).toBeNull();
@@ -263,7 +264,7 @@ describe('MatchClient', () => {
 
     it('avoids extra throws queries during spectator initial load', async () => {
       setSearchParams('spectator=true');
-      const view = render(<MatchClient matchId="match-1" />);
+      const view = render(<TestQueryProvider><MatchClient matchId="match-1" /></TestQueryProvider>);
 
       await screen.findByText('Live Match');
 
@@ -280,7 +281,7 @@ describe('MatchClient', () => {
       mockRealtime.connectionStatus = 'connecting';
       mockRealtime.isConnected = false;
 
-      const view = render(<MatchClient matchId="match-1" />);
+      const view = render(<TestQueryProvider><MatchClient matchId="match-1" /></TestQueryProvider>);
 
       const spectatorCards = await screen.findAllByText('Player One');
       expect(spectatorCards.length).toBeGreaterThan(0);
@@ -290,7 +291,7 @@ describe('MatchClient', () => {
 
     it('shows Live Match indicator in spectator mode', async () => {
       setSearchParams('spectator=true');
-      const view = render(<MatchClient matchId="match-1" />);
+      const view = render(<TestQueryProvider><MatchClient matchId="match-1" /></TestQueryProvider>);
 
       const liveIndicator = await screen.findByText('Live Match');
       expect(liveIndicator).toBeDefined();
@@ -322,7 +323,7 @@ describe('MatchClient', () => {
       mockRealtime.isConnected = false;
       mockRealtime.connectionStatus = 'offline';
 
-      const view = render(<MatchClient matchId="match-1" />);
+      const view = render(<TestQueryProvider><MatchClient matchId="match-1" /></TestQueryProvider>);
 
       // Wait for main UI to render
       await screen.findAllByText('Undo dart');
@@ -360,7 +361,7 @@ describe('MatchClient', () => {
       mockRealtime.connectionStatus = 'offline';
 
       const user = userEvent.setup();
-      const view = render(<MatchClient matchId="match-1" />);
+      const view = render(<TestQueryProvider><MatchClient matchId="match-1" /></TestQueryProvider>);
 
       // Initially: it's Player Two with full start score.
       await screen.findAllByText('Undo dart');

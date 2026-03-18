@@ -9,9 +9,11 @@ import {
   computeBustRateTrend,
   computeTonRateOverTime,
   computePeriodComparison,
+  computeTrendLine,
   computeYBounds,
 } from '@/lib/stats/computations';
 import type { PlayerCoreStats, LegRow, MatchRow } from '@/lib/stats/types';
+import type { TrendLine } from '@/lib/stats/computations';
 
 const Chart = dynamic(() => import('@/components/Chart'), { ssr: false });
 
@@ -24,7 +26,6 @@ interface TrendsTabProps {
 
 function DeltaIndicator({ value, suffix = '', inverted = false }: { value: number; suffix?: string; inverted?: boolean }) {
   if (value === 0) return <span className="text-muted-foreground text-sm">no change</span>;
-  // For inverted metrics (like bust rate), negative is good
   const isPositive = inverted ? value < 0 : value > 0;
   const arrow = value > 0 ? '↑' : '↓';
   const color = isPositive ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400';
@@ -33,6 +34,52 @@ function DeltaIndicator({ value, suffix = '', inverted = false }: { value: numbe
       {arrow} {Math.abs(value)}{suffix}
     </span>
   );
+}
+
+function trendDescription(trend: TrendLine, unit: string, inverted: boolean = false): string {
+  if (trend.direction === 'stable') return 'Stable trend';
+  const sign = trend.slopePerMonth > 0 ? '+' : '';
+  const label = inverted
+    ? (trend.direction === 'improving' ? 'Improving' : 'Worsening')
+    : (trend.direction === 'improving' ? 'Improving' : 'Declining');
+  return `${label}: ${sign}${trend.slopePerMonth} ${unit}/month`;
+}
+
+function trendColor(trend: TrendLine): string {
+  if (trend.direction === 'improving') return '#22c55e';
+  if (trend.direction === 'declining') return '#ef4444';
+  return '#a1a1aa';
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function makeTrendSeries(trend: TrendLine, name: string = 'Trend'): any {
+  if (!trend.data.length) return null;
+  return {
+    type: 'line',
+    name,
+    data: trend.data,
+    color: trendColor(trend),
+    lineWidth: 2,
+    dashStyle: 'LongDash',
+    marker: { enabled: false },
+    enableMouseTracking: false,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function makeAvgPlotLine(value: number, label: string): any {
+  return {
+    value,
+    color: '#a1a1aa',
+    width: 1,
+    dashStyle: 'Dash',
+    label: {
+      text: `${label}: ${value}`,
+      align: 'right',
+      style: { color: '#a1a1aa', fontSize: '10px' },
+    },
+    zIndex: 3,
+  };
 }
 
 export function TrendsTab({ playerCoreStats, legs, matches, selectedPlayer }: TrendsTabProps) {
@@ -53,13 +100,20 @@ export function TrendsTab({ playerCoreStats, legs, matches, selectedPlayer }: Tr
   const bustTrend = useMemo(() => computeBustRateTrend(playerTurns), [playerTurns]);
   const tonRateData = useMemo(() => computeTonRateOverTime(playerTurns), [playerTurns]);
 
+  // Trendlines
+  const avgScoreTrendLine = useMemo(() => computeTrendLine(avgScoreTrend.rolling), [avgScoreTrend.rolling]);
+  const firstNineTrendLine = useMemo(() => computeTrendLine(firstNineTrend.rolling), [firstNineTrend.rolling]);
+  const checkoutTrendLine = useMemo(() => computeTrendLine(checkoutTrend.rolling), [checkoutTrend.rolling]);
+  const bustTrendLine = useMemo(() => computeTrendLine(bustTrend.rolling, true), [bustTrend.rolling]);
+  const accuracy20TrendLine = useMemo(() => computeTrendLine(accuracy20Trend.rollingHitPct), [accuracy20Trend.rollingHitPct]);
+
   const avgScoreYBounds = useMemo(() => {
-    return computeYBounds([...avgScoreTrend.cumulative, ...avgScoreTrend.daily, ...avgScoreTrend.rolling]);
-  }, [avgScoreTrend]);
+    return computeYBounds([...avgScoreTrend.cumulative, ...avgScoreTrend.daily, ...avgScoreTrend.rolling, ...avgScoreTrendLine.data]);
+  }, [avgScoreTrend, avgScoreTrendLine]);
 
   const firstNineYBounds = useMemo(() => {
-    return computeYBounds([...firstNineTrend.daily, ...firstNineTrend.rolling]);
-  }, [firstNineTrend]);
+    return computeYBounds([...firstNineTrend.daily, ...firstNineTrend.rolling, ...firstNineTrendLine.data]);
+  }, [firstNineTrend, firstNineTrendLine]);
 
   const accuracy20YBounds = useMemo(() => {
     const values = [
@@ -126,7 +180,7 @@ export function TrendsTab({ playerCoreStats, legs, matches, selectedPlayer }: Tr
       <Card>
         <CardHeader>
           <CardTitle>Average Score Over Time</CardTitle>
-          <CardDescription>Performance progression and consistency tracking</CardDescription>
+          <CardDescription>{trendDescription(avgScoreTrendLine, 'pts')}</CardDescription>
         </CardHeader>
         <CardContent>
           <Chart options={{
@@ -146,6 +200,7 @@ export function TrendsTab({ playerCoreStats, legs, matches, selectedPlayer }: Tr
               title: { text: 'Average Score' },
               min: avgScoreYBounds.min,
               max: avgScoreYBounds.max,
+              plotLines: [makeAvgPlotLine(comparison.allTimeAvg, 'All-time avg')],
             },
             series: [
               {
@@ -173,8 +228,9 @@ export function TrendsTab({ playerCoreStats, legs, matches, selectedPlayer }: Tr
                 dashStyle: 'ShortDash',
                 lineWidth: 2,
                 marker: { radius: 3, symbol: 'circle' }
-              }
-            ],
+              },
+              makeTrendSeries(avgScoreTrendLine),
+            ].filter(Boolean),
             legend: { enabled: true },
             tooltip: {
               shared: true,
@@ -197,7 +253,7 @@ export function TrendsTab({ playerCoreStats, legs, matches, selectedPlayer }: Tr
       <Card>
         <CardHeader>
           <CardTitle>First Nine Average</CardTitle>
-          <CardDescription>Opening three visits (first 9 darts) per day</CardDescription>
+          <CardDescription>{trendDescription(firstNineTrendLine, 'pts')}</CardDescription>
         </CardHeader>
         <CardContent>
           <Chart options={{
@@ -235,7 +291,8 @@ export function TrendsTab({ playerCoreStats, legs, matches, selectedPlayer }: Tr
                 lineWidth: 2,
                 marker: { radius: 3, symbol: 'circle' },
               },
-            ],
+              makeTrendSeries(firstNineTrendLine),
+            ].filter(Boolean),
             legend: { enabled: true },
             tooltip: {
               shared: true,
@@ -252,7 +309,7 @@ export function TrendsTab({ playerCoreStats, legs, matches, selectedPlayer }: Tr
           <Card>
             <CardHeader>
               <CardTitle>Checkout Rate Over Time</CardTitle>
-              <CardDescription>Finishing success when on a double</CardDescription>
+              <CardDescription>{trendDescription(checkoutTrendLine, 'pp')}</CardDescription>
             </CardHeader>
             <CardContent>
               <Chart options={{
@@ -290,7 +347,8 @@ export function TrendsTab({ playerCoreStats, legs, matches, selectedPlayer }: Tr
                     lineWidth: 1,
                     marker: { radius: 2, symbol: 'circle' },
                   },
-                ],
+                  makeTrendSeries(checkoutTrendLine),
+                ].filter(Boolean),
                 legend: { enabled: true },
                 tooltip: { shared: true, valueSuffix: '%', valueDecimals: 1 },
               }} />
@@ -302,7 +360,7 @@ export function TrendsTab({ playerCoreStats, legs, matches, selectedPlayer }: Tr
           <Card>
             <CardHeader>
               <CardTitle>Bust Rate Over Time</CardTitle>
-              <CardDescription>Lower is better — improving players bust less</CardDescription>
+              <CardDescription>{trendDescription(bustTrendLine, 'pp', true)}</CardDescription>
             </CardHeader>
             <CardContent>
               <Chart options={{
@@ -339,7 +397,8 @@ export function TrendsTab({ playerCoreStats, legs, matches, selectedPlayer }: Tr
                     lineWidth: 1,
                     marker: { radius: 2, symbol: 'circle' },
                   },
-                ],
+                  makeTrendSeries(bustTrendLine),
+                ].filter(Boolean),
                 legend: { enabled: true },
                 tooltip: { shared: true, valueSuffix: '%', valueDecimals: 1 },
               }} />
@@ -352,7 +411,7 @@ export function TrendsTab({ playerCoreStats, legs, matches, selectedPlayer }: Tr
       <Card>
         <CardHeader>
           <CardTitle>20 Bed Accuracy</CardTitle>
-          <CardDescription>Hit rate vs. misses into 1 or 5 when aiming at 20</CardDescription>
+          <CardDescription>{trendDescription(accuracy20TrendLine, 'pp')}</CardDescription>
         </CardHeader>
         <CardContent>
           <Chart options={{
@@ -406,7 +465,8 @@ export function TrendsTab({ playerCoreStats, legs, matches, selectedPlayer }: Tr
                 dashStyle: 'ShortDashDot',
                 marker: { radius: 3, symbol: 'circle' },
               },
-            ],
+              makeTrendSeries(accuracy20TrendLine),
+            ].filter(Boolean),
             legend: { enabled: true },
             tooltip: {
               shared: true,

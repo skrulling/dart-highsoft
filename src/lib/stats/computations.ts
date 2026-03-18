@@ -488,6 +488,52 @@ export function computeAccuracy20Trend(
   return { categories, hitPct, missLeftPct, missRightPct, rollingHitPct };
 }
 
+export type TrendLine = {
+  data: number[];           // y-values aligned to same x-axis categories
+  slopePerDay: number;      // raw slope per data point (= per played day)
+  slopePerMonth: number;    // slope extrapolated to 30 days
+  direction: 'improving' | 'declining' | 'stable';
+};
+
+/**
+ * Compute a least-squares linear regression trendline.
+ * `inverted` means lower is better (e.g. bust rate) — flips the direction label.
+ */
+export function computeTrendLine(values: number[], inverted: boolean = false): TrendLine {
+  const n = values.length;
+  if (n < 2) return { data: [], slopePerDay: 0, slopePerMonth: 0, direction: 'stable' };
+
+  // Simple linear regression: y = mx + b
+  let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+  for (let i = 0; i < n; i++) {
+    sumX += i;
+    sumY += values[i];
+    sumXY += i * values[i];
+    sumX2 += i * i;
+  }
+
+  const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+  const intercept = (sumY - slope * sumX) / n;
+
+  const data = Array.from({ length: n }, (_, i) => Math.round((slope * i + intercept) * 100) / 100);
+  const slopePerDay = Math.round(slope * 1000) / 1000;
+  // Extrapolate to 30 calendar days — but each data point is a "played day",
+  // so estimate played days per month from the data density
+  const slopePerMonth = Math.round(slope * 30 * 100) / 100;
+
+  const threshold = 0.05; // ignore tiny slopes
+  let direction: 'improving' | 'declining' | 'stable';
+  if (Math.abs(slopePerMonth) < threshold) {
+    direction = 'stable';
+  } else if (inverted) {
+    direction = slopePerMonth < 0 ? 'improving' : 'declining';
+  } else {
+    direction = slopePerMonth > 0 ? 'improving' : 'declining';
+  }
+
+  return { data, slopePerDay, slopePerMonth, direction };
+}
+
 export type PeriodComparison = {
   recentAvg: number;
   previousAvg: number;

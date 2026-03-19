@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { getSupabaseClient } from '@/lib/supabaseClient';
 import { computePlayerCoreStats, computeGamesPerDay } from '@/lib/stats/computations';
 import type {
@@ -9,154 +10,154 @@ import type {
   PlayerCoreStats, OverallStats, DataLimitWarnings
 } from '@/lib/stats/types';
 
+// --- Fetch functions ---
+
+type StatsGlobalData = {
+  summary: SummaryRow[];
+  players: PlayerRow[];
+  legs: LegRow[];
+  matches: MatchRow[];
+  globalStats: { turns: number; throws: number };
+  playerSegments: PlayerSegmentRow[];
+  playerAdjacency: PlayerAdjacencyRow[];
+};
+
+async function fetchStatsGlobalData(): Promise<StatsGlobalData> {
+  const supabase = await getSupabaseClient();
+
+  const [
+    { data: s },
+    { data: p },
+    { data: l },
+    { data: m },
+    { count: turnsCount },
+    { count: throwsCount },
+    { data: segmentData },
+    { data: accuracyData },
+    { data: adjacencyData }
+  ] = await Promise.all([
+    supabase
+      .from('player_summary')
+      .select('*')
+      .order('wins', { ascending: false }),
+    supabase
+      .from('players')
+      .select('id, display_name')
+      .eq('is_active', true)
+      .order('display_name'),
+    supabase
+      .from('legs')
+      .select('*, matches!inner(ended_early)')
+      .eq('matches.ended_early', false)
+      .order('created_at')
+      .limit(100000),
+    supabase
+      .from('matches')
+      .select('id, created_at, winner_player_id, start_score, finish')
+      .eq('ended_early', false)
+      .order('created_at')
+      .limit(100000),
+    supabase
+      .from('turns')
+      .select('legs!inner(matches!inner(ended_early))', { count: 'exact', head: true })
+      .eq('legs.matches.ended_early', false),
+    supabase
+      .from('throws')
+      .select('turns!inner(legs!inner(matches!inner(ended_early)))', { count: 'exact', head: true })
+      .eq('turns.legs.matches.ended_early', false),
+    supabase.from('player_segment_summary').select('*').limit(100000),
+    supabase.from('player_accuracy_stats').select('*').limit(100000),
+    supabase.from('player_adjacency_stats').select('*').limit(100000)
+  ]);
+
+  return {
+    summary: ((s as unknown) as SummaryRow[]) ?? [],
+    players: ((p as unknown) as PlayerRow[]) ?? [],
+    legs: ((l as unknown) as LegRow[]) ?? [],
+    matches: ((m as unknown) as MatchRow[]) ?? [],
+    globalStats: { turns: turnsCount ?? 0, throws: throwsCount ?? 0 },
+    playerSegments: ((segmentData as unknown) as PlayerSegmentRow[]) ?? [],
+    playerAdjacency: ((adjacencyData as unknown) as PlayerAdjacencyRow[]) ?? [],
+  };
+  // playerAccuracy fetched but unused — kept in query to avoid schema drift, discarded here
+  void accuracyData;
+}
+
+type PlayerDetailData = {
+  turns: TurnRow[];
+  throws: ThrowRow[];
+};
+
+async function fetchPlayerDetailData(playerId: string): Promise<PlayerDetailData> {
+  const supabase = await getSupabaseClient();
+
+  const { data: t } = await supabase
+    .from('turns')
+    .select('id, leg_id, player_id, total_scored, busted, turn_number, created_at, legs!inner(matches!inner(ended_early))')
+    .eq('player_id', playerId)
+    .eq('legs.matches.ended_early', false)
+    .order('created_at')
+    .limit(100000);
+
+  const playerTurns = ((t as unknown) as TurnRow[]) ?? [];
+
+  if (playerTurns.length === 0) {
+    return { turns: [], throws: [] };
+  }
+
+  const turnIds = playerTurns.map(turn => turn.id);
+  const batchSize = 200;
+  const batches: string[][] = [];
+  for (let i = 0; i < turnIds.length; i += batchSize) {
+    batches.push(turnIds.slice(i, i + batchSize));
+  }
+
+  const batchResults = await Promise.all(
+    batches.map((batch) =>
+      supabase
+        .from('throws')
+        .select('id, turn_id, dart_index, segment, scored')
+        .in('turn_id', batch)
+    )
+  );
+
+  const allThrows: ThrowRow[] = batchResults.flatMap(
+    ({ data }) => ((data as unknown) as ThrowRow[]) ?? []
+  );
+
+  return { turns: playerTurns, throws: allThrows };
+}
+
+// --- Hook ---
+
 export function useStatsData() {
-  const [summary, setSummary] = useState<SummaryRow[]>([]);
-  const [players, setPlayers] = useState<PlayerRow[]>([]);
-  const [legs, setLegs] = useState<LegRow[]>([]);
-  const [turns, setTurns] = useState<TurnRow[]>([]);
-  const [throws, setThrows] = useState<ThrowRow[]>([]);
-  const [matches, setMatches] = useState<MatchRow[]>([]);
-  const [playerSegments, setPlayerSegments] = useState<PlayerSegmentRow[]>([]);
-  const [, setPlayerAccuracy] = useState<PlayerAccuracyRow[]>([]);
-  const [playerAdjacency, setPlayerAdjacency] = useState<PlayerAdjacencyRow[]>([]);
   const [selectedPlayer, setSelectedPlayer] = useState<string>('');
-  const [loading, setLoading] = useState(true);
-  const [playerLoading, setPlayerLoading] = useState(false);
-  const [globalStats, setGlobalStats] = useState({ turns: 0, throws: 0 });
   const [activeView, setActiveView] = useState<'traditional' | 'elo'>('traditional');
   const [warningDismissed, setWarningDismissed] = useState(false);
 
-  // Initial data load
-  useEffect(() => {
-    (async () => {
-      try {
-        setLoading(true);
-        const supabase = await getSupabaseClient();
+  // Global stats data — cached across navigations
+  const globalQuery = useQuery({
+    queryKey: ['stats', 'global'],
+    queryFn: fetchStatsGlobalData,
+  });
 
-        const [
-          { data: s },
-          { data: p },
-          { data: l },
-          { data: m },
-          { count: turnsCount },
-          { count: throwsCount },
-          { data: segmentData },
-          { data: accuracyData },
-          { data: adjacencyData }
-        ] = await Promise.all([
-          supabase
-            .from('player_summary')
-            .select('*')
-            .order('wins', { ascending: false }),
-          supabase
-            .from('players')
-            .select('id, display_name')
-            .eq('is_active', true)
-            .order('display_name'),
-          supabase
-            .from('legs')
-            .select('*, matches!inner(ended_early)')
-            .eq('matches.ended_early', false)
-            .order('created_at')
-            .limit(100000),
-          supabase
-            .from('matches')
-            .select('id, created_at, winner_player_id, start_score, finish')
-            .eq('ended_early', false)
-            .order('created_at')
-            .limit(100000),
-          supabase
-            .from('turns')
-            .select('legs!inner(matches!inner(ended_early))', { count: 'exact', head: true })
-            .eq('legs.matches.ended_early', false),
-          supabase
-            .from('throws')
-            .select('turns!inner(legs!inner(matches!inner(ended_early)))', { count: 'exact', head: true })
-            .eq('turns.legs.matches.ended_early', false),
-          supabase.from('player_segment_summary').select('*').limit(100000),
-          supabase.from('player_accuracy_stats').select('*').limit(100000),
-          supabase.from('player_adjacency_stats').select('*').limit(100000)
-        ]);
+  // Player detail data — cached per player
+  const playerQuery = useQuery({
+    queryKey: ['stats', 'player', selectedPlayer],
+    queryFn: () => fetchPlayerDetailData(selectedPlayer),
+    enabled: !!selectedPlayer,
+  });
 
-        setSummary(((s as unknown) as SummaryRow[]) ?? []);
-        setPlayers(((p as unknown) as PlayerRow[]) ?? []);
-        setLegs(((l as unknown) as LegRow[]) ?? []);
-        setMatches(((m as unknown) as MatchRow[]) ?? []);
-        setGlobalStats({ turns: turnsCount ?? 0, throws: throwsCount ?? 0 });
-        setPlayerSegments(((segmentData as unknown) as PlayerSegmentRow[]) ?? []);
-        setPlayerAccuracy(((accuracyData as unknown) as PlayerAccuracyRow[]) ?? []);
-        setPlayerAdjacency(((adjacencyData as unknown) as PlayerAdjacencyRow[]) ?? []);
-      } catch (error) {
-        console.error('Error loading stats:', error);
-        setSummary([]);
-        setPlayers([]);
-        setLegs([]);
-        setMatches([]);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
+  const summary = globalQuery.data?.summary ?? [];
+  const players = globalQuery.data?.players ?? [];
+  const legs = globalQuery.data?.legs ?? [];
+  const matches = globalQuery.data?.matches ?? [];
+  const globalStats = globalQuery.data?.globalStats ?? { turns: 0, throws: 0 };
+  const playerSegments = globalQuery.data?.playerSegments ?? [];
+  const playerAdjacency = globalQuery.data?.playerAdjacency ?? [];
 
-  // Lazy load player details when selected
-  useEffect(() => {
-    setWarningDismissed(false);
-
-    if (!selectedPlayer) {
-      setTurns([]);
-      setThrows([]);
-      return;
-    }
-
-    (async () => {
-      try {
-        setPlayerLoading(true);
-        const supabase = await getSupabaseClient();
-
-        const { data: t } = await supabase
-          .from('turns')
-          .select('id, leg_id, player_id, total_scored, busted, turn_number, created_at, legs!inner(matches!inner(ended_early))')
-          .eq('player_id', selectedPlayer)
-          .eq('legs.matches.ended_early', false)
-          .order('created_at')
-          .limit(100000);
-
-        const playerTurns = ((t as unknown) as TurnRow[]) ?? [];
-        setTurns(playerTurns);
-
-        if (playerTurns.length > 0) {
-          const turnIds = playerTurns.map(turn => turn.id);
-          const batchSize = 200;
-          const batches: string[][] = [];
-          for (let i = 0; i < turnIds.length; i += batchSize) {
-            batches.push(turnIds.slice(i, i + batchSize));
-          }
-
-          const batchResults = await Promise.all(
-            batches.map((batch) =>
-              supabase
-                .from('throws')
-                .select('id, turn_id, dart_index, segment, scored')
-                .in('turn_id', batch)
-            )
-          );
-
-          const allThrows: ThrowRow[] = batchResults.flatMap(
-            ({ data }) => ((data as unknown) as ThrowRow[]) ?? []
-          );
-          setThrows(allThrows);
-        } else {
-          setThrows([]);
-        }
-      } catch (error) {
-        console.error('Error loading player details:', error);
-        setTurns([]);
-        setThrows([]);
-      } finally {
-        setPlayerLoading(false);
-      }
-    })();
-  }, [selectedPlayer]);
+  const turns = playerQuery.data?.turns ?? [];
+  const throws = playerQuery.data?.throws ?? [];
 
   const overallStats: OverallStats = useMemo(() => {
     const totalMatches = matches.length;
@@ -199,6 +200,12 @@ export function useStatsData() {
     return computePlayerCoreStats(selectedPlayer, turns, throws, legs, matches);
   }, [selectedPlayer, turns, throws, legs, matches]);
 
+  // Reset warning when player changes
+  const handleSelectPlayer = (playerId: string) => {
+    setWarningDismissed(false);
+    setSelectedPlayer(playerId);
+  };
+
   return {
     summary,
     players,
@@ -207,9 +214,9 @@ export function useStatsData() {
     playerSegments,
     playerAdjacency,
     selectedPlayer,
-    setSelectedPlayer,
-    loading,
-    playerLoading,
+    setSelectedPlayer: handleSelectPlayer,
+    loading: globalQuery.isLoading,
+    playerLoading: playerQuery.isFetching && !!selectedPlayer,
     activeView,
     setActiveView,
     warningDismissed,

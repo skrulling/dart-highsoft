@@ -8,3 +8,4 @@
 
 export * from './mockSupabase';
 export * from './factories';
+export * from './renderWithProviders';

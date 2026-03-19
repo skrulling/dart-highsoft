@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import Highcharts from 'highcharts';
 import { Grid, type GridOptions } from '@highcharts/grid-pro-react';
 import SparklineRenderer from '@highcharts/grid-pro/es-modules/Grid/Pro/CellRendering/Renderers/SparklineRenderer';
@@ -232,8 +233,6 @@ export function GridLeaderboard() {
     playerLocations,
     loading,
   } = useLeaderboardData();
-  const [eloHistory, setEloHistory] = useState<Map<string, number[]>>(new Map());
-  const [multiEloHistory, setMultiEloHistory] = useState<Map<string, number[]>>(new Map());
   const [enabledLocations, setEnabledLocations] = useState<LocationValue[]>(loadLeaderboardLocations);
 
   useEffect(() => {
@@ -294,18 +293,20 @@ export function GridLeaderboard() {
     );
   }, [merged, enabledLocations]);
 
-  useEffect(() => {
-    const playerIds = merged.map((p) => p.player_id);
-    if (playerIds.length === 0) return;
+  // Stable player ID list for query key (avoids refetch on every render)
+  const playerIds = useMemo(() => merged.map((p) => p.player_id).sort(), [merged]);
 
-    Promise.all([
+  const { data: eloHistoryData } = useQuery({
+    queryKey: ['eloHistory', playerIds],
+    queryFn: () => Promise.all([
       batchEloHistory(playerIds),
       batchMultiEloHistory(playerIds),
-    ]).then(([elo, multi]) => {
-      setEloHistory(elo);
-      setMultiEloHistory(multi);
-    });
-  }, [merged]);
+    ]).then(([elo, multi]) => ({ elo, multi })),
+    enabled: playerIds.length > 0,
+  });
+
+  const eloHistory = eloHistoryData?.elo ?? new Map<string, number[]>();
+  const multiEloHistory = eloHistoryData?.multi ?? new Map<string, number[]>();
 
   const options = useMemo<GridOptions>(() => {
     const player: string[] = [];

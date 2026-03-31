@@ -545,6 +545,27 @@ export function GridLeaderboard() {
           minVisibleRows: 12,
         },
       },
+      responsive: {
+        rules: [{
+          condition: {
+            maxWidth: 800
+          },
+          gridOptions: {
+            header: [
+              { columnId: 'idx' },
+              { columnId: 'player' },
+              { columnId: 'multiElo' },
+              { columnId: 'elo1v1' },
+            ],
+            columns: [
+              {
+                id: 'player',
+                width: 150,
+              },
+            ],
+          }
+        }]
+      },
       lang: {
         noData: 'No leaderboard data yet. Play some matches!',
       },

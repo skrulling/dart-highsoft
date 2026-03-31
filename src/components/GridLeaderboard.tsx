@@ -560,7 +560,7 @@ export function GridLeaderboard() {
             columns: [
               {
                 id: 'player',
-                width: 150,
+                width: 110,
               },
             ],
           }

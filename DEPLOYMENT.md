@@ -309,6 +309,38 @@ Before you call the deploy done, make sure:
 - The deployed site can create players and matches
 - Vercel and Supabase are in nearby regions
 
+## Troubleshooting
+
+### Error: `function uuid_generate_v4() does not exist`
+
+If `supabase db push` fails on a fresh project with an error like:
+
+```text
+ERROR: function uuid_generate_v4() does not exist
+```
+
+pull the latest version of this repo and run:
+
+```bash
+supabase db push
+```
+
+This repo now includes a compatibility migration that creates a `public.uuid_generate_v4()` shim for Supabase projects where `uuid-ossp` lives under the `extensions` schema.
+
+If you are already stuck on a project and want to unblock it immediately, run this in the Supabase SQL Editor, then run `supabase db push` again:
+
+```sql
+create extension if not exists "uuid-ossp" with schema extensions;
+
+create or replace function public.uuid_generate_v4()
+returns uuid
+language sql
+stable
+as $$
+  select extensions.uuid_generate_v4();
+$$;
+```
+
 ## Useful Official Docs
 
 - Vercel CLI overview: `https://vercel.com/docs/cli`
@@ -317,4 +349,3 @@ Before you call the deploy done, make sure:
 - Vercel deploy command: `https://vercel.com/docs/cli/deploy`
 - Supabase CLI reference: `https://supabase.com/docs/reference/cli/supabase-bootstrap`
 - Supabase linking / deploy flow: `https://supabase.com/docs/guides/functions/deploy`
-

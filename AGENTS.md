@@ -17,6 +17,7 @@ Help make small, correct changes in a TypeScript Next.js + Supabase dart scoring
 - `e2e`: Playwright E2E tests and fixtures.
 - `supabase`: SQL migrations and local config.
 - `supabase-test`: Separate Supabase config for E2E tests (port 56XXX).
+- `DEPLOYMENT.md`: Beginner-friendly production deployment guide for Vercel + Supabase.
 
 ## File Map
 

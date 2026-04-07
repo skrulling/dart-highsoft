@@ -163,6 +163,10 @@ export function MatchScoringView({
     return 3;
   }, [currentPlayer, localTurn.playerId, localTurn.darts.length, currentPlayerLastTurn, turnThrowCounts]);
 
+  const matchEndedEarly = Boolean(match.ended_early);
+  const isTerminalMatch = Boolean(matchWinnerId || matchEndedEarly);
+  const terminalHref = isTournamentMatch ? (tournamentId ? `/tournament/${tournamentId}` : '/games') : '/games';
+
   return (
     <div className="w-full space-y-3 md:space-y-6 md:-ml-[calc(50vw-50%)] md:-mr-6 md:pl-4 md:pr-4 lg:pr-6 md:max-w-none relative">
       {/* Connection status indicator */}
@@ -298,12 +302,12 @@ export function MatchScoringView({
             })()}
           </div>
           )}
-          <div className={`${matchWinnerId ? 'pointer-events-none opacity-50' : ''} md:hidden`}>
+          <div className={`${isTerminalMatch ? 'pointer-events-none opacity-50' : ''} md:hidden`}>
             <MobileKeypad onHit={(seg) => onBoardClick(0, 0, seg as unknown as ReturnType<typeof computeHit>)} />
           </div>
           {/* Desktop: board with buttons on the right */}
           <div className="hidden md:flex items-start gap-4">
-            <div className={`flex-1 flex justify-center ${matchWinnerId ? 'pointer-events-none opacity-50' : ''}`}>
+            <div className={`flex-1 flex justify-center ${isTerminalMatch ? 'pointer-events-none opacity-50' : ''}`}>
               <Dartboard onHit={onBoardClick} />
             </div>
             <div className="flex flex-col gap-2 pt-4">
@@ -311,7 +315,7 @@ export function MatchScoringView({
                 variant="outline"
                 size="sm"
                 onClick={onUndoLastThrow}
-                disabled={!!matchWinnerId}
+                disabled={isTerminalMatch}
                 className="text-xs whitespace-nowrap"
               >
                 Undo dart
@@ -320,17 +324,17 @@ export function MatchScoringView({
                 variant="outline"
                 size="sm"
                 onClick={onOpenEditModal}
-                disabled={!currentLeg}
+                disabled={!currentLeg || isTerminalMatch}
                 className="text-xs whitespace-nowrap"
               >
                 Edit throws
               </Button>
-              {!isTournamentMatch && (
+              {!isTournamentMatch && !matchEndedEarly && (
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={onOpenEditPlayersModal}
-                  disabled={!canEditPlayers}
+                  disabled={!canEditPlayers || isTerminalMatch}
                   className="text-xs whitespace-nowrap"
                 >
                   Edit players
@@ -339,7 +343,7 @@ export function MatchScoringView({
               <Button variant="outline" size="sm" onClick={onToggleSpectatorMode} className="text-xs whitespace-nowrap">
                 Spectator
               </Button>
-              {!matchWinnerId && !isTournamentMatch && (
+              {!isTerminalMatch && !isTournamentMatch && (
                 <Dialog open={endGameDialogOpen} onOpenChange={onEndGameDialogOpenChange}>
                   <DialogTrigger asChild>
                     <Button variant="destructive" size="sm" className="text-xs whitespace-nowrap">
@@ -381,18 +385,40 @@ export function MatchScoringView({
           </div>
           {/* Mobile: buttons below keypad */}
           <div className="flex flex-wrap items-center gap-2 sm:gap-3 mt-2 md:hidden">
-            <Button variant="outline" size="sm" onClick={onUndoLastThrow} disabled={!!matchWinnerId} className="text-xs sm:text-sm">
+            <Button variant="outline" size="sm" onClick={onUndoLastThrow} disabled={isTerminalMatch} className="text-xs sm:text-sm">
               Undo dart
             </Button>
-            <Button variant="outline" size="sm" onClick={onOpenEditModal} disabled={!currentLeg} className="text-xs sm:text-sm">
+            <Button variant="outline" size="sm" onClick={onOpenEditModal} disabled={!currentLeg || isTerminalMatch} className="text-xs sm:text-sm">
               Edit throws
             </Button>
-            {!isTournamentMatch && (
-              <Button variant="outline" size="sm" onClick={onOpenEditPlayersModal} disabled={!canEditPlayers} className="text-xs sm:text-sm">
+            {!isTournamentMatch && !matchEndedEarly && (
+              <Button variant="outline" size="sm" onClick={onOpenEditPlayersModal} disabled={!canEditPlayers || isTerminalMatch} className="text-xs sm:text-sm">
                 Edit players
               </Button>
             )}
           </div>
+          {matchEndedEarly && (
+            <Card className="mt-4 overflow-hidden border-2 border-amber-500/80 bg-gradient-to-br from-amber-50 to-orange-50 shadow-md ring-2 ring-amber-400/30 dark:from-amber-900/20 dark:to-orange-900/10 md:hidden">
+              <CardContent className="py-6">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <span className="text-3xl">⚠️</span>
+                    <div>
+                      <div className="text-xs uppercase tracking-wide text-amber-700 dark:text-amber-300">
+                        {isTournamentMatch ? 'Tournament Ended Early' : 'Match Ended Early'}
+                      </div>
+                      <div className="text-lg font-extrabold">
+                        {isTournamentMatch ? 'This bracket match has been closed.' : 'This match has been closed.'}
+                      </div>
+                    </div>
+                  </div>
+                  <Button asChild>
+                    <Link href={terminalHref}>{isTournamentMatch ? 'Back to Bracket' : 'Back to Games'}</Link>
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
           {matchWinnerId && (
             <Card className="mt-4 overflow-hidden border-2 border-green-500/80 shadow-md ring-2 ring-green-400/30 bg-gradient-to-br from-emerald-50 to-green-50 dark:from-emerald-900/20 dark:to-green-900/10 md:hidden">
               <CardContent className="py-6">
@@ -423,6 +449,33 @@ export function MatchScoringView({
                   matchWinnerId={matchWinnerId}
                   playerById={playerById}
                 />
+              </CardContent>
+            </Card>
+          )}
+          {matchEndedEarly && (
+            <Card className="hidden md:block mt-4 overflow-hidden border-2 border-amber-500/80 bg-gradient-to-br from-amber-50 to-orange-50 shadow-md ring-2 ring-amber-400/30 dark:from-amber-900/20 dark:to-orange-900/10">
+              <CardContent className="py-6">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <span className="text-3xl">⚠️</span>
+                    <div>
+                      <div className="text-xs uppercase tracking-wide text-amber-700 dark:text-amber-300">
+                        {isTournamentMatch ? 'Tournament Ended Early' : 'Match Ended Early'}
+                      </div>
+                      <div className="text-xl font-extrabold">
+                        {isTournamentMatch ? 'This bracket match has been closed.' : 'This match has been closed.'}
+                      </div>
+                      <div className="text-sm text-amber-700/80 dark:text-amber-200/80">
+                        {isTournamentMatch
+                          ? 'No winner was recorded because the tournament was cancelled.'
+                          : 'No winner was recorded for this match.'}
+                      </div>
+                    </div>
+                  </div>
+                  <Button asChild>
+                    <Link href={terminalHref}>{isTournamentMatch ? 'Back to Bracket' : 'Back to Games'}</Link>
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           )}
@@ -529,7 +582,7 @@ export function MatchScoringView({
       </div>
       {/* Action Buttons - Mobile only */}
       <div className="flex flex-col sm:flex-row gap-2 pt-4 md:hidden">
-        {!matchWinnerId && !isTournamentMatch && (
+        {!isTerminalMatch && !isTournamentMatch && (
           <Dialog open={endGameDialogOpen} onOpenChange={onEndGameDialogOpenChange}>
             <DialogTrigger asChild>
               <Button variant="destructive" className="flex-1 sm:max-w-xs">

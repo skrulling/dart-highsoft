@@ -2,15 +2,16 @@
 
 import { useMemo } from 'react';
 import { BracketMatchCard } from './BracketMatchCard';
-import type { TournamentMatchRecord } from '@/lib/tournament/types';
+import type { TournamentMatchRecord, TournamentStatus } from '@/lib/tournament/types';
 
 type Props = {
   matches: TournamentMatchRecord[];
+  tournamentStatus: TournamentStatus;
   playerName: (id: string | null) => string;
   onMatchClick?: (matchId: string) => void;
 };
 
-export function BracketView({ matches, playerName, onMatchClick }: Props) {
+export function BracketView({ matches, tournamentStatus, playerName, onMatchClick }: Props) {
   const { wbRounds, lbRounds, gfMatches } = useMemo(() => {
     const wb = matches.filter((m) => m.bracket === 'winners');
     const lb = matches.filter((m) => m.bracket === 'losers');
@@ -61,6 +62,7 @@ export function BracketView({ matches, playerName, onMatchClick }: Props) {
                     <BracketMatchCard
                       key={tm.id}
                       tm={tm}
+                      tournamentStatus={tournamentStatus}
                       playerName={playerName}
                       onMatchClick={onMatchClick}
                     />
@@ -81,6 +83,7 @@ export function BracketView({ matches, playerName, onMatchClick }: Props) {
                       </div>
                       <BracketMatchCard
                         tm={tm}
+                        tournamentStatus={tournamentStatus}
                         playerName={playerName}
                         onMatchClick={onMatchClick}
                       />
@@ -106,12 +109,13 @@ export function BracketView({ matches, playerName, onMatchClick }: Props) {
                   </div>
                   <div className="flex flex-col justify-around gap-2">
                     {roundMatches.map((tm) => (
-                      <BracketMatchCard
-                        key={tm.id}
-                        tm={tm}
-                        playerName={playerName}
-                        onMatchClick={onMatchClick}
-                      />
+                    <BracketMatchCard
+                      key={tm.id}
+                      tm={tm}
+                      tournamentStatus={tournamentStatus}
+                      playerName={playerName}
+                      onMatchClick={onMatchClick}
+                    />
                     ))}
                   </div>
                 </div>

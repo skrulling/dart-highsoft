@@ -60,6 +60,7 @@ Help make small, correct changes in a TypeScript Next.js + Supabase dart scoring
 | `around-world/sessions/` | POST | Create Around the World session |
 | `commentary/` | POST | Generate AI commentary via LLM |
 | `tts/` | POST | Text-to-speech for commentary |
+| `tournaments/[id]/end/` | PATCH | End a tournament early; cancels bracket and closes unresolved linked matches |
 
 ### Utils (`src/utils`) — Pure Business Logic
 | File | Purpose |
@@ -199,6 +200,9 @@ Help make small, correct changes in a TypeScript Next.js + Supabase dart scoring
 
 **Fair ending:**
 First player checks out → remaining players complete their turns in the round → if single checkout: leg resolved → if multiple checkouts: tiebreak rounds (3 darts each, highest score wins).
+
+**Tournament early ending:**
+Tournament page `End Tournament` action → `PATCH /api/tournaments/:id/end` → tournament `status` set to `cancelled` with `completed_at` → unresolved linked tournament matches are marked `ended_early` and become terminal on open match pages → bracket remains visible but no winner is recorded and remaining active players stay unranked/unfinished.
 
 ## Supabase Migration Rule
 - Do not use `ALTER FUNCTION` in Supabase migrations. For function changes, use drop + recreate.

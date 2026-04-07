@@ -1,4 +1,4 @@
-export type TournamentStatus = 'pending' | 'in_progress' | 'completed';
+export type TournamentStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';
 export type BracketType = 'winners' | 'losers' | 'grand_final';
 
 export type TournamentRecord = {

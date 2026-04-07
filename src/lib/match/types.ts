@@ -10,6 +10,8 @@ export type MatchRecord = {
   legs_to_win: number;
   ended_early?: boolean;
   fair_ending?: boolean;
+  winner_player_id?: string | null;
+  completed_at?: string | null;
   tournament_match_id?: string | null;
 };
 
@@ -49,4 +51,3 @@ export type ThrowRecord = {
 export type TurnWithThrows = TurnRecord & {
   throws: ThrowRecord[];
 };
-

@@ -468,11 +468,12 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   const fairEndingResolvedRef = useRef<string | null>(null);
   useEffect(() => {
     if (isSpectatorMode) return;
+    if (match?.ended_early) return;
     if (fairEndingWinnerId && !matchWinnerId && fairEndingResolvedRef.current !== fairEndingWinnerId) {
       fairEndingResolvedRef.current = fairEndingWinnerId;
       void endLegAndMaybeMatch(fairEndingWinnerId);
     }
-  }, [isSpectatorMode, fairEndingWinnerId, matchWinnerId, endLegAndMaybeMatch]);
+  }, [isSpectatorMode, fairEndingWinnerId, matchWinnerId, match?.ended_early, endLegAndMaybeMatch]);
 
   // Toggle spectator mode
   const toggleSpectatorMode = useCallback(() => {

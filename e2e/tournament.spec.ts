@@ -151,6 +151,51 @@ test.describe('Tournament', () => {
     await expect(activeBadges).toHaveCount(4);
   });
 
+  test('can end a tournament early from the bracket page', async ({
+    page,
+    supabase,
+    createTournament,
+  }) => {
+    const { tournamentId } = await createTournament({ name: 'E2E Cancel Tournament' });
+
+    const initialState = await getTournamentState(supabase, tournamentId);
+    const liveMatchIds = initialState
+      .filter((m) => m.match_id && !m.winner_id)
+      .map((m) => m.match_id!);
+
+    await page.goto(`/tournament/${tournamentId}`);
+
+    await page.getByRole('button', { name: 'End Tournament' }).click();
+    await page.getByRole('button', { name: 'End Tournament' }).last().click();
+
+    await expect(page.getByText('Cancelled', { exact: true })).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText('Tournament Ended Early')).toBeVisible();
+    await expect(page.getByText('LIVE')).toHaveCount(0);
+    await expect(page.getByText('Unfinished', { exact: true })).toHaveCount(4);
+
+    const { data: tournament } = await supabase
+      .from('tournaments')
+      .select('status, winner_player_id, completed_at')
+      .eq('id', tournamentId)
+      .single();
+
+    expect(tournament?.status).toBe('cancelled');
+    expect(tournament?.winner_player_id).toBeNull();
+    expect(tournament?.completed_at).toBeTruthy();
+
+    const { data: matches } = await supabase
+      .from('matches')
+      .select('id, ended_early, completed_at')
+      .in('id', liveMatchIds);
+
+    expect(matches?.every((match) => match.ended_early && match.completed_at)).toBe(true);
+
+    await page.goto('/games');
+    const tournamentCard = page.locator('a').filter({ hasText: 'E2E Cancel Tournament' });
+    await expect(tournamentCard).toBeVisible();
+    await expect(tournamentCard.getByText('Cancelled', { exact: true })).toBeVisible();
+  });
+
   test('play tournament match through UI and Back to Bracket', async ({
     page,
     supabase,

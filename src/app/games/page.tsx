@@ -6,6 +6,7 @@ import { getSupabaseClient } from '@/lib/supabaseClient';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import type { TournamentStatus } from '@/lib/tournament/types';
 import { Play, Eye, Trophy, Clock, Users, Swords } from 'lucide-react';
 import Link from 'next/link';
 
@@ -33,7 +34,7 @@ type MatchWithDetails = {
 type TournamentSummary = {
   id: string;
   name: string;
-  status: string;
+  status: TournamentStatus;
   start_score: string;
   finish: string;
   legs_to_win: number;
@@ -144,7 +145,7 @@ export default function GamesPage() {
       const { data } = await supabase
         .from('tournaments')
         .select('id, name, status, start_score, finish, legs_to_win, created_at')
-        .in('status', ['in_progress', 'completed'])
+        .in('status', ['in_progress', 'completed', 'cancelled'])
         .order('created_at', { ascending: false })
         .limit(10);
 
@@ -209,6 +210,16 @@ export default function GamesPage() {
     return 'In Progress';
   };
 
+  const getTournamentBadge = (status: TournamentStatus) => {
+    if (status === 'in_progress') {
+      return { label: 'Live', variant: 'default' as const, className: 'animate-pulse' };
+    }
+    if (status === 'cancelled') {
+      return { label: 'Cancelled', variant: 'destructive' as const, className: '' };
+    }
+    return { label: 'Done', variant: 'secondary' as const, className: '' };
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -238,8 +249,11 @@ export default function GamesPage() {
                   <CardHeader className="pb-3">
                     <div className="flex items-center justify-between">
                       <CardTitle className="text-lg">{t.name}</CardTitle>
-                      <Badge variant={t.status === 'in_progress' ? 'default' : 'secondary'} className={t.status === 'in_progress' ? 'animate-pulse' : ''}>
-                        {t.status === 'in_progress' ? 'Live' : 'Done'}
+                      <Badge
+                        variant={getTournamentBadge(t.status).variant}
+                        className={getTournamentBadge(t.status).className}
+                      >
+                        {getTournamentBadge(t.status).label}
                       </Badge>
                     </div>
                     <CardDescription>

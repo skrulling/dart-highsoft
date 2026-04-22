@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ThrowSegmentBadges } from '@/components/ThrowSegmentBadges';
 import { computeCheckoutSuggestions } from '@/utils/checkoutSuggestions';
+import { computeSetupSuggestions } from '@/utils/setupSuggestions';
 import { getLegRoundStats, getSpectatorScore } from '@/utils/matchStats';
 import { decorateAvg } from '@/utils/playerStats';
 import type { Player, ThrowRecord, TurnRecord, TurnWithThrows } from '@/lib/match/types';
@@ -101,22 +102,30 @@ export function SpectatorLiveMatchCard({
 
               // Only show checkout suggestions if we're actually in a checkout scenario
               const shouldShowCheckout = currentScore > 0 && currentScore <= 170 && dartsLeft > 0;
+              const hasCheckout = shouldShowCheckout && paths.length > 0;
+              const setup = !hasCheckout && currentScore > 0 && dartsLeft > 0
+                ? computeSetupSuggestions(currentScore, dartsLeft, finishRule)
+                : null;
 
               return (
                 <div className="flex flex-wrap items-center justify-center gap-2">
-                  {shouldShowCheckout && paths.length > 0
-                    ? paths.map((p, i) => (
-                        <Badge key={i} variant="outline" className="text-xs">
-                          {p.join(', ')}
-                        </Badge>
-                      ))
-                    : shouldShowCheckout ? (
-                        <Badge variant="outline" className="text-xs text-muted-foreground">
-                          No checkout available
-                        </Badge>
-                      ) : (
-                        <div className="invisible">-</div>
-                      )}
+                  {hasCheckout ? (
+                    paths.map((p, i) => (
+                      <Badge key={i} variant="outline" className="text-xs">
+                        {p.join(', ')}
+                      </Badge>
+                    ))
+                  ) : setup ? (
+                    <Badge variant="secondary" className="text-xs">
+                      Setup: {setup.path.join(', ')} → {setup.target}
+                    </Badge>
+                  ) : shouldShowCheckout ? (
+                    <Badge variant="outline" className="text-xs text-muted-foreground">
+                      No checkout available
+                    </Badge>
+                  ) : (
+                    <div className="invisible">-</div>
+                  )}
                 </div>
               );
             })()}

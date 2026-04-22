@@ -20,6 +20,7 @@ import { TurnsHistoryCard } from '@/components/TurnsHistoryCard';
 import { EloChangesDisplay } from '@/components/match/EloChangesDisplay';
 import type { MatchEloChange } from '@/hooks/useMatchEloChanges';
 import { computeCheckoutSuggestions } from '@/utils/checkoutSuggestions';
+import { computeSetupSuggestions } from '@/utils/setupSuggestions';
 import { computeHit, type SegmentResult } from '@/utils/dartboard';
 import type { LegRecord, MatchRecord, Player, TurnRecord, TurnWithThrows } from '@/lib/match/types';
 import type { FinishRule } from '@/utils/x01';
@@ -280,6 +281,9 @@ export function MatchScoringView({
             {(() => {
               const rem = currentPlayer ? getScoreForPlayer(currentPlayer.id) : 0;
               const paths = computeCheckoutSuggestions(rem, currentPlayerDartsLeft, finishRule);
+              const setup = paths.length === 0 && rem !== 0
+                ? computeSetupSuggestions(rem, currentPlayerDartsLeft, finishRule)
+                : null;
               return (
                 <div className="flex flex-wrap items-center gap-2 min-h-6">
                   {paths.length > 0 && rem !== 0 ? (
@@ -288,6 +292,10 @@ export function MatchScoringView({
                         {p.join(', ')}
                       </Badge>
                     ))
+                  ) : setup ? (
+                    <Badge variant="secondary">
+                      Setup: {setup.path.join(', ')} → {setup.target}
+                    </Badge>
                   ) : (
                     <Badge variant="outline" className="invisible" aria-hidden>
                       –

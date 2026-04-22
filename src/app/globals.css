@@ -98,3 +98,37 @@
     @apply bg-background text-foreground;
   }
 }
+
+@keyframes nikita-rainbow-shift {
+  0%   { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+
+@keyframes nikita-wiggle {
+  0%, 100% { transform: scale(1) rotate(-1deg); }
+  25%      { transform: scale(1.08) rotate(2deg); }
+  50%      { transform: scale(1) rotate(-2deg); }
+  75%      { transform: scale(1.08) rotate(1deg); }
+}
+
+.nikita-rainbow {
+  background-image: linear-gradient(
+    90deg,
+    #ff0040,
+    #ff8a00,
+    #ffd500,
+    #2bff00,
+    #00e0ff,
+    #4d00ff,
+    #ff00c8,
+    #ff0040
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation:
+    nikita-rainbow-shift 2.5s linear infinite,
+    nikita-wiggle 1.2s ease-in-out infinite;
+  display: inline-block;
+}

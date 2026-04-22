@@ -25,7 +25,7 @@ const ScoreProgressChart = dynamic(
 type CelebrationState = {
   score: number;
   playerName: string;
-  level: 'info' | 'good' | 'excellent' | 'godlike' | 'max' | 'bust';
+  level: 'info' | 'good' | 'excellent' | 'godlike' | 'max' | 'bust' | 'nikita';
   throws: { segment: string; scored: number; dart_index: number }[];
 } | null;
 
@@ -214,6 +214,8 @@ export function MatchSpectatorView({
                     ? 'text-5xl md:text-6xl bg-gradient-to-r from-yellow-400 via-red-500 to-pink-500 bg-clip-text text-transparent'
                     : celebration?.level === 'good'
                     ? 'text-5xl md:text-6xl bg-gradient-to-r from-blue-500 to-green-500 bg-clip-text text-transparent'
+                    : celebration?.level === 'nikita'
+                    ? 'text-5xl md:text-6xl bg-gradient-to-r from-amber-500 via-orange-500 to-pink-500 bg-clip-text text-transparent'
                     : 'text-4xl md:text-5xl text-foreground'
                 }`}
               >
@@ -235,6 +237,8 @@ export function MatchSpectatorView({
                     ? 'text-yellow-600 dark:text-yellow-400'
                     : celebration?.level === 'good'
                     ? 'text-blue-600 dark:text-blue-400'
+                    : celebration?.level === 'nikita'
+                    ? 'text-orange-600 dark:text-orange-400'
                     : 'text-foreground'
                 }`}
               >
@@ -251,18 +255,37 @@ export function MatchSpectatorView({
                       ? 'text-fuchsia-600 dark:text-fuchsia-400'
                       : celebration?.level === 'excellent'
                       ? 'text-red-500 dark:text-red-400'
+                      : celebration?.level === 'nikita'
+                      ? ''
                       : 'text-green-600 dark:text-green-400'
                   }`}
                 >
-                  {celebration?.level === 'bust'
-                    ? '💥 BUST! 💥'
-                    : celebration?.level === 'max'
-                    ? '🎯 180! 🎯'
-                    : celebration?.level === 'godlike'
-                    ? '🌟 GODLIKE 🌟'
-                    : celebration?.level === 'excellent'
-                    ? '🔥 EXCELLENT! 🔥'
-                    : '⚡ GREAT ROUND! ⚡'}
+                  {celebration?.level === 'bust' ? (
+                    '💥 BUST! 💥'
+                  ) : celebration?.level === 'max' ? (
+                    '🎯 180! 🎯'
+                  ) : celebration?.level === 'godlike' ? (
+                    '🌟 GODLIKE 🌟'
+                  ) : celebration?.level === 'excellent' ? (
+                    '🔥 EXCELLENT! 🔥'
+                  ) : celebration?.level === 'nikita' ? (
+                    <span className="nikita-rainbow text-2xl md:text-3xl font-extrabold">
+                      Nikita special!
+                    </span>
+                  ) : (
+                    '⚡ GREAT ROUND! ⚡'
+                  )}
+                </div>
+              )}
+
+              {celebration?.level === 'nikita' && (
+                <div className="flex justify-center">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src="/nikita-special.png"
+                    alt="Nikita special"
+                    className="h-32 w-auto object-contain -rotate-6"
+                  />
                 </div>
               )}
 

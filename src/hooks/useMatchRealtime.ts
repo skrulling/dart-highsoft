@@ -93,9 +93,15 @@ function areTurnsEqual(a: TurnRecord[], b: TurnRecord[]): boolean {
 type CelebrationState = {
   score: number;
   playerName: string;
-  level: 'info' | 'good' | 'excellent' | 'godlike' | 'max' | 'bust';
+  level: 'info' | 'good' | 'excellent' | 'godlike' | 'max' | 'bust' | 'nikita';
   throws: { segment: string; scored: number; dart_index: number }[];
 } | null;
+
+function isNikitaSpecial(throws: { scored: number }[]): boolean {
+  if (throws.length !== 3) return false;
+  const sorted = throws.map((t) => t.scored).sort((a, b) => a - b);
+  return sorted[0] === 1 && sorted[1] === 5 && sorted[2] === 20;
+}
 
 type RealtimeApi = {
   isConnected: boolean;
@@ -661,6 +667,14 @@ export function useMatchRealtime({
                 throws,
               });
               setTimeout(() => setCelebration(null), 3000);
+            } else if (isNikitaSpecial(throws)) {
+              setCelebration({
+                score: total,
+                playerName,
+                level: 'nikita',
+                throws,
+              });
+              setTimeout(() => setCelebration(null), 5000);
             } else if (total === 180) {
               setCelebration({
                 score: total,
@@ -977,6 +991,14 @@ export function useMatchRealtime({
                 throws,
               });
               setTimeout(() => setCelebration(null), 3000);
+            } else if (isNikitaSpecial(throws)) {
+              setCelebration({
+                score: total,
+                playerName,
+                level: 'nikita',
+                throws,
+              });
+              setTimeout(() => setCelebration(null), 5000);
             } else if (total === 180) {
               setCelebration({
                 score: total,

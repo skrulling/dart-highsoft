@@ -50,7 +50,7 @@ export default function MatchClient({ matchId }: { matchId: string }) {
   const [celebration, setCelebration] = useState<{
     score: number;
     playerName: string;
-    level: 'info' | 'good' | 'excellent' | 'godlike' | 'max' | 'bust';
+    level: 'info' | 'good' | 'excellent' | 'godlike' | 'max' | 'bust' | 'nikita';
     throws: { segment: string; scored: number; dart_index: number }[];
   } | null>(null);
   const celebratedTurns = useRef<Set<string>>(new Set());

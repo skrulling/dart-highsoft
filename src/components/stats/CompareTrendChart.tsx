@@ -108,7 +108,7 @@ export function CompareTrendChart({ playerIds, players, perPlayer, legs, matches
         color: getPlayerColor(i),
         lineWidth: 2.5,
         marker: { enabled: false },
-        connectNulls: false,
+        connectNulls: true,
       };
     });
   }, [metric, perPlayer, legs, matches, playerIds, playerById]);

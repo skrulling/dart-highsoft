@@ -24,8 +24,11 @@ type Row = {
   gameWinRate: number;
   legWinRate: number;
   avgScore: number;
+  avgScore30: number;
   first9: number;
+  first9_30: number;
   t20Grouping: number;
+  t20Grouping30: number;
   checkoutRate: number;
   bustRate: number;
   dartsPerLeg: number;
@@ -108,13 +111,28 @@ function computeRow(
   const first9 = computeFirst9(core.playerTurns, core.playerThrows);
   const t20Grouping = computeT20GroupingAllTime(core.playerTurns, core.playerThrows);
 
+  // Last-30-days slice
+  const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  const recentTurns = core.playerTurns.filter(t => new Date(t.created_at).getTime() >= cutoff);
+  const recentTurnIds = new Set(recentTurns.map(t => t.id));
+  const recentThrows = core.playerThrows.filter(th => recentTurnIds.has(th.turn_id));
+  const validRecent = recentTurns.filter(t => !t.busted);
+  const avgScore30 = validRecent.length > 0
+    ? Math.round((validRecent.reduce((s, t) => s + t.total_scored, 0) / validRecent.length) * 100) / 100
+    : 0;
+  const first9_30 = computeFirst9(recentTurns, recentThrows);
+  const t20Grouping30 = computeT20GroupingAllTime(recentTurns, recentThrows);
+
   return {
     gamesPlayed: core.gamesPlayed,
     gameWinRate: core.gameWinRate,
     legWinRate: core.legWinRate,
     avgScore: core.avgScore,
+    avgScore30,
     first9,
+    first9_30,
     t20Grouping,
+    t20Grouping30,
     checkoutRate: core.checkoutRate,
     bustRate,
     dartsPerLeg: dplTrend.allTimeAvg,
@@ -128,8 +146,11 @@ const COLUMNS: Array<{ key: keyof Row; label: string; suffix?: string; decimals?
   { key: 'gameWinRate', label: 'Match Win', suffix: '%', higherIsBetter: true },
   { key: 'legWinRate', label: 'Leg Win', suffix: '%', higherIsBetter: true },
   { key: 'avgScore', label: 'Avg', decimals: 2, higherIsBetter: true },
+  { key: 'avgScore30', label: 'Avg 30d', decimals: 2, higherIsBetter: true },
   { key: 'first9', label: 'First 9', decimals: 2, higherIsBetter: true },
+  { key: 'first9_30', label: 'First 9 30d', decimals: 2, higherIsBetter: true },
   { key: 't20Grouping', label: 'T20 Group', suffix: '%', decimals: 1, higherIsBetter: true },
+  { key: 't20Grouping30', label: 'T20 Group 30d', suffix: '%', decimals: 1, higherIsBetter: true },
   { key: 'checkoutRate', label: 'Checkout', suffix: '%', higherIsBetter: true },
   { key: 'bustRate', label: 'Bust', suffix: '%', higherIsBetter: false },
   { key: 'dartsPerLeg', label: 'Darts/Leg', decimals: 1, higherIsBetter: false },

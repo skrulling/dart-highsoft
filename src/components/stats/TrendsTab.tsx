@@ -116,11 +116,11 @@ export function TrendsTab({ playerCoreStats, legs, matches, selectedPlayer }: Tr
   const dplTrendLine = useMemo(() => computeTrendLine(dplTrend.rolling, true), [dplTrend.rolling]);
 
   const avgScoreYBounds = useMemo(() => {
-    return computeYBounds([...avgScoreTrend.cumulative, ...avgScoreTrend.daily, ...avgScoreTrend.rolling, ...avgScoreTrendLine.data]);
+    return computeYBounds([...avgScoreTrend.cumulative, ...avgScoreTrend.daily, ...avgScoreTrend.rolling, ...avgScoreTrend.rolling30, ...avgScoreTrendLine.data]);
   }, [avgScoreTrend, avgScoreTrendLine]);
 
   const firstNineYBounds = useMemo(() => {
-    return computeYBounds([...firstNineTrend.daily, ...firstNineTrend.rolling, ...firstNineTrendLine.data]);
+    return computeYBounds([...firstNineTrend.daily, ...firstNineTrend.rolling, ...firstNineTrend.rolling30, ...firstNineTrendLine.data]);
   }, [firstNineTrend, firstNineTrendLine]);
 
   const accuracy20YBounds = useMemo(() => {
@@ -230,6 +230,15 @@ export function TrendsTab({ playerCoreStats, legs, matches, selectedPlayer }: Tr
               },
               {
                 type: 'spline',
+                name: '30-day Rolling Average',
+                data: avgScoreTrend.rolling30,
+                color: '#ec4899',
+                dashStyle: 'LongDashDot',
+                lineWidth: 2,
+                marker: { radius: 3, symbol: 'circle' }
+              },
+              {
+                type: 'spline',
                 name: 'Daily Average',
                 data: avgScoreTrend.daily,
                 color: '#f97316',
@@ -289,6 +298,15 @@ export function TrendsTab({ playerCoreStats, legs, matches, selectedPlayer }: Tr
                 color: '#10b981',
                 lineWidth: 3,
                 marker: { radius: 4, symbol: 'circle' },
+              },
+              {
+                type: 'spline',
+                name: '30-day Rolling Average',
+                data: firstNineTrend.rolling30,
+                color: '#ec4899',
+                dashStyle: 'LongDashDot',
+                lineWidth: 2,
+                marker: { radius: 3, symbol: 'circle' },
               },
               {
                 type: 'spline',

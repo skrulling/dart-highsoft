@@ -323,7 +323,7 @@ export function computeTonBandsOverTime(
 
 export function computeAvgScoreTrend(
   playerTurns: TurnRow[]
-): { categories: string[]; cumulative: number[]; daily: number[]; rolling: number[] } {
+): { categories: string[]; cumulative: number[]; daily: number[]; rolling: number[]; rolling30: number[] } {
   const validTurns = playerTurns
     .filter(t => !t.busted)
     .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
@@ -352,20 +352,21 @@ export function computeAvgScoreTrend(
   }
 
   const rolling: number[] = [];
+  const rolling30: number[] = [];
   for (let i = 0; i < daily.length; i++) {
-    const start = Math.max(0, i - 6);
-    const window = daily.slice(start, i + 1);
-    const windowAvg = window.reduce((acc, val) => acc + val, 0) / window.length;
-    rolling.push(Math.round(windowAvg * 100) / 100);
+    const window7 = daily.slice(Math.max(0, i - 6), i + 1);
+    rolling.push(Math.round((window7.reduce((a, v) => a + v, 0) / window7.length) * 100) / 100);
+    const window30 = daily.slice(Math.max(0, i - 29), i + 1);
+    rolling30.push(Math.round((window30.reduce((a, v) => a + v, 0) / window30.length) * 100) / 100);
   }
 
-  return { categories: days, cumulative, daily, rolling };
+  return { categories: days, cumulative, daily, rolling, rolling30 };
 }
 
 export function computeFirstNineTrend(
   playerTurns: TurnRow[],
   playerThrows: ThrowRow[]
-): { categories: string[]; daily: number[]; rolling: number[] } {
+): { categories: string[]; daily: number[]; rolling: number[]; rolling30: number[] } {
   const throwsByTurn = new Map<string, number>();
   for (const thr of playerThrows) {
     if (!thr.turn_id) continue;
@@ -411,14 +412,15 @@ export function computeFirstNineTrend(
   const daily = entries.map(([, stats]) => Math.round((stats.sum / stats.count) * 100) / 100);
 
   const rolling: number[] = [];
+  const rolling30: number[] = [];
   for (let i = 0; i < daily.length; i++) {
-    const start = Math.max(0, i - 6);
-    const window = daily.slice(start, i + 1);
-    const windowAvg = window.reduce((acc, val) => acc + val, 0) / window.length;
-    rolling.push(Math.round(windowAvg * 100) / 100);
+    const window7 = daily.slice(Math.max(0, i - 6), i + 1);
+    rolling.push(Math.round((window7.reduce((a, v) => a + v, 0) / window7.length) * 100) / 100);
+    const window30 = daily.slice(Math.max(0, i - 29), i + 1);
+    rolling30.push(Math.round((window30.reduce((a, v) => a + v, 0) / window30.length) * 100) / 100);
   }
 
-  return { categories, daily, rolling };
+  return { categories, daily, rolling, rolling30 };
 }
 
 export function computeAccuracy20Trend(

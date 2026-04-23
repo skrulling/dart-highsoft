@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useMemo, useState } from 'react';
+import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { useStatsData } from '@/hooks/useStatsData';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -10,11 +12,75 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import Link from 'next/link';
 import {
   GlobalStatsCards, DataLimitWarning, OverviewTab,
-  PerformanceTab, TargetAnalysisTab, TrendsTab, OverallCharts
+  PerformanceTab, TargetAnalysisTab, TrendsTab, OverallCharts,
+  ComparePlayersView,
 } from '@/components/stats';
+import { MAX_COMPARE } from '@/components/stats/ComparePlayerPicker';
+
+type ViewMode = 'traditional' | 'elo' | 'compare';
+
+function isViewMode(s: string | null): s is ViewMode {
+  return s === 'traditional' || s === 'elo' || s === 'compare';
+}
 
 export default function StatsPage() {
   const stats = useStatsData();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  // Compare selection — mirrored to ?players=. Unknown IDs are dropped once
+  // the player list resolves.
+  const [compareIds, setCompareIds] = useState<string[]>(() => {
+    const raw = searchParams.get('players') ?? '';
+    return raw.split(',').map(s => s.trim()).filter(Boolean).slice(0, MAX_COMPARE);
+  });
+
+  // Sync URL -> activeView on mount (and when the ?view= param changes externally).
+  useEffect(() => {
+    const urlView = searchParams.get('view');
+    if (isViewMode(urlView) && urlView !== stats.activeView) {
+      stats.setActiveView(urlView);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
+  // Drop IDs that don't resolve to a loaded player once globalQuery settles.
+  useEffect(() => {
+    if (!stats.players.length) return;
+    const valid = new Set(stats.players.map(p => p.id));
+    const filtered = compareIds.filter(id => valid.has(id));
+    if (filtered.length !== compareIds.length) {
+      setCompareIds(filtered);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stats.players]);
+
+  const writeUrl = (view: ViewMode, players: string[]) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (view === 'traditional') params.delete('view'); else params.set('view', view);
+    if (view === 'compare' && players.length) params.set('players', players.join(','));
+    else params.delete('players');
+    const qs = params.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  };
+
+  const setView = (view: ViewMode) => {
+    stats.setActiveView(view);
+    writeUrl(view, view === 'compare' ? compareIds : []);
+  };
+
+  const setCompareIdsAndUrl = (ids: string[]) => {
+    setCompareIds(ids);
+    writeUrl('compare', ids);
+  };
+
+  const avgScore = useMemo(() =>
+    stats.summary.length > 0
+      ? Math.round(stats.summary.reduce((sum, p) => sum + p.avg_per_turn, 0) / stats.summary.length)
+      : 0,
+    [stats.summary]
+  );
 
   if (stats.loading) {
     return (
@@ -23,10 +89,6 @@ export default function StatsPage() {
       </div>
     );
   }
-
-  const avgScore = stats.summary.length > 0
-    ? Math.round(stats.summary.reduce((sum, p) => sum + p.avg_per_turn, 0) / stats.summary.length)
-    : 0;
 
   return (
     <div className="container mx-auto p-4 space-y-6">
@@ -37,16 +99,22 @@ export default function StatsPage() {
         </div>
 
         {/* View Toggle */}
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <Button
             variant={stats.activeView === 'traditional' ? 'default' : 'outline'}
-            onClick={() => stats.setActiveView('traditional')}
+            onClick={() => setView('traditional')}
           >
             📊 Performance Stats
           </Button>
           <Button
+            variant={stats.activeView === 'compare' ? 'default' : 'outline'}
+            onClick={() => setView('compare')}
+          >
+            ⚔️ Compare
+          </Button>
+          <Button
             variant={stats.activeView === 'elo' ? 'default' : 'outline'}
-            onClick={() => stats.setActiveView('elo')}
+            onClick={() => setView('elo')}
           >
             🏆 Elo Rankings
           </Button>
@@ -55,6 +123,17 @@ export default function StatsPage() {
           </Button>
         </div>
       </div>
+
+      {/* Compare View */}
+      {stats.activeView === 'compare' && (
+        <ComparePlayersView
+          players={stats.players}
+          legs={stats.legs}
+          matches={stats.matches}
+          selectedIds={compareIds}
+          onChange={setCompareIdsAndUrl}
+        />
+      )}
 
       {/* Elo View */}
       {stats.activeView === 'elo' && (

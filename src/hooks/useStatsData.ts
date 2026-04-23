@@ -83,12 +83,12 @@ async function fetchStatsGlobalData(): Promise<StatsGlobalData> {
   void accuracyData;
 }
 
-type PlayerDetailData = {
+export type PlayerDetailData = {
   turns: TurnRow[];
   throws: ThrowRow[];
 };
 
-async function fetchPlayerDetailData(playerId: string): Promise<PlayerDetailData> {
+export async function fetchPlayerDetailData(playerId: string): Promise<PlayerDetailData> {
   const supabase = await getSupabaseClient();
 
   const { data: t } = await supabase
@@ -132,7 +132,7 @@ async function fetchPlayerDetailData(playerId: string): Promise<PlayerDetailData
 
 export function useStatsData() {
   const [selectedPlayer, setSelectedPlayer] = useState<string>('');
-  const [activeView, setActiveView] = useState<'traditional' | 'elo'>('traditional');
+  const [activeView, setActiveView] = useState<'traditional' | 'elo' | 'compare'>('traditional');
   const [warningDismissed, setWarningDismissed] = useState(false);
 
   // Global stats data — cached across navigations
@@ -146,6 +146,7 @@ export function useStatsData() {
     queryKey: ['stats', 'player', selectedPlayer],
     queryFn: () => fetchPlayerDetailData(selectedPlayer),
     enabled: !!selectedPlayer,
+    staleTime: 5 * 60_000,
   });
 
   const summary = globalQuery.data?.summary ?? [];

@@ -5,3 +5,4 @@ export { PerformanceTab } from './PerformanceTab';
 export { TargetAnalysisTab } from './TargetAnalysisTab';
 export { TrendsTab } from './TrendsTab';
 export { OverallCharts } from './OverallCharts';
+export { ComparePlayersView } from './ComparePlayersView';

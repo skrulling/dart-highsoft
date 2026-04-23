@@ -91,7 +91,6 @@ export function applyThrowChange(
   }
 
   const throws = target.throws ?? [];
-  const prevCount = throws.length;
   const existingIndex = ensureThrowIdMatchIndex(throws, record);
   const computedScore = record.scored ?? scoreFromSegment(record.segment);
 
@@ -118,9 +117,6 @@ export function applyThrowChange(
   target.throws = throws;
 
   const nextCounts = { ...state.turnThrowCounts, [target.id]: throws.length };
-  if (prevCount < 3 && throws.length === 3) {
-    effects.completedTurnId = target.id;
-  }
 
   return {
     turns,

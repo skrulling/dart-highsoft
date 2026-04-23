@@ -167,10 +167,11 @@ export function MatchSpectatorView({
   fairEndingState,
 }: Props) {
   const [winnerModalOpen, setWinnerModalOpen] = useState(false);
+  const matchEndedEarly = Boolean(match.ended_early);
 
   useEffect(() => {
-    setWinnerModalOpen(Boolean(matchWinnerId));
-  }, [matchWinnerId]);
+    setWinnerModalOpen(Boolean(matchWinnerId) && !matchEndedEarly);
+  }, [matchWinnerId, matchEndedEarly]);
 
   const topThreeTurns = useMemo(
     () =>
@@ -363,6 +364,16 @@ export function MatchSpectatorView({
           <div className="rounded-md border border-purple-400/60 bg-purple-50 px-4 py-3 text-purple-800 dark:border-purple-700/60 dark:bg-purple-900/20 dark:text-purple-200">
             <div className="font-semibold">Tiebreak Round {fairEndingState.tiebreakRound}</div>
             <div className="text-sm">Multiple players checked out — highest score wins!</div>
+          </div>
+        )}
+        {matchEndedEarly && (
+          <div className="rounded-md border border-amber-400/60 bg-amber-50 px-4 py-3 text-amber-800 dark:border-amber-700/60 dark:bg-amber-900/20 dark:text-amber-200">
+            <div className="font-semibold">{match.tournament_match_id ? 'Tournament ended early' : 'Match ended early'}</div>
+            <div className="text-sm">
+              {match.tournament_match_id
+                ? 'This bracket match is no longer playable because the tournament was cancelled.'
+                : 'This match is no longer playable and no winner was recorded.'}
+            </div>
           </div>
         )}
 

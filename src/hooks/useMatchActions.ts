@@ -394,7 +394,7 @@ export function useMatchActions(args: UseMatchActionsArgs): UseMatchActionsResul
 
   const processBoardClick = useCallback(
     async (_x: number, _y: number, result: SegmentResult) => {
-      if (matchWinnerId) return; // match over
+      if (matchWinnerId || match?.ended_early) return; // match over
       if (!currentLeg || !currentPlayer) return;
       const isTiebreak = fairEndingState.phase === 'tiebreak';
       const clickStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
@@ -513,6 +513,7 @@ export function useMatchActions(args: UseMatchActionsArgs): UseMatchActionsResul
     },
     [
       matchWinnerId,
+      match?.ended_early,
       currentLeg,
       currentPlayer,
       syncTurnFromStateIfNeeded,
@@ -543,6 +544,7 @@ export function useMatchActions(args: UseMatchActionsArgs): UseMatchActionsResul
   );
 
   const undoLastThrow = useCallback(async () => {
+    if (match?.ended_early) return;
     if (!currentLeg) return;
     const supabase = await getSupabaseClient();
     // If we have an empty local turn (no darts), remove it before undoing previous throws
@@ -709,7 +711,7 @@ export function useMatchActions(args: UseMatchActionsArgs): UseMatchActionsResul
       await loadAll();
       return;
     }
-  }, [currentLeg, ongoingTurnRef, setLocalTurn, currentPlayer, getScoreForPlayer, loadAll, legs, turns, orderPlayers, matchId]);
+  }, [match?.ended_early, currentLeg, ongoingTurnRef, setLocalTurn, currentPlayer, getScoreForPlayer, loadAll, legs, turns, orderPlayers, matchId]);
 
   const openEditModal = useCallback(async () => {
     if (!currentLeg) return;

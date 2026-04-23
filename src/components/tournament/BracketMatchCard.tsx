@@ -1,14 +1,15 @@
 import { Badge } from '@/components/ui/badge';
-import type { TournamentMatchRecord } from '@/lib/tournament/types';
+import type { TournamentMatchRecord, TournamentStatus } from '@/lib/tournament/types';
 
 type Props = {
   tm: TournamentMatchRecord;
   playerName: (id: string | null) => string;
   onMatchClick?: (matchId: string) => void;
+  tournamentStatus: TournamentStatus;
 };
 
-export function BracketMatchCard({ tm, playerName, onMatchClick }: Props) {
-  const isPlayable = tm.match_id && !tm.winner_id;
+export function BracketMatchCard({ tm, playerName, onMatchClick, tournamentStatus }: Props) {
+  const isPlayable = Boolean(tm.match_id && !tm.winner_id && tournamentStatus === 'in_progress');
   const isComplete = !!tm.winner_id;
   const isPending = !tm.player1_id && !tm.player2_id && !tm.is_bye;
 

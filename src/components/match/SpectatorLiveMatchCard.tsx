@@ -7,13 +7,13 @@ import { computeCheckoutSuggestions } from '@/utils/checkoutSuggestions';
 import { computeSetupSuggestions } from '@/utils/setupSuggestions';
 import { getLegRoundStats, getSpectatorScore } from '@/utils/matchStats';
 import { decorateAvg } from '@/utils/playerStats';
-import type { Player, ThrowRecord, TurnRecord, TurnWithThrows } from '@/lib/match/types';
+import type { MatchRecord, Player, ThrowRecord, TurnRecord, TurnWithThrows } from '@/lib/match/types';
 import type { FairEndingState } from '@/utils/fairEnding';
 import type { FinishRule } from '@/utils/x01';
 import { useEffect, useMemo, useRef } from 'react';
 
 type Props = {
-  match: { start_score: string; finish: string; legs_to_win: number };
+  match: MatchRecord;
   orderPlayers: Player[];
   spectatorCurrentPlayer: Player | null;
   turns: TurnRecord[];
@@ -43,10 +43,13 @@ export function SpectatorLiveMatchCard({
     if (typeof window === 'undefined') return false;
     return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   }, []);
+  const isEndedEarly = Boolean(match.ended_early);
+  const spectatorCurrentPlayerId = spectatorCurrentPlayer?.id ?? null;
 
   useEffect(() => {
-    if (!spectatorCurrentPlayer) return;
-    const el = itemRefs.current[spectatorCurrentPlayer.id];
+    if (isEndedEarly) return;
+    if (!spectatorCurrentPlayerId) return;
+    const el = itemRefs.current[spectatorCurrentPlayerId];
     const container = listRef.current;
     if (el && container) {
       const containerRect = container.getBoundingClientRect();
@@ -56,12 +59,12 @@ export function SpectatorLiveMatchCard({
       container.scrollTo({ top: Math.max(0, target), behavior: reducedMotion ? 'auto' : 'smooth' });
     }
     return;
-  }, [spectatorCurrentPlayer?.id, reducedMotion]);
+  }, [isEndedEarly, spectatorCurrentPlayerId, reducedMotion]);
 
   return (
     <Card className="xl:col-span-2">
       <CardHeader>
-        <CardTitle>Live Match</CardTitle>
+        <CardTitle>{isEndedEarly ? 'Ended Match' : 'Live Match'}</CardTitle>
         <CardDescription>
           {match.start_score} • {match.finish.replace('_', ' ')} • Legs to win {match.legs_to_win}
         </CardDescription>
@@ -69,10 +72,17 @@ export function SpectatorLiveMatchCard({
       <CardContent>
         <div className="space-y-4">
           {/* Current player indicator */}
-          {spectatorCurrentPlayer && (
+          {spectatorCurrentPlayer && !isEndedEarly && (
             <div className="text-center">
               <div className="text-lg font-semibold text-muted-foreground">Current Turn</div>
               <div className="text-3xl font-bold text-primary">{spectatorCurrentPlayer.display_name}</div>
+            </div>
+          )}
+          {isEndedEarly && (
+            <div className="rounded-md border border-amber-400/60 bg-amber-50 px-4 py-3 text-amber-800 dark:border-amber-700/60 dark:bg-amber-900/20 dark:text-amber-200">
+              {match.tournament_match_id
+                ? 'This bracket match was closed because the tournament ended early.'
+                : 'This match ended early with no recorded winner.'}
             </div>
           )}
 
@@ -80,7 +90,7 @@ export function SpectatorLiveMatchCard({
           <div className="min-h-8 flex justify-center">
             {(() => {
               const isTiebreak = fairEndingState?.phase === 'tiebreak';
-              if (!spectatorCurrentPlayer || isTiebreak) return <div className="invisible">-</div>;
+              if (!spectatorCurrentPlayer || isTiebreak || isEndedEarly) return <div className="invisible">-</div>;
 
               const currentScore = getSpectatorScore(
                 turns,
@@ -184,7 +194,7 @@ export function SpectatorLiveMatchCard({
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                      {isCurrent && <Badge variant="default">Playing</Badge>}
+                      {isCurrent && !isEndedEarly && <Badge variant="default">Playing</Badge>}
                       {isCheckedOut && (
                         <Badge variant="outline" className="border-green-500 text-green-600 dark:text-green-400">Checked out</Badge>
                       )}

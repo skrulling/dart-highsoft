@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { useStatsData } from '@/hooks/useStatsData';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -24,6 +24,18 @@ function isViewMode(s: string | null): s is ViewMode {
 }
 
 export default function StatsPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-lg">Loading statistics...</div>
+      </div>
+    }>
+      <StatsPageInner />
+    </Suspense>
+  );
+}
+
+function StatsPageInner() {
   const stats = useStatsData();
   const router = useRouter();
   const pathname = usePathname();

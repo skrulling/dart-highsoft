@@ -6,6 +6,7 @@ import {
   computeAvgScoreTrend,
   computeFirstNineTrend,
   computeAccuracy20Trend,
+  computeT20GroupingTrend,
   computeCheckoutRateTrend,
   computeBustRateTrend,
   computeTonRateOverTime,
@@ -96,6 +97,7 @@ export function TrendsTab({ playerCoreStats, legs, matches, selectedPlayer }: Tr
   const avgScoreTrend = useMemo(() => computeAvgScoreTrend(playerTurns), [playerTurns]);
   const firstNineTrend = useMemo(() => computeFirstNineTrend(playerTurns, playerThrows), [playerTurns, playerThrows]);
   const accuracy20Trend = useMemo(() => computeAccuracy20Trend(playerTurns, playerThrows), [playerTurns, playerThrows]);
+  const t20GroupingTrend = useMemo(() => computeT20GroupingTrend(playerTurns, playerThrows), [playerTurns, playerThrows]);
   const checkoutTrend = useMemo(
     () => computeCheckoutRateTrend(playerTurns, playerLegs, legs, matches, selectedPlayer),
     [playerTurns, playerLegs, legs, matches, selectedPlayer]
@@ -113,6 +115,7 @@ export function TrendsTab({ playerCoreStats, legs, matches, selectedPlayer }: Tr
   const checkoutTrendLine = useMemo(() => computeTrendLine(checkoutTrend.rolling), [checkoutTrend.rolling]);
   const bustTrendLine = useMemo(() => computeTrendLine(bustTrend.rolling, true), [bustTrend.rolling]);
   const accuracy20TrendLine = useMemo(() => computeTrendLine(accuracy20Trend.rollingHitPct), [accuracy20Trend.rollingHitPct]);
+  const t20GroupingTrendLine = useMemo(() => computeTrendLine(t20GroupingTrend.rolling), [t20GroupingTrend.rolling]);
   const dplTrendLine = useMemo(() => computeTrendLine(dplTrend.rolling, true), [dplTrend.rolling]);
 
   const avgScoreYBounds = useMemo(() => {
@@ -582,6 +585,74 @@ export function TrendsTab({ playerCoreStats, legs, matches, selectedPlayer }: Tr
           }} />
         </CardContent>
       </Card>
+
+      {/* T20 Grouping (first 9 darts landing in 20/1/5 wedges) */}
+      {t20GroupingTrend.categories.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>T20 Grouping (First 9 Darts)</CardTitle>
+            <CardDescription>
+              {trendDescription(t20GroupingTrendLine, 'pp')} — % of first-9 darts landing in the 20, 1, or 5 wedges (any multiplier)
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Chart options={{
+              title: { text: null },
+              chart: { height: 360 },
+              xAxis: {
+                type: 'category',
+                categories: t20GroupingTrend.categories,
+                title: { text: 'Date' },
+                tickmarkPlacement: 'on',
+                labels: {
+                  step: Math.ceil((t20GroupingTrend.categories.length || 1) / 8),
+                },
+              },
+              yAxis: {
+                title: { text: 'Grouping Rate (%)' },
+                min: 0,
+                max: 100,
+              },
+              series: [
+                {
+                  type: 'spline',
+                  name: '7-day Rolling',
+                  data: t20GroupingTrend.rolling,
+                  color: '#8b5cf6',
+                  lineWidth: 3,
+                  marker: { radius: 4, symbol: 'circle' },
+                },
+                {
+                  type: 'spline',
+                  name: '30-day Rolling',
+                  data: t20GroupingTrend.rolling30,
+                  color: '#ec4899',
+                  dashStyle: 'LongDashDot',
+                  lineWidth: 2,
+                  marker: { radius: 3, symbol: 'circle' },
+                },
+                {
+                  type: 'spline',
+                  name: 'Daily',
+                  data: t20GroupingTrend.daily,
+                  color: '#c4b5fd',
+                  dashStyle: 'ShortDash',
+                  lineWidth: 1,
+                  marker: { radius: 2, symbol: 'circle' },
+                },
+                makeTrendSeries(t20GroupingTrendLine),
+              ].filter(Boolean),
+              legend: { enabled: true },
+              tooltip: {
+                shared: true,
+                valueSuffix: '%',
+                valueDecimals: 1,
+                headerFormat: '<span style="font-size: 10px">{point.key}</span><br/>',
+              },
+            }} />
+          </CardContent>
+        </Card>
+      )}
 
       {/* Ton Rate Over Time (normalized) */}
       <Card>

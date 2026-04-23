@@ -490,6 +490,64 @@ export function computeAccuracy20Trend(
   return { categories, hitPct, missLeftPct, missRightPct, rollingHitPct };
 }
 
+/**
+ * Percentage of first-9 darts per leg that land in the 20 / 1 / 5 pies
+ * (any multiplier — single, double, triple). Measures grouping tightness
+ * around T20, assuming the player is aiming there.
+ */
+export function computeT20GroupingTrend(
+  playerTurns: TurnRow[],
+  playerThrows: ThrowRow[]
+): { categories: string[]; daily: number[]; rolling: number[]; rolling30: number[] } {
+  const turnsByLeg = new Map<string, TurnRow[]>();
+  for (const turn of playerTurns) {
+    if (!turnsByLeg.has(turn.leg_id)) turnsByLeg.set(turn.leg_id, []);
+    turnsByLeg.get(turn.leg_id)!.push(turn);
+  }
+
+  const firstNineTurnIds = new Map<string, TurnRow>();
+  for (const legTurns of turnsByLeg.values()) {
+    const sorted = [...legTurns].sort((a, b) => a.turn_number - b.turn_number);
+    for (const turn of sorted.slice(0, 3)) firstNineTurnIds.set(turn.id, turn);
+  }
+
+  const groupSegments = new Set([
+    '20', 'S20', 'D20', 'T20',
+    '1',  'S1',  'D1',  'T1',
+    '5',  'S5',  'D5',  'T5',
+  ]);
+
+  const dayStats = new Map<string, { hits: number; total: number }>();
+  for (const thr of playerThrows) {
+    const turn = firstNineTurnIds.get(thr.turn_id);
+    if (!turn) continue;
+    if (!thr.segment) continue;
+    const day = new Date(turn.created_at).toISOString().slice(0, 10);
+    const entry = dayStats.get(day) ?? { hits: 0, total: 0 };
+    entry.total += 1;
+    if (groupSegments.has(thr.segment)) entry.hits += 1;
+    dayStats.set(day, entry);
+  }
+
+  const entries = Array.from(dayStats.entries())
+    .filter(([, s]) => s.total > 0)
+    .sort((a, b) => a[0].localeCompare(b[0]));
+
+  const categories = entries.map(([d]) => d);
+  const daily = entries.map(([, s]) => Math.round((s.hits / s.total) * 1000) / 10);
+
+  const rolling: number[] = [];
+  const rolling30: number[] = [];
+  for (let i = 0; i < daily.length; i++) {
+    const w7 = daily.slice(Math.max(0, i - 6), i + 1);
+    rolling.push(Math.round((w7.reduce((a, v) => a + v, 0) / w7.length) * 10) / 10);
+    const w30 = daily.slice(Math.max(0, i - 29), i + 1);
+    rolling30.push(Math.round((w30.reduce((a, v) => a + v, 0) / w30.length) * 10) / 10);
+  }
+
+  return { categories, daily, rolling, rolling30 };
+}
+
 export type TrendLine = {
   data: number[];           // y-values aligned to same x-axis categories
   slopePerDay: number;      // raw slope per data point (= per played day)

@@ -1,5 +1,6 @@
 "use client";
 
+import type React from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import Highcharts from 'highcharts';
@@ -9,7 +10,6 @@ import '@highcharts/grid-pro/css/grid-pro.css';
 import { useLeaderboardData } from '@/hooks/useLeaderboardData';
 import { batchEloHistory, batchMultiEloHistory } from '@/utils/eloHistory';
 import { LOCATIONS, type LocationValue } from '@/utils/locations';
-import { Button } from '@/components/ui/button';
 
 SparklineRenderer['useHighcharts'](Highcharts);
 
@@ -222,6 +222,67 @@ function getWinsCount(value: unknown): number | null {
   return points.filter((point) => point > 0).length;
 }
 
+function getCurrentWinStreak(points: number[]): number {
+  let streak = 0;
+  for (const point of points) {
+    if (point <= 0) break;
+    streak += 1;
+  }
+  return streak;
+}
+
+function buildLinePoints(values: number[] | undefined, width: number, height: number, padding: number): string {
+  const safeValues = Array.isArray(values)
+    ? values.filter((value) => Number.isFinite(value))
+    : [];
+  if (safeValues.length === 0) return '';
+  if (safeValues.length === 1) return `${padding},${height - padding}`;
+
+  const min = Math.min(...safeValues);
+  const max = Math.max(...safeValues);
+  const range = max - min || 1;
+  const usableWidth = width - padding * 2;
+  const usableHeight = height - padding * 2;
+
+  return safeValues
+    .map((value, index) => {
+      const x = padding + (index / (safeValues.length - 1)) * usableWidth;
+      const y = height - padding - ((value - min) / range) * usableHeight;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(' ');
+}
+
+function buildLineArea(points: string, width: number, height: number, padding: number): string {
+  if (!points) return '';
+  const splitPoints = points.split(' ');
+  const first = splitPoints[0];
+  const last = splitPoints.at(-1);
+  if (!first || !last) return '';
+  const firstX = first.split(',')[0];
+  const lastX = last.split(',')[0];
+  return `${firstX},${height - padding} ${points} ${lastX},${height - padding}`;
+}
+
+function buildFormTrend(points: number[]): number[] {
+  const chronological = points.slice().reverse();
+  let score = 0;
+  return [0, ...chronological.map((point) => {
+    score += point > 0 ? 1 : -0.35;
+    return score;
+  })];
+}
+
+function normalizeCounts(counts: number[] | undefined, length: number): number[] {
+  const normalized = Array.isArray(counts)
+    ? counts.slice(0, length).map((count) => Number.isFinite(count) ? count : 0)
+    : [];
+  while (normalized.length < length) {
+    normalized.push(0);
+  }
+  return normalized;
+}
+
 function renderGamesHtml(value: unknown): string {
   if (typeof value !== 'string' || !value) {
     return '<span class="games-summary-empty">–</span>';
@@ -325,20 +386,26 @@ type MergedPlayer = {
 };
 
 const LEADERBOARD_LOCATION_STORAGE_KEY = 'leaderboard-location-filter';
+type LeaderboardLocationFilter = 'all' | LocationValue;
+type MatchActivityRange = '7d' | '30d';
 
-function loadLeaderboardLocations(): LocationValue[] {
-  if (typeof window === 'undefined') return LOCATIONS.map((l) => l.value);
+function loadLeaderboardLocationFilter(): LeaderboardLocationFilter {
+  if (typeof window === 'undefined') return 'all';
   try {
     const stored = localStorage.getItem(LEADERBOARD_LOCATION_STORAGE_KEY);
     if (stored) {
-      const parsed = JSON.parse(stored) as LocationValue[];
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      const parsed = JSON.parse(stored) as LeaderboardLocationFilter | LocationValue[];
+      if (parsed === 'all') return parsed;
+      if (typeof parsed === 'string' && LOCATIONS.some((loc) => loc.value === parsed)) return parsed;
+      if (Array.isArray(parsed) && parsed.length === 1 && LOCATIONS.some((loc) => loc.value === parsed[0])) {
+        return parsed[0];
+      }
     }
   } catch { /* ignore */ }
-  return LOCATIONS.map((l) => l.value);
+  return 'all';
 }
 
-export function GridLeaderboard() {
+export function GridLeaderboard({ headerContent }: { headerContent?: React.ReactNode } = {}) {
   const {
     leaders,
     eloLeaders,
@@ -346,19 +413,16 @@ export function GridLeaderboard() {
     recentWinsByPlayer,
     playerGameStats,
     playerLocations,
+    matchActivity,
+    weeklyEloClimber,
     loading,
   } = useLeaderboardData();
-  const [enabledLocations, setEnabledLocations] = useState<LocationValue[]>(loadLeaderboardLocations);
+  const [locationFilter, setLocationFilter] = useState<LeaderboardLocationFilter>(loadLeaderboardLocationFilter);
+  const [matchActivityRange, setMatchActivityRange] = useState<MatchActivityRange>('7d');
 
   useEffect(() => {
-    localStorage.setItem(LEADERBOARD_LOCATION_STORAGE_KEY, JSON.stringify(enabledLocations));
-  }, [enabledLocations]);
-
-  function toggleLocation(loc: LocationValue) {
-    setEnabledLocations((prev) =>
-      prev.includes(loc) ? prev.filter((l) => l !== loc) : [...prev, loc]
-    );
-  }
+    localStorage.setItem(LEADERBOARD_LOCATION_STORAGE_KEY, JSON.stringify(locationFilter));
+  }, [locationFilter]);
 
   const merged = useMemo(() => {
     const map = new Map<string, MergedPlayer>();
@@ -403,10 +467,37 @@ export function GridLeaderboard() {
   }, [leaders, eloLeaders, eloMultiLeaders, playerGameStats, playerLocations]);
 
   const filteredMerged = useMemo(() => {
-    return merged.filter(
-      (p) => p.location === null || enabledLocations.includes(p.location as LocationValue)
-    );
-  }, [merged, enabledLocations]);
+    if (locationFilter === 'all') return merged;
+    return merged.filter((p) => p.location === locationFilter);
+  }, [merged, locationFilter]);
+
+  const hotStreak = useMemo(() => {
+    let best: { playerId: string; player: string; streak: number; wins: number; recent: number[] } | null = null;
+
+    for (const row of merged) {
+      const recent = recentWinsByPlayer.get(row.player_id) ?? [];
+      const streak = getCurrentWinStreak(recent);
+      if (streak === 0) continue;
+
+      const wins = recent.filter((point) => point > 0).length;
+      if (
+        !best ||
+        streak > best.streak ||
+        (streak === best.streak && wins > best.wins) ||
+        (streak === best.streak && wins === best.wins && row.display_name.localeCompare(best.player) < 0)
+      ) {
+        best = {
+          playerId: row.player_id,
+          player: row.display_name,
+          streak,
+          wins,
+          recent,
+        };
+      }
+    }
+
+    return best;
+  }, [merged, recentWinsByPlayer]);
 
   // Stable player ID list for query key (avoids refetch on every render)
   const playerIds = useMemo(() => merged.map((p) => p.player_id).sort(), [merged]);
@@ -422,6 +513,29 @@ export function GridLeaderboard() {
 
   const eloHistory = eloHistoryData?.elo ?? new Map<string, number[]>();
   const multiEloHistory = eloHistoryData?.multi ?? new Map<string, number[]>();
+  const hotStreakLinePoints = buildLinePoints(
+    hotStreak ? buildFormTrend(hotStreak.recent) : [],
+    150,
+    42,
+    3
+  );
+  const hotStreakAreaPoints = buildLineArea(hotStreakLinePoints, 150, 42, 3);
+  const climberHistory = weeklyEloClimber
+    ? weeklyEloClimber.rating_history ?? [0, weeklyEloClimber.rating_change]
+    : [];
+  const climberLinePoints = buildLinePoints(climberHistory, 150, 42, 3);
+  const climberAreaPoints = buildLineArea(climberLinePoints, 150, 42, 3);
+  const selectedMatchTotal = matchActivityRange === '7d'
+    ? matchActivity.sevenDayTotal
+    : matchActivity.thirtyDayTotal;
+  const selectedMatchDelta = matchActivityRange === '7d'
+    ? matchActivity.sevenDayDelta
+    : matchActivity.thirtyDayDelta;
+  const selectedMatchCounts = matchActivityRange === '7d'
+    ? matchActivity.sevenDayCounts
+    : matchActivity.thirtyDayCounts;
+  const safeMatchCounts = normalizeCounts(selectedMatchCounts, matchActivityRange === '7d' ? 7 : 30);
+  const maxMatchCount = Math.max(...safeMatchCounts, 1);
 
   const options = useMemo<GridOptions>(() => {
     const player: string[] = [];
@@ -678,20 +792,403 @@ export function GridLeaderboard() {
 
   return (
     <div className="grid-leaderboard">
-      <div className="flex gap-1 mb-3">
-        {LOCATIONS.map((loc) => (
-          <Button
-            key={loc.value}
-            type="button"
-            size="sm"
-            variant={enabledLocations.includes(loc.value) ? 'default' : 'outline'}
-            onClick={() => toggleLocation(loc.value)}
-          >
-            {loc.label}
-          </Button>
-        ))}
+      <div className="leaderboard-header">
+        <div className="leaderboard-heading">{headerContent}</div>
+        <div className="leaderboard-kpis" aria-label="Leaderboard overview">
+          <div className="leaderboard-kpi">
+            <div className="leaderboard-kpi__topline">
+              <span className="leaderboard-kpi__label">Hot streak</span>
+              {hotStreak && <span className="leaderboard-kpi__badge leaderboard-kpi__badge--hot">🔥 On fire</span>}
+            </div>
+            <div className="leaderboard-kpi__headline">
+              {hotStreak ? `${hotStreak.player} · ${hotStreak.streak}W` : '–'}
+            </div>
+            <svg className="leaderboard-kpi__chart" viewBox="0 0 150 42" aria-hidden="true">
+              <defs>
+                <linearGradient id="hot-streak-fill-compact" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#ff7a18" stopOpacity="0.26" />
+                  <stop offset="100%" stopColor="#ff7a18" stopOpacity="0" />
+                </linearGradient>
+              </defs>
+              {hotStreakAreaPoints && <polygon points={hotStreakAreaPoints} fill="url(#hot-streak-fill-compact)" />}
+              {hotStreakLinePoints && <polyline points={hotStreakLinePoints} fill="none" stroke="#ff7a18" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />}
+              {hotStreakLinePoints && <circle cx={hotStreakLinePoints.split(' ').at(-1)?.split(',')[0]} cy={hotStreakLinePoints.split(' ').at(-1)?.split(',')[1]} r="2.2" fill="#ff7a18" />}
+            </svg>
+            <div className="leaderboard-kpi__axis">
+              <span>Oldest</span>
+              <span>Latest</span>
+            </div>
+          </div>
+          <div className="leaderboard-kpi leaderboard-kpi--wide">
+            <div className="leaderboard-kpi__topline">
+              <span className="leaderboard-kpi__label">
+                {matchActivityRange === '7d' ? 'Matches last 7 days' : 'Matches last 30 days'}
+              </span>
+              <span className="leaderboard-kpi__toggle" aria-label="Select match activity range" role="group">
+                <button
+                  type="button"
+                  className={matchActivityRange === '7d' ? 'leaderboard-kpi__toggle-option leaderboard-kpi__toggle-option--active' : 'leaderboard-kpi__toggle-option'}
+                  onClick={() => setMatchActivityRange('7d')}
+                >
+                  7d
+                </button>
+                <button
+                  type="button"
+                  className={matchActivityRange === '30d' ? 'leaderboard-kpi__toggle-option leaderboard-kpi__toggle-option--active' : 'leaderboard-kpi__toggle-option'}
+                  onClick={() => setMatchActivityRange('30d')}
+                >
+                  30d
+                </button>
+              </span>
+            </div>
+            <div className="leaderboard-kpi__metric">
+              <span>{selectedMatchTotal}</span>
+              {selectedMatchDelta !== 0 && (
+                <span className={selectedMatchDelta > 0 ? 'leaderboard-kpi__delta' : 'leaderboard-kpi__delta leaderboard-kpi__delta--down'}>
+                  {selectedMatchDelta > 0 ? '+' : ''}{selectedMatchDelta} vs prev
+                </span>
+              )}
+            </div>
+            <div className={matchActivityRange === '30d' ? 'leaderboard-kpi__bars leaderboard-kpi__bars--dense' : 'leaderboard-kpi__bars'} aria-hidden="true">
+              {safeMatchCounts.map((count, index) => (
+                <span
+                  key={`${matchActivityRange}-${index}`}
+                  className={matchActivityRange === '7d' && index >= 5 ? 'leaderboard-kpi__bar leaderboard-kpi__bar--weekend' : 'leaderboard-kpi__bar'}
+                  style={{ height: `${Math.max(8, (count / maxMatchCount) * 32)}px` }}
+                />
+              ))}
+            </div>
+          </div>
+          <div className="leaderboard-kpi">
+            <div className="leaderboard-kpi__topline">
+              <span className="leaderboard-kpi__label">Biggest climber</span>
+              {weeklyEloClimber && <span className="leaderboard-kpi__badge leaderboard-kpi__badge--climber">▲</span>}
+            </div>
+            <div className="leaderboard-kpi__headline">
+              {weeklyEloClimber ? weeklyEloClimber.display_name : '–'}
+            </div>
+            <div className="leaderboard-kpi__subvalue leaderboard-kpi__subvalue--positive">
+              {weeklyEloClimber ? `+${weeklyEloClimber.rating_change} Elo` : 'No gain yet'}
+            </div>
+            <svg className="leaderboard-kpi__chart" viewBox="0 0 150 42" aria-hidden="true">
+              <defs>
+                <linearGradient id="climber-fill-compact" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#35f58c" stopOpacity="0.24" />
+                  <stop offset="100%" stopColor="#35f58c" stopOpacity="0" />
+                </linearGradient>
+              </defs>
+              {climberAreaPoints && <polygon points={climberAreaPoints} fill="url(#climber-fill-compact)" />}
+              {climberLinePoints && <polyline points={climberLinePoints} fill="none" stroke="#35f58c" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />}
+              {climberLinePoints && <circle cx={climberLinePoints.split(' ').at(-1)?.split(',')[0]} cy={climberLinePoints.split(' ').at(-1)?.split(',')[1]} r="2.2" fill="#35f58c" />}
+            </svg>
+            <div className="leaderboard-kpi__axis">
+              <span>7d ago</span>
+              <span>Now</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="leaderboard-toolbar">
+        <div />
+        <div className="leaderboard-actions">
+          <div className="location-filter-tabs" aria-label="Filter leaderboard by location">
+            <button
+              type="button"
+              className={locationFilter === 'all' ? 'location-filter-tab location-filter-tab--active' : 'location-filter-tab'}
+              onClick={() => setLocationFilter('all')}
+            >
+              All
+            </button>
+            {LOCATIONS.map((loc) => (
+              <button
+                key={loc.value}
+                type="button"
+                className={locationFilter === loc.value ? 'location-filter-tab location-filter-tab--active' : 'location-filter-tab'}
+                onClick={() => setLocationFilter(loc.value)}
+              >
+                {loc.label}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
       <style>{`
+        .grid-leaderboard {
+          display: flex;
+          flex-direction: column;
+          gap: 14px;
+        }
+        .leaderboard-header {
+          display: grid;
+          grid-template-columns: minmax(300px, 1fr) minmax(620px, 720px);
+          gap: 28px;
+          align-items: end;
+        }
+        .leaderboard-kpis {
+          display: grid;
+          grid-template-columns: 1fr 1.18fr 1fr;
+          gap: 8px;
+          justify-self: end;
+          width: min(100%, 720px);
+        }
+        .leaderboard-kpi {
+          position: relative;
+          min-height: 132px;
+          overflow: hidden;
+          border: 1px solid rgba(148, 163, 184, 0.13);
+          border-radius: 8px;
+          background:
+            linear-gradient(180deg, rgba(17, 24, 39, 0.92), rgba(10, 17, 27, 0.92)),
+            rgba(15, 23, 42, 0.68);
+          padding: 13px 14px;
+          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+        }
+        .leaderboard-kpi__topline {
+          display: flex;
+          min-height: 13px;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 8px;
+        }
+        .leaderboard-kpi__label {
+          display: block;
+          color: #858b94;
+          font-size: 10px;
+          font-weight: 900;
+          letter-spacing: 0;
+          line-height: 1.15;
+          text-transform: uppercase;
+        }
+        .leaderboard-kpi__badge {
+          display: inline-flex;
+          min-width: 0;
+          align-items: center;
+          justify-content: center;
+          border-radius: 8px;
+          padding: 4px 8px;
+          font-size: 10px;
+          font-weight: 900;
+          line-height: 1;
+          text-transform: uppercase;
+          white-space: nowrap;
+        }
+        .leaderboard-kpi__badge--hot {
+          color: #ff8b2b;
+          background: rgba(255, 122, 24, 0.11);
+          border: 1px solid rgba(255, 122, 24, 0.28);
+          box-shadow: inset 0 0 16px rgba(255, 122, 24, 0.08);
+        }
+        .leaderboard-kpi__badge--climber {
+          color: #35f58c;
+          background: rgba(47, 240, 132, 0.1);
+          border: 1px solid rgba(47, 240, 132, 0.26);
+          box-shadow: inset 0 0 16px rgba(47, 240, 132, 0.08);
+        }
+        .leaderboard-kpi__headline {
+          position: relative;
+          z-index: 1;
+          margin-top: 6px;
+          overflow: hidden;
+          color: #f8fafc;
+          font-size: 18px;
+          font-weight: 900;
+          line-height: 1.08;
+          letter-spacing: 0;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .leaderboard-kpi__metric {
+          display: flex;
+          min-width: 0;
+          align-items: baseline;
+          gap: 8px;
+          margin-top: 6px;
+          color: #f8fafc;
+          font-size: 26px;
+          font-weight: 900;
+          line-height: 1;
+          letter-spacing: 0;
+        }
+        .leaderboard-kpi__subvalue {
+          margin-top: 3px;
+          color: #94a3b8;
+          font-size: 12px;
+          font-weight: 800;
+          line-height: 1.1;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .leaderboard-kpi__subvalue--positive {
+          color: #35f58c;
+        }
+        .leaderboard-kpi__delta {
+          color: #35f58c;
+          font-size: 11px;
+          font-weight: 900;
+        }
+        .leaderboard-kpi__delta--down {
+          color: #ff6b78;
+        }
+        .leaderboard-kpi__toggle {
+          display: inline-flex;
+          height: 21px;
+          overflow: hidden;
+          border: 1px solid rgba(148, 163, 184, 0.15);
+          border-radius: 6px;
+          background: rgba(15, 23, 42, 0.7);
+        }
+        .leaderboard-kpi__toggle-option {
+          display: inline-flex;
+          min-width: 31px;
+          align-items: center;
+          justify-content: center;
+          border: 0;
+          background: transparent;
+          color: #7f8998;
+          cursor: pointer;
+          font-size: 11px;
+          font-weight: 900;
+          line-height: 1;
+        }
+        .leaderboard-kpi__toggle-option--active {
+          color: #e5edf7;
+          background: rgba(148, 163, 184, 0.13);
+        }
+        .leaderboard-kpi__chart {
+          position: absolute;
+          right: 14px;
+          bottom: 20px;
+          left: 14px;
+          width: calc(100% - 28px);
+          height: 42px;
+          overflow: visible;
+        }
+        .leaderboard-kpi__axis {
+          position: absolute;
+          right: 14px;
+          bottom: 9px;
+          left: 14px;
+          display: flex;
+          justify-content: space-between;
+          color: #6f7886;
+          font-size: 9px;
+          font-weight: 800;
+          line-height: 1;
+        }
+        .leaderboard-kpi__bars {
+          position: absolute;
+          right: 14px;
+          bottom: 18px;
+          left: 14px;
+          display: grid;
+          height: 36px;
+          grid-template-columns: repeat(7, minmax(0, 1fr));
+          gap: 5px;
+          align-items: end;
+        }
+        .leaderboard-kpi__bars--dense {
+          grid-template-columns: repeat(30, minmax(0, 1fr));
+          gap: 1px;
+        }
+        .leaderboard-kpi__bar {
+          display: block;
+          border-radius: 2px 2px 0 0;
+          background: #315e84;
+        }
+        .leaderboard-kpi__bar--weekend {
+          background: #5ab7ff;
+        }
+        .leaderboard-toolbar {
+          display: flex;
+          gap: 16px;
+          align-items: center;
+          justify-content: space-between;
+        }
+        .leaderboard-actions {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 10px;
+          align-items: center;
+          justify-content: flex-end;
+        }
+        .location-filter-tabs {
+          display: inline-flex;
+          overflow: hidden;
+          border: 1px solid rgba(148, 163, 184, 0.13);
+          border-radius: 8px;
+          background: rgba(15, 23, 42, 0.48);
+          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+        }
+        .location-filter-tab {
+          display: inline-flex;
+          height: 34px;
+          align-items: center;
+          justify-content: center;
+          border: 0;
+          border-right: 1px solid rgba(148, 163, 184, 0.13);
+          background: transparent;
+          color: #a3aab5;
+          font-size: 13px;
+          font-weight: 800;
+          letter-spacing: 0;
+          line-height: 1;
+          text-decoration: none;
+          transition: background-color 140ms ease, color 140ms ease;
+        }
+        .location-filter-tab {
+          min-width: 60px;
+          padding: 0 14px;
+          cursor: pointer;
+        }
+        .location-filter-tab:last-child {
+          border-right: 0;
+        }
+        .location-filter-tab:hover {
+          color: #e2e8f0;
+          background: rgba(148, 163, 184, 0.08);
+        }
+        .location-filter-tab--active {
+          color: #70bdff;
+          background: rgba(56, 189, 248, 0.16);
+        }
+        @media (max-width: 1100px) {
+          .leaderboard-header {
+            grid-template-columns: 1fr;
+          }
+          .leaderboard-kpis {
+            justify-self: stretch;
+            width: 100%;
+          }
+        }
+        @media (max-width: 800px) {
+          .leaderboard-kpis {
+            grid-template-columns: 1fr;
+          }
+          .leaderboard-toolbar {
+            align-items: flex-start;
+            flex-direction: column;
+          }
+          .leaderboard-actions {
+            width: 100%;
+            justify-content: flex-start;
+          }
+        }
+        @media (max-width: 700px) {
+          .leaderboard-kpis {
+            gap: 8px;
+          }
+          .location-filter-tabs {
+            width: 100%;
+          }
+          .location-filter-tab {
+            flex: 1 1 0;
+            min-width: 0;
+            padding-right: 8px;
+            padding-left: 8px;
+          }
+        }
         .grid-leaderboard .hcg-container {
           height: 800px;
           max-height: 800px;

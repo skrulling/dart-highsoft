@@ -14,6 +14,8 @@ import { Button } from '@/components/ui/button';
 SparklineRenderer['useHighcharts'](Highcharts);
 
 const MEDALS = ['🥇', '🥈', '🥉'];
+const TREND_UP_COLOR = '#2ff084';
+const TREND_DOWN_COLOR = '#ff4d5f';
 
 const ELO_TIER_RANGES = [
   { max: 1124, tier: 1 },
@@ -83,6 +85,21 @@ function renderEloBadgeHtml(value: unknown): string {
   `;
 }
 
+function renderLocationPillHtml(value: unknown): string {
+  if (typeof value !== 'string' || value === '–') {
+    return '<span class="location-pill-empty">–</span>';
+  }
+
+  const normalized = value.toLowerCase();
+  const variant = normalized.includes('bergen')
+    ? 'location-pill--blue'
+    : normalized.includes('vik')
+      ? 'location-pill--purple'
+      : 'location-pill--neutral';
+
+  return `<span class="location-pill ${variant}">${value}</span>`;
+}
+
 function compareNullableNumbers(a: unknown, b: unknown): number {
   const na = typeof a === 'number' && Number.isFinite(a) ? a : null;
   const nb = typeof b === 'number' && Number.isFinite(b) ? b : null;
@@ -93,25 +110,35 @@ function compareNullableNumbers(a: unknown, b: unknown): number {
 }
 
 function sparklineChartOptions(this: { value: unknown }) {
-  const raw = String(this.value).trim();
-  if (!raw) return {};
-  const nums = raw.split(',').map(Number);
+  const nums = parseSparkline(this.value);
+  if (nums.length === 0) return {};
+
   const positive = nums.length > 1 && nums[nums.length - 1] >= nums[0];
-  return {
-    colors: [positive ? '#22c55e' : '#ef4444'],
-  };
-}
+  const lineColor = positive ? TREND_UP_COLOR : TREND_DOWN_COLOR;
+  const areaColor: Highcharts.GradientColorObject = positive
+    ? {
+        linearGradient: { x1: 0, y1: 0, x2: 0, y2: 1 },
+        stops: [
+          [0, 'rgba(47, 240, 132, 0.28)'],
+          [1, 'rgba(47, 240, 132, 0)'],
+        ],
+      }
+    : {
+        linearGradient: { x1: 0, y1: 0, x2: 0, y2: 1 },
+        stops: [
+          [0, 'rgba(255, 77, 95, 0.26)'],
+          [1, 'rgba(255, 77, 95, 0)'],
+        ],
+      };
 
-function winsSparklineChartOptions(this: { value: unknown }) {
-  const points = parseSparkline(this.value).map((value) => (value >= 0 ? 1 : -1));
-  if (points.length === 0) return {};
-
   return {
+    colors: [lineColor],
     chart: {
-      type: 'column',
-      height: 24,
-      margin: [1, 1, 1, 1],
+      type: 'area',
+      height: 34,
+      margin: [2, 2, 2, 2],
       spacing: [0, 0, 0, 0],
+      backgroundColor: 'transparent',
     },
     legend: { enabled: false },
     tooltip: { enabled: false },
@@ -119,8 +146,6 @@ function winsSparklineChartOptions(this: { value: unknown }) {
     xAxis: { visible: false },
     yAxis: {
       visible: false,
-      min: -1,
-      max: 1,
       startOnTick: false,
       endOnTick: false,
     },
@@ -128,23 +153,36 @@ function winsSparklineChartOptions(this: { value: unknown }) {
       series: {
         animation: false,
         enableMouseTracking: false,
+        marker: {
+          enabled: false,
+          radius: 1.8,
+          states: {
+            hover: { enabled: false },
+          },
+        },
+        lineWidth: 2,
+        states: {
+          inactive: { opacity: 1 },
+          hover: { enabled: false },
+        },
       },
-      column: {
-        borderWidth: 0,
-        pointPadding: 0.06,
-        groupPadding: 0,
-        threshold: 0,
+      area: {
+        fillColor: areaColor,
+        threshold: null,
       },
     },
     series: [
       {
-        type: 'column',
-        data: points,
-        zones: [
-          { value: 0, color: '#ef4444' },
-          { color: '#22c55e' },
-        ],
-      } as Highcharts.SeriesColumnOptions,
+        type: 'area',
+        color: lineColor,
+        fillColor: areaColor,
+        data: nums,
+        marker: {
+          enabled: nums.length <= 1,
+          fillColor: lineColor,
+          lineColor,
+        },
+      } as Highcharts.SeriesAreaOptions,
     ],
   };
 }
@@ -182,6 +220,83 @@ function getWinsCount(value: unknown): number | null {
   const points = parseSparkline(value);
   if (points.length === 0) return null;
   return points.filter((point) => point > 0).length;
+}
+
+function renderGamesHtml(value: unknown): string {
+  if (typeof value !== 'string' || !value) {
+    return '<span class="games-summary-empty">–</span>';
+  }
+
+  const [winsPart, playedPart] = value.split('/');
+  const wins = Number.parseInt(winsPart ?? '', 10);
+  const played = Number.parseInt(playedPart ?? '', 10);
+  if (!Number.isFinite(wins) || !Number.isFinite(played)) {
+    return '<span class="games-summary-empty">–</span>';
+  }
+
+  return `
+    <span class="games-summary">
+      <span class="games-summary__wins">${wins}</span>
+      <span class="games-summary__separator">/</span>
+      <span class="games-summary__played">${played}</span>
+    </span>
+  `;
+}
+
+function compareGamesSummary(a: unknown, b: unknown): number {
+  const parse = (value: unknown) => {
+    if (typeof value !== 'string') return { wins: null as number | null, played: null as number | null };
+    const [winsPart, playedPart] = value.split('/');
+    const wins = Number.parseInt(winsPart ?? '', 10);
+    const played = Number.parseInt(playedPart ?? '', 10);
+    return {
+      wins: Number.isFinite(wins) ? wins : null,
+      played: Number.isFinite(played) ? played : null,
+    };
+  };
+
+  const left = parse(a);
+  const right = parse(b);
+  if (left.played == null && right.played == null) return 0;
+  if (left.played == null) return -1;
+  if (right.played == null) return 1;
+  if (left.played !== right.played) return left.played - right.played;
+  return (left.wins ?? 0) - (right.wins ?? 0);
+}
+
+function renderWinRateHtml(value: unknown): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return '<span class="win-rate-empty">–</span>';
+  }
+
+  const clamped = Math.max(0, Math.min(100, value));
+  const isStrong = value >= 40;
+  return `
+    <span class="win-rate">
+      <span class="win-rate__value ${isStrong ? 'win-rate__value--strong' : 'win-rate__value--muted'}">${value.toFixed(1)}%</span>
+      <span class="win-rate__track">
+        <span class="win-rate__bar ${isStrong ? 'win-rate__bar--strong' : 'win-rate__bar--muted'}" style="width: ${clamped}%;"></span>
+      </span>
+    </span>
+  `;
+}
+
+function renderWinLossHtml(value: unknown): string {
+  const points = parseSparkline(value);
+  if (points.length === 0) {
+    return '<span class="win-loss-empty">–</span>';
+  }
+
+  return `
+    <span class="win-loss-strip" aria-label="${points.filter((point) => point > 0).length} wins in last ${points.length} games">
+      ${points
+        .map((point) => {
+          const isWin = point > 0;
+          return `<span class="win-loss-pill ${isWin ? 'win-loss-pill--win' : 'win-loss-pill--loss'}">${isWin ? 'W' : 'L'}</span>`;
+        })
+        .join('')}
+    </span>
+  `;
 }
 
 function compareWinsForm(a: unknown, b: unknown): number {
@@ -315,9 +430,8 @@ export function GridLeaderboard() {
     const multiEloTrend: string[] = [];
     const elo1v1Raw: (number | null)[] = [];
     const elo1v1Trend: string[] = [];
-    const winsRaw: (number | null)[] = [];
     const winsRecent: string[] = [];
-    const gamesPlayedRaw: (number | null)[] = [];
+    const gamesSummary: string[] = [];
     const gameWinRateRaw: (number | null)[] = [];
     const avgRaw: (number | null)[] = [];
 
@@ -329,21 +443,18 @@ export function GridLeaderboard() {
       multiEloTrend.push(multiEloHistory.get(row.player_id)?.join(',') ?? '');
       elo1v1Raw.push(row.elo_1v1);
       elo1v1Trend.push(eloHistory.get(row.player_id)?.join(',') ?? '');
-      winsRaw.push(row.wins);
       winsRecent.push((recentWinsByPlayer.get(row.player_id) ?? []).slice().reverse().join(','));
-      gamesPlayedRaw.push(row.games_played);
+      gamesSummary.push(row.wins != null && row.games_played != null ? `${row.wins}/${row.games_played}` : '');
       gameWinRateRaw.push(row.game_win_rate);
       avgRaw.push(row.avg_per_turn);
     });
 
     // Pre-compute per-column medals
-    const winsMedals = rankColumn(winsRaw);
     const avgMedals = rankColumn(avgRaw);
 
     // Keep Elo raw numeric for stable sorting; render badges via formatter.
     const multiElo = multiEloRaw;
     const elo1v1 = elo1v1Raw;
-    const wins = winsRaw.map((v, i) => formatWithMedal(v, winsMedals, i));
     const avg = avgRaw.map((v, i) => formatWithMedal(v, avgMedals, i, 2));
 
     // Empty column — CSS counters fill in the row number
@@ -362,9 +473,8 @@ export function GridLeaderboard() {
           multiEloTrend,
           elo1v1,
           elo1v1Trend,
-          wins,
           winsRecent,
-          gamesPlayed: gamesPlayedRaw,
+          gamesSummary,
           gameWinRate: gameWinRateRaw,
           avg,
         },
@@ -385,6 +495,11 @@ export function GridLeaderboard() {
           id: 'location',
           header: { format: 'Location' },
           width: 100,
+          cells: {
+            formatter: function () {
+              return renderLocationPillHtml(this.value);
+            },
+          },
         },
         {
           id: 'multiElo',
@@ -446,28 +561,12 @@ export function GridLeaderboard() {
           filtering: { enabled: false },
         },
         {
-          id: 'wins',
-          header: { format: 'Wins' },
-          sorting: {
-            compare: (a, b) => {
-              const na = typeof a === 'string' ? parseFloat(a.replace(/[^\d]/g, '')) : NaN;
-              const nb = typeof b === 'string' ? parseFloat(b.replace(/[^\d]/g, '')) : NaN;
-              if (isNaN(na) && isNaN(nb)) return 0;
-              if (isNaN(na)) return -1;
-              if (isNaN(nb)) return 1;
-              return na - nb;
-            },
-            orderSequence: ['desc', 'asc', null]
-          },
-        },
-        {
           id: 'winsRecent',
           header: { format: 'Last 10' },
-          width: 140,
+          width: 160,
           cells: {
-            renderer: {
-              type: 'sparkline' as const,
-              chartOptions: winsSparklineChartOptions,
+            formatter: function () {
+              return renderWinLossHtml(this.value);
             },
           },
           sorting: {
@@ -476,24 +575,26 @@ export function GridLeaderboard() {
           filtering: { enabled: false },
         },
         {
-          id: 'gamesPlayed',
-          header: { format: 'Played' },
-          width: 90,
+          id: 'gamesSummary',
+          header: { format: 'Games' },
+          width: 110,
+          cells: {
+            formatter: function () {
+              return renderGamesHtml(this.value);
+            },
+          },
           sorting: {
-            compare: compareNullableNumbers,
+            compare: compareGamesSummary,
             orderSequence: ['desc', 'asc', null]
           },
         },
         {
           id: 'gameWinRate',
           header: { format: 'Win Rate' },
-          width: 110,
+          width: 130,
           cells: {
             formatter: function () {
-              if (typeof this.value !== 'number' || !Number.isFinite(this.value)) {
-                return '–';
-              }
-              return `${this.value.toFixed(1)}%`;
+              return renderWinRateHtml(this.value);
             },
           },
           sorting: {
@@ -532,8 +633,7 @@ export function GridLeaderboard() {
         {
           format: 'Games',
           columns: [
-            { columnId: 'wins' },
-            { columnId: 'gamesPlayed' },
+            { columnId: 'gamesSummary' },
             { columnId: 'gameWinRate' },
             { columnId: 'winsRecent' },
           ],
@@ -597,6 +697,29 @@ export function GridLeaderboard() {
           max-height: 800px;
           --hcg-vertical-padding: 6px;
         }
+        .grid-leaderboard .hcg-table thead th {
+          color: #858b94;
+          font-size: 11px;
+          font-weight: 800;
+          letter-spacing: 0;
+          text-transform: uppercase;
+        }
+        .grid-leaderboard .hcg-table tbody td {
+          color: #f1f5f9;
+          font-size: 15px;
+          font-weight: 800;
+          letter-spacing: 0;
+        }
+        .grid-leaderboard .hcg-table tbody td:nth-child(2),
+        .grid-leaderboard .hcg-table tbody td:last-child {
+          color: #f8fafc !important;
+          font-weight: 900 !important;
+        }
+        .grid-leaderboard .hcg-table tbody td:nth-child(2) *,
+        .grid-leaderboard .hcg-table tbody td:last-child * {
+          color: inherit !important;
+          font-weight: inherit !important;
+        }
         .grid-leaderboard .hcg-table tbody {
           counter-reset: row-num;
         }
@@ -604,10 +727,29 @@ export function GridLeaderboard() {
           counter-increment: row-num;
         }
         .grid-leaderboard .hcg-table tbody tr td:first-child {
-          text-align: center;
+          padding-right: 0 !important;
+          padding-left: 0 !important;
+          text-align: center !important;
+          vertical-align: middle;
         }
         .grid-leaderboard .hcg-table tbody tr td:first-child::after {
           content: counter(row-num);
+          display: inline-flex;
+          width: 28px;
+          height: 28px;
+          align-items: center;
+          justify-content: center;
+          border-radius: 8px;
+          color: #9aa4b2;
+          background: rgba(30, 41, 59, 0.5);
+          font-size: 13px;
+          font-weight: 900;
+          line-height: 1;
+          margin: 0 auto;
+        }
+        .grid-leaderboard .hcg-table tbody tr:nth-child(-n + 3) td:first-child::after {
+          color: #f4c84a;
+          background: rgba(245, 158, 11, 0.17);
         }
         .grid-leaderboard .elo-badge {
           display: flex;
@@ -635,6 +777,149 @@ export function GridLeaderboard() {
             0 0 8px rgba(0, 0, 0, 0.45);
         }
         .grid-leaderboard .elo-badge-empty {
+          color: #94a3b8;
+        }
+        .grid-leaderboard .location-pill {
+          display: inline-flex;
+          min-width: 38px;
+          height: 22px;
+          align-items: center;
+          justify-content: center;
+          border-radius: 999px;
+          padding: 0 10px;
+          font-size: 12px;
+          font-weight: 600;
+          line-height: 1;
+          letter-spacing: 0;
+        }
+        .grid-leaderboard .location-pill--purple {
+          color: #c4a5ff;
+          background: rgba(139, 92, 246, 0.14);
+          border: 1px solid rgba(139, 92, 246, 0.36);
+        }
+        .grid-leaderboard .location-pill--blue {
+          color: #60c7ff;
+          background: rgba(14, 165, 233, 0.13);
+          border: 1px solid rgba(14, 165, 233, 0.36);
+        }
+        .grid-leaderboard .location-pill--neutral {
+          color: #cbd5e1;
+          background: rgba(148, 163, 184, 0.12);
+          border: 1px solid rgba(148, 163, 184, 0.28);
+        }
+        .grid-leaderboard .location-pill-empty {
+          color: #94a3b8;
+        }
+        .grid-leaderboard .games-summary {
+          display: inline-flex;
+          width: 100%;
+          align-items: baseline;
+          justify-content: center;
+          gap: 4px;
+          font-weight: 800;
+          letter-spacing: 0;
+          color: #f8fafc;
+        }
+        .grid-leaderboard .games-summary__wins {
+          min-width: 28px;
+          text-align: right;
+          font-size: 16px;
+          line-height: 1;
+        }
+        .grid-leaderboard .games-summary__separator,
+        .grid-leaderboard .games-summary__played {
+          color: #8b95a5;
+          font-size: 13px;
+          font-weight: 700;
+          line-height: 1;
+        }
+        .grid-leaderboard .games-summary__played {
+          min-width: 30px;
+          text-align: left;
+        }
+        .grid-leaderboard .games-summary-empty,
+        .grid-leaderboard .win-rate-empty {
+          color: #94a3b8;
+        }
+        .grid-leaderboard .win-rate {
+          display: inline-flex;
+          width: 100%;
+          align-items: center;
+          justify-content: center;
+          gap: 10px;
+        }
+        .grid-leaderboard .win-rate__value {
+          min-width: 48px;
+          text-align: right;
+          font-size: 13px;
+          font-weight: 800;
+          line-height: 1;
+          letter-spacing: 0;
+        }
+        .grid-leaderboard .win-rate__value--strong {
+          color: #35f58c;
+        }
+        .grid-leaderboard .win-rate__value--muted {
+          color: #f8fafc;
+        }
+        .grid-leaderboard .win-rate__track {
+          position: relative;
+          display: inline-flex;
+          width: 46px;
+          height: 4px;
+          overflow: hidden;
+          border-radius: 999px;
+          background: rgba(148, 163, 184, 0.12);
+        }
+        .grid-leaderboard .win-rate__bar {
+          height: 100%;
+          min-width: 3px;
+          border-radius: inherit;
+        }
+        .grid-leaderboard .win-rate__bar--strong {
+          background: #35f58c;
+        }
+        .grid-leaderboard .win-rate__bar--muted {
+          background: #5db8ff;
+        }
+        .grid-leaderboard .win-loss-strip {
+          display: inline-flex;
+          width: 100%;
+          align-items: center;
+          justify-content: center;
+          gap: 4px;
+        }
+        .grid-leaderboard .win-loss-pill {
+          display: inline-flex;
+          box-sizing: border-box;
+          flex: 0 0 16px;
+          width: 16px;
+          min-width: 16px;
+          max-width: 16px;
+          height: 18px;
+          align-items: center;
+          justify-content: center;
+          overflow: hidden;
+          border-radius: 4px;
+          font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+          font-size: 9px;
+          font-weight: 800;
+          line-height: 1;
+          letter-spacing: 0;
+        }
+        .grid-leaderboard .win-loss-pill--win {
+          color: #35f58c;
+          background: rgba(47, 240, 132, 0.14);
+          border: 1px solid rgba(47, 240, 132, 0.24);
+          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+        }
+        .grid-leaderboard .win-loss-pill--loss {
+          color: #ff6b78;
+          background: rgba(255, 77, 95, 0.14);
+          border: 1px solid rgba(255, 77, 95, 0.24);
+          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+        }
+        .grid-leaderboard .win-loss-empty {
           color: #94a3b8;
         }
       `}</style>

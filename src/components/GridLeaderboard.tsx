@@ -69,6 +69,11 @@ function getEloTierBadgeNumber(rating: number): number {
   return 8;
 }
 
+function renderRowRankHtml(rank: number): string {
+  const top = rank <= 3 ? ' row-rank--top' : '';
+  return `<span class="row-rank${top}">${rank}</span>`;
+}
+
 function renderEloBadgeHtml(value: unknown): string {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     return '<span class="elo-badge-empty">–</span>';
@@ -600,6 +605,12 @@ export function GridLeaderboard({ headerContent }: { headerContent?: React.React
           width: 45,
           sorting: { enabled: false },
           filtering: { enabled: false },
+          cells: {
+            formatter: function () {
+              const rowIndex = (this.row as unknown as { index: number }).index;
+              return renderRowRankHtml(rowIndex + 1);
+            },
+          },
         },
         {
           id: 'player',
@@ -1217,20 +1228,13 @@ export function GridLeaderboard({ headerContent }: { headerContent?: React.React
           color: inherit !important;
           font-weight: inherit !important;
         }
-        .grid-leaderboard .hcg-table tbody {
-          counter-reset: row-num;
-        }
-        .grid-leaderboard .hcg-table tbody tr {
-          counter-increment: row-num;
-        }
         .grid-leaderboard .hcg-table tbody tr td:first-child {
           padding-right: 0 !important;
           padding-left: 0 !important;
           text-align: center !important;
           vertical-align: middle;
         }
-        .grid-leaderboard .hcg-table tbody tr td:first-child::after {
-          content: counter(row-num);
+        .grid-leaderboard .row-rank {
           display: inline-flex;
           width: 28px;
           height: 28px;
@@ -1244,7 +1248,7 @@ export function GridLeaderboard({ headerContent }: { headerContent?: React.React
           line-height: 1;
           margin: 0 auto;
         }
-        .grid-leaderboard .hcg-table tbody tr:nth-child(-n + 3) td:first-child::after {
+        .grid-leaderboard .row-rank--top {
           color: #f4c84a;
           background: rgba(245, 158, 11, 0.17);
         }

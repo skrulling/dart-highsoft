@@ -141,10 +141,12 @@ export default function GamesPage() {
   const loadTournaments = async () => {
     try {
       const supabase = await getSupabaseClient();
+      // Hide completed tournaments after 24h; keep in-progress ones indefinitely.
+      const completedCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       const { data } = await supabase
         .from('tournaments')
         .select('id, name, status, start_score, finish, legs_to_win, created_at')
-        .in('status', ['in_progress', 'completed'])
+        .or(`status.eq.in_progress,and(status.eq.completed,completed_at.gte.${completedCutoff})`)
         .order('created_at', { ascending: false })
         .limit(10);
 

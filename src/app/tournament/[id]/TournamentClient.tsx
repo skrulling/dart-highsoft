@@ -1,16 +1,47 @@
 "use client";
 
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTournamentData } from '@/hooks/useTournamentData';
 import { BracketView } from '@/components/tournament/BracketView';
 import { TournamentStandings } from '@/components/tournament/TournamentStandings';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
 import Link from 'next/link';
 
 export default function TournamentClient({ tournamentId }: { tournamentId: string }) {
   const router = useRouter();
   const { loading, error, tournament, matches, players, playerMap } = useTournamentData(tournamentId);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  async function handleDeleteTournament() {
+    setDeleteLoading(true);
+    setDeleteError(null);
+    try {
+      const res = await fetch(`/api/tournaments/${tournamentId}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setDeleteError(body.error ?? 'Failed to delete tournament');
+        setDeleteLoading(false);
+        return;
+      }
+      router.push('/games');
+    } catch {
+      setDeleteError('Network error while deleting tournament');
+      setDeleteLoading(false);
+    }
+  }
 
   function getPlayerName(id: string | null): string {
     if (!id) return 'TBD';
@@ -45,6 +76,46 @@ export default function TournamentClient({ tournamentId }: { tournamentId: strin
           >
             {tournament.status === 'in_progress' ? 'In Progress' : tournament.status === 'completed' ? 'Completed' : 'Pending'}
           </Badge>
+          {tournament.status !== 'completed' && (
+            <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+              <DialogTrigger asChild>
+                <Button variant="destructive" size="sm">
+                  Delete
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Delete Tournament?</DialogTitle>
+                  <DialogDescription>
+                    This permanently deletes <strong>{tournament.name}</strong> and all of its
+                    matches, legs, turns, and throws. This cannot be undone.
+                    <br />
+                    <br />
+                    Use this when the tournament was created with the wrong configuration.
+                  </DialogDescription>
+                </DialogHeader>
+                {deleteError && (
+                  <div className="text-sm text-red-600">{deleteError}</div>
+                )}
+                <DialogFooter>
+                  <Button
+                    variant="outline"
+                    onClick={() => setDeleteDialogOpen(false)}
+                    disabled={deleteLoading}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    onClick={handleDeleteTournament}
+                    disabled={deleteLoading}
+                  >
+                    {deleteLoading ? 'Deleting…' : 'Delete Tournament'}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          )}
           <Button asChild variant="outline" size="sm">
             <Link href="/">Home</Link>
           </Button>

@@ -7,6 +7,7 @@ import { SegmentResult } from '@/utils/dartboard';
 import { FinishRule } from '@/utils/x01';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
+import { useQueryClient } from '@tanstack/react-query';
 import { useCommentary } from '@/hooks/useCommentary';
 import { useMatchData } from '@/hooks/useMatchData';
 import { useMatchRealtime } from '@/hooks/useMatchRealtime';
@@ -40,6 +41,7 @@ const MatchSpectatorView = dynamic(
 
 export default function MatchClient({ matchId }: { matchId: string }) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const searchParams = useSearchParams();
   const spectatorParam = searchParams.get('spectator') === 'true';
   const [tournamentId, setTournamentId] = useState<string | null>(null);
@@ -285,6 +287,20 @@ export default function MatchClient({ matchId }: { matchId: string }) {
 
   // Determine if match has a winner already
   const matchWinnerId = useMemo(() => selectMatchWinnerId(match, legs), [match, legs]);
+
+  // When this match transitions from in-progress to completed in the user's session,
+  // invalidate the leaderboard caches so the front page shows the new result on return.
+  const lastInvalidatedWinnerRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!matchWinnerId) {
+      lastInvalidatedWinnerRef.current = null;
+      return;
+    }
+    if (lastInvalidatedWinnerRef.current === matchWinnerId) return;
+    lastInvalidatedWinnerRef.current = matchWinnerId;
+    queryClient.invalidateQueries({ queryKey: ['leaderboard'] });
+    queryClient.invalidateQueries({ queryKey: ['eloHistory'] });
+  }, [matchWinnerId, queryClient]);
 
   // Fetch ELO rating changes for the completed match
   const { eloChanges, loading: eloChangesLoading } = useMatchEloChanges(matchId, matchWinnerId, players.length);
